@@ -1,0 +1,31 @@
+{
+  "name": "discord-music-bot",
+  "version": "1.0.0",
+  "description": "Un bot Discord de musique avec Node.js et discord.js",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "nodemon bot.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "music",
+    "youtube"
+  ],
+  "author": "Votre Nom",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.14.0",
+    "@discordjs/voice": "^0.16.1",
+    "play-dl": "^1.9.16",
+    "dotenv": "^16.3.1",
+    "ffmpeg-static": "^5.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
