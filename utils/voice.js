@@ -83,19 +83,16 @@ class VoiceConnection extends require('events').EventEmitter {
         }
         console.log('[voice] IDENTIFY avec session=' + this.sessionId.slice(0, 8) + '... token=' + (this.token || '').slice(0, 6) + '...');
         this._startHeartbeat(interval);
-        // Petit delai pour laisser Discord lier la session au WS (evite 4003 Not authenticated)
-        setTimeout(() => {
-          this.ws.send(JSON.stringify({
-            op: 0, // IDENTIFY (WS vocal : op 0)
-            d: {
-              server_id: this.serverId,
-              user_id: this.userId,
-              session_id: this.sessionId,
-              token: this.token,
-            },
-          }));
-          console.log('[voice] IDENTIFY envoye');
-        }, 1000);
+        this.ws.send(JSON.stringify({
+          op: 0, // IDENTIFY (WS vocal : op 0)
+          d: {
+            server_id: this.serverId,
+            user_id: this.userId,
+            session_id: this.sessionId,
+            token: this.token,
+          },
+        }));
+        console.log('[voice] IDENTIFY envoye');
         break;
       }
       case 2: { // READY (WS vocal : op 2)

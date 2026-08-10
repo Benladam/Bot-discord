@@ -109,6 +109,14 @@ class MusicPlayer {
 
   /** Une tentative de connexion vocale maison. */
   async _connectOnce(voiceChannel) {
+    // 0) Vider toute session vocale residuelle (opcode 4 channel_id null)
+    const leavePayload = { op: 4, d: { guild_id: this.guildId, channel_id: null, self_mute: false, self_deaf: false } };
+    try {
+      if (typeof this.client.ws.send === 'function') this.client.ws.send(leavePayload);
+      else { const sh = this.client.ws.shards && this.client.ws.shards.first(); if (sh && sh.send) sh.send(leavePayload); }
+    } catch (_) {}
+    await new Promise((r) => setTimeout(r, 300));
+
     // 1) Rejoindre le salon via le gateway (opcode 4 VOICE STATE UPDATE)
     console.log('🔌 Connexion au salon vocal en cours...');
     const payload = {
@@ -168,7 +176,7 @@ class MusicPlayer {
             endpoint: server.endpoint,
             token: server.token,
             sessionId: state.session_id,
-          }), 800);
+          }), 2500);
         } else if (Date.now() > deadline) {
           this.client.removeListener('raw', onRaw);
           reject(new Error('VOCAL_UNAVAILABLE'));
