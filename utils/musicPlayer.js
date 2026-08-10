@@ -88,8 +88,23 @@ class MusicPlayer {
   async ensureConnection(voiceChannel) {
     if (this.connection && this.connection.connected) return this.connection;
 
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        this.connection = await this._connectOnce(voiceChannel);
+        return this.connection;
+      } catch (e) {
+        lastErr = e;
+        console.log('⚠️ Tentative ' + attempt + ' échouée: ' + (e && e.message));
+        if (this.connection) { try { this.connection.destroy(); } catch (_) {} this.connection = null; }
+      }
+    }
+    throw lastErr || new Error('VOCAL_UNAVAILABLE');
+  }
+
+  /** Une tentative de connexion vocale maison. */
+  async _connectOnce(voiceChannel) {
     // 1) Rejoindre le salon via le gateway (opcode 4 VOICE STATE UPDATE)
-    //    -> déclenche VOICE_SERVER_UPDATE / VOICE_STATE_UPDATE (pas l'API REST PATCH).
     console.log('🔌 Connexion au salon vocal en cours...');
     const payload = {
       op: 4,
@@ -100,8 +115,6 @@ class MusicPlayer {
         self_deaf: false,
       },
     };
-    // discord.js v14 : client.ws.send existe, mais selon la version on passe
-    // par le shard. On essaie les deux.
     if (typeof this.client.ws.send === 'function') {
       this.client.ws.send(payload);
     } else {
@@ -114,7 +127,7 @@ class MusicPlayer {
     const voiceInfo = await this._waitVoiceInfo();
 
     // 3) Créer notre connexion vocale maison
-    this.connection = new VoiceConnection({
+    const conn = new VoiceConnection({
       endpoint: voiceInfo.endpoint,
       token: voiceInfo.token,
       sessionId: voiceInfo.sessionId,
@@ -123,16 +136,17 @@ class MusicPlayer {
       publicIp: process.env.PUBLIC_IP || '87.91.140.78',
     });
 
-    this.connection.on('ready', () => {
+    conn.on('ready', () => {
       console.log('✅ Connecté au salon vocal — prêt à émettre du son.');
-      console.log('   [diag] status=ready ssrc=' + (this.connection.ssrc || '?') +
-        ' secretKey=' + (this.connection.secretKey ? 'oui' : 'NON') +
-        ' endpoint=' + (this.connection.endpoint || '?'));
+      console.log('   [diag] status=ready ssrc=' + (conn.ssrc || '?') +
+        ' secretKey=' + (conn.secretKey ? 'oui' : 'NON') +
+        ' endpoint=' + (conn.endpoint || '?'));
     });
-    this.connection.on('error', (e) => console.error('❌ Erreur connexion vocale:', e && e.message));
+    conn.on('error', (e) => console.error('❌ Erreur connexion vocale:', e && e.message));
+    conn.on('close', () => { /* géré par timeout */ });
 
-    await this.connection.connect();
-    return this.connection;
+    await conn.connect();
+    return conn;
   }
 
   /** Attend VOICE_SERVER_UPDATE + VOICE_STATE_UPDATE pour récupérer endpoint/token/sessionId. */

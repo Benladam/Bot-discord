@@ -64,6 +64,8 @@ class VoiceConnection extends require('events').EventEmitter {
       this.ws.on('close', (code, reason) => {
         console.log('[voice] WS ferme code=' + code + ' reason=' + (reason ? reason.toString() : ''));
         this.connected = false; this.emit('close');
+        // Si la connexion n'est pas encore établie, on reject pour declencher le retry.
+        if (!this.connected) reject(new Error('WS ferme code=' + code + ' (' + (reason ? reason.toString() : '') + ')'));
       });
     });
   }
