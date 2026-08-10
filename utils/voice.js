@@ -48,17 +48,18 @@ class VoiceConnection extends require('events').EventEmitter {
   _openWS() {
     return new Promise((resolve, reject) => {
       const url = `wss://${this.endpoint}/?v=8`;
+      console.log('[voice] ouverture WS vocal:', url);
       this.ws = new WebSocket(url);
       this.ws.on('open', () => {
-        // attendre HELLO pour le heartbeat interval
+        console.log('[voice] WS vocal ouvert');
       });
       this.ws.on('message', (data) => {
         let msg;
         try { msg = JSON.parse(data.toString()); } catch { return; }
         this._onWS(msg, resolve, reject);
       });
-      this.ws.on('error', (e) => { this.emit('error', e); reject(e); });
-      this.ws.on('close', () => { this.connected = false; this.emit('close'); });
+      this.ws.on('error', (e) => { console.error('[voice] WS erreur:', e.message); this.emit('error', e); reject(e); });
+      this.ws.on('close', () => { console.log('[voice] WS ferme'); this.connected = false; this.emit('close'); });
     });
   }
 
@@ -67,8 +68,8 @@ class VoiceConnection extends require('events').EventEmitter {
     switch (op) {
       case 10: { // HELLO
         const interval = d.heartbeat_interval;
+        console.log('[voice] HELLO recu (heartbeat', interval, 'ms)');
         this._startHeartbeat(interval);
-        // IDENTIFY
         this.ws.send(JSON.stringify({
           op: 0,
           d: {
@@ -78,6 +79,7 @@ class VoiceConnection extends require('events').EventEmitter {
             token: this.token,
           },
         }));
+        console.log('[voice] IDENTIFY envoye');
         break;
       }
       case 2: { // READY
@@ -85,9 +87,9 @@ class VoiceConnection extends require('events').EventEmitter {
         this.voiceIp = d.ip;
         this.voicePort = d.port;
         this.modes = d.modes;
-        // Ouvre le socket UDP et fait la découverte
+        console.log('[voice] READY: ssrc=' + d.ssrc + ' ip=' + d.ip + ':' + d.port + ' modes=' + (d.modes || []).join(','));
         this._openUDP().then(() => {
-          // SELECT_PROTOCOL avec notre IP publique + port local
+          console.log('[voice] UDP local port=' + this.udpPort + ' -> SELECT_PROTOCOL ip=' + this.publicIp);
           this.ws.send(JSON.stringify({
             op: 1,
             d: {
@@ -99,21 +101,20 @@ class VoiceConnection extends require('events').EventEmitter {
               },
             },
           }));
-        }).catch(reject);
+        }).catch((e) => { console.error('[voice] UDP erreur:', e.message); reject(e); });
         break;
       }
       case 4: { // SESSION_DESCRIPTION
         this.secretKey = Buffer.from(d.secret_key);
         this.connected = true;
+        console.log('[voice] SESSION_DESCRIPTION recu (secretKey OK)');
         this.emit('ready');
         resolve();
         break;
       }
-      case 8: { // HELLO (resume) ou autre
-        break;
-      }
       default:
-        // SPEAKING (op 5) etc. ignorés
+        // SPEAKING (op 5) etc.
+        if (op !== 5) console.log('[voice] WS op=' + op + ' recu');
         break;
     }
   }

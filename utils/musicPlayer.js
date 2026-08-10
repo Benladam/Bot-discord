@@ -154,10 +154,13 @@ class MusicPlayer {
         }
       };
       const onRaw = (pkt) => {
+        console.log('[voice] raw event recu: ' + (pkt.t || '?'));
         if (pkt.t === 'VOICE_SERVER_UPDATE') {
           server = { endpoint: pkt.d.endpoint, token: pkt.d.token };
+          console.log('[voice] VOICE_SERVER_UPDATE: endpoint=' + pkt.d.endpoint);
           check();
         } else if (pkt.t === 'VOICE_STATE_UPDATE') {
+          console.log('[voice] VOICE_STATE_UPDATE: user=' + pkt.d.user_id + ' session=' + (pkt.d.session_id || 'aucun'));
           if (pkt.d.session_id && pkt.d.user_id === this.client.user.id) {
             state = { session_id: pkt.d.session_id };
             check();
