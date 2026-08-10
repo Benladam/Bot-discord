@@ -200,13 +200,20 @@ class VoiceConnection extends require('events').EventEmitter {
     header.writeUInt32BE(this.timestamp & 0xffffffff, 4);
     header.writeUInt32BE(this.ssrc, 8);
 
-    // Nonce 24 octets = header RTP (12) + 12 zeros
+    // DAVE aead_aes256_gcm_rtpsize : le header RTP est ETENDU de 2 octets de
+    // taille (uint16 BE) apres le SSRC. Ce header etendu (14 octets) sert de
+    // nonce (14 + 10 zeros = 24) et d'AAD pour AES-256-GCM.
+    const sizeField = Buffer.alloc(2);
+    // (taille calculee apres le chiffrement, voir plus bas)
+    const headerExtended = Buffer.alloc(14);
+    header.copy(headerExtended, 0, 0, 12);
+    // nonce = header etendu (14) + 10 zeros = 24 octets
     const nonce = Buffer.alloc(24);
-    header.copy(nonce, 0, 0, 12);
+    headerExtended.copy(nonce, 0, 0, 14);
 
-    // AES-256-GCM : AAD = header RTP (12 octets)
+    // AES-256-GCM : AAD = header etendu (14 octets)
     const cipher = crypto.createCipheriv('aes-256-gcm', this.secretKey, nonce);
-    cipher.setAAD(header);
+    cipher.setAAD(headerExtended);
     const ct = Buffer.concat([cipher.update(opusFrame), cipher.final()]);
     const tag = cipher.getAuthTag(); // 16 octets
 
@@ -215,12 +222,10 @@ class VoiceConnection extends require('events').EventEmitter {
     counter.writeUInt32BE(this.nonceCounter & 0xffffffff, 0);
     this.nonceCounter = (this.nonceCounter + 1) & 0xffffffff;
 
-    // DAVE aead_aes256_gcm_rtpsize : apres le header RTP (12), on met 2 octets
-    // de taille (uint16 BE) = taille du reste (ciphertext + tag + counter).
-    // Sans ca, Discord rejette le flux (icone micro casse).
     const payloadRest = Buffer.concat([ct, tag, counter]);
-    const sizeField = Buffer.alloc(2);
+    // La taille (2 octets) = taille du reste (ciphertext + tag + counter)
     sizeField.writeUInt16BE(payloadRest.length, 0);
+    headerExtended.writeUInt16BE(payloadRest.length, 12); // dans le header etendu pour nonce/AAD
 
     const packet = Buffer.concat([header, sizeField, payloadRest]);
     this.udp.send(packet, 0, packet.length, this.voicePort, this.voiceIp);
