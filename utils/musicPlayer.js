@@ -53,16 +53,17 @@ class MusicPlayer {
   }
 
   async _connectOnce(voiceChannel) {
-    // 0) Quitter proprement tout salon vocal deja rejoint (evite session residuelle
-    //    qui fait echouer l'IDENTIFY en 4003/4006).
+    // 0) Forcer la deconnexion vocale via le GATEWAY (opcode 4 channel_id null)
+    //    MEME si discord.js ne voit pas le bot connecte (etat pas resynchro
+    //    apres redemarrage). Ca ferme la session residuelle cote serveur et
+    //    evite le 4006 "Session is no longer valid" au join suivant.
     try {
-      const guild = this.client.guilds.cache.get(this.guildId);
-      if (guild && guild.members.me && guild.members.me.voice && guild.members.me.voice.channel) {
-        await guild.members.me.voice.setChannel(null);
-        await new Promise((r) => setTimeout(r, 1000));
-        console.log('[voice] session vocale residuelle quittee');
-      }
-    } catch (_) { /* pas connecte -> ignore */ }
+      const leavePayload = { op: 4, d: { guild_id: this.guildId, channel_id: null, self_mute: false, self_deaf: false } };
+      if (typeof this.client.ws.send === 'function') this.client.ws.send(leavePayload);
+      else { const sh = this.client.ws.shards && this.client.ws.shards.first(); if (sh && sh.send) sh.send(leavePayload); }
+      await new Promise((r) => setTimeout(r, 1000));
+      console.log('[voice] deconnexion vocale gateway envoyee (leave)');
+    } catch (_) { /* ignore */ }
 
     console.log('🔌 Connexion au salon vocal en cours...');
     const payload = {
