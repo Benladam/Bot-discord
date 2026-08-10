@@ -74,6 +74,12 @@ class VoiceConnection extends require('events').EventEmitter {
       case 8: { // HELLO (WS vocal : op 8 = HELLO, pas 10)
         const interval = d.heartbeat_interval;
         console.log('[voice] HELLO recu (heartbeat ' + interval + ' ms)');
+        if (!this.sessionId || !this.token) {
+          console.error('[voice] IDENTIFY impossible: sessionId=' + this.sessionId + ' token=' + (this.token ? 'present' : 'ABSENT'));
+          reject(new Error('VOCAL_UNAVAILABLE'));
+          return;
+        }
+        console.log('[voice] IDENTIFY avec session=' + this.sessionId.slice(0, 8) + '... token=' + (this.token || '').slice(0, 6) + '...');
         this._startHeartbeat(interval);
         this.ws.send(JSON.stringify({
           op: 0, // IDENTIFY (WS vocal : op 0)
