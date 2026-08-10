@@ -16,8 +16,22 @@ const {
   SlashCommandBuilder,
 } = require('discord.js');
 require('dotenv').config();
-
 const { MusicPlayer } = require('./utils/musicPlayer');
+
+// === BYPASS vocal local : on force discord.js a annoncer l'IP publique ===
+// (au lieu de 192.168.1.x) lors de la IP discovery, sinon Discord envoie
+// l'audio vers une IP inateignable et le son ne sort jamais.
+const PUBLIC_IP = process.env.PUBLIC_IP || '87.91.140.78';
+const _networkInterfaces = os.networkInterfaces.bind(os);
+os.networkInterfaces = function () {
+  const orig = _networkInterfaces();
+  // Injecte une fausse interface avec l'IP publique en premier
+  return Object.assign({}, orig, {
+    '__public__': [{ address: PUBLIC_IP, family: 'IPv4', internal: false }],
+  });
+};
+// discord.js lit parfois via dns ou une autre methode ; on patch aussi si besoin.
+console.log('[bypass] IP publique forcee pour la voix : ' + PUBLIC_IP);
 const { setupConsole } = require('./console-commands');
 const langStore = require('./langStore');
 const { t: botT } = require('./botI18n');
