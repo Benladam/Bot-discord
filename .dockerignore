@@ -1,0 +1,13 @@
+# Fichiers et dossiers ignores par git
+node_modules/
+.env
+.env.*
+*.pem
+*.key
+npm-debug.log
+*.log
+.DS_Store
+queue_state.json
+.bot-gui-prefs.json
+bot.log
+gui_build/
