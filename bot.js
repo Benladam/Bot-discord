@@ -245,9 +245,10 @@ client.once(Events.ClientReady, async (c) => {
           reply: (o) => diag('[test-reply] ' + JSON.stringify(o).slice(0, 200)),
           editReply: (o) => diag('[test-edit] ' + JSON.stringify(o).slice(0, 200)),
         };
-        const play = require('./commands/play');
-        await play.execute(ctx, ['local:C:/Users/enzom/test_vocal.opus'], deps);
-        diag('[TEST] play execute termine');
+        diag('[TEST] connexion OK, lancement playNext local');
+        player.queue.push({ url: 'local:C:/Users/enzom/test_vocal.opus', title: 'Test vocal 440Hz' });
+        await player.playNext((song) => diag('[TEST] embed: ' + (song && song.title)));
+        diag('[TEST] playNext termine');
       } catch (e) {
         console.error('[TEST] erreur:', e);
       }
