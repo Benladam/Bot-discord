@@ -88,9 +88,18 @@ class MusicPlayer {
   async ensureConnection(voiceChannel) {
     if (this.connection && this.connection.connected) return this.connection;
 
-    // 1) Rejoindre le salon via l'API Discord (déclenche VOICE_SERVER_UPDATE / VOICE_STATE_UPDATE)
+    // 1) Rejoindre le salon via le gateway (opcode 4 VOICE STATE UPDATE)
+    //    -> déclenche VOICE_SERVER_UPDATE / VOICE_STATE_UPDATE (pas l'API REST PATCH).
     console.log('🔌 Connexion au salon vocal en cours...');
-    await voiceChannel.guild.members.me.voice.setChannel(voiceChannel.id);
+    this.client.ws.send({
+      op: 4,
+      d: {
+        guild_id: this.guildId,
+        channel_id: voiceChannel.id,
+        self_mute: false,
+        self_deaf: false,
+      },
+    });
 
     // 2) Capturer les infos vocales via les events gateway bruts
     const voiceInfo = await this._waitVoiceInfo();
