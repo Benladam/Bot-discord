@@ -214,8 +214,14 @@ class VoiceConnection extends require('events').EventEmitter {
     counter.writeUInt32BE(this.nonceCounter & 0xffffffff, 0);
     this.nonceCounter = (this.nonceCounter + 1) & 0xffffffff;
 
-    const payload = Buffer.concat([ct, tag, counter]);
-    const packet = Buffer.concat([header, payload]);
+    // DAVE aead_aes256_gcm_rtpsize : apres le header RTP (12), on met 2 octets
+    // de taille (uint16 BE) = taille du reste (ciphertext + tag + counter).
+    // Sans ca, Discord rejette le flux (icone micro casse).
+    const payloadRest = Buffer.concat([ct, tag, counter]);
+    const sizeField = Buffer.alloc(2);
+    sizeField.writeUInt16BE(payloadRest.length, 0);
+
+    const packet = Buffer.concat([header, sizeField, payloadRest]);
     this.udp.send(packet, 0, packet.length, this.voicePort, this.voiceIp);
 
     this.seq = (this.seq + 1) & 0xffff;
