@@ -62,7 +62,7 @@ class VoiceConnection extends require('events').EventEmitter {
       this.ws.on('message', (data) => {
         const raw = data.toString();
         let msg;
-        try { msg = JSON.parse(raw); } catch { console.log('[voice] WS message non-JSON:', raw.slice(0, 200)); return; }
+        try { msg = JSON.parse(raw); } catch { return; } // messages binaires (RTP control) = ignores
         this._onWS(msg, resolve, reject);
       });
       this.ws.on('error', (e) => { console.error('[voice] WS erreur:', e.message); this.emit('error', e); reject(e); });
@@ -137,8 +137,9 @@ class VoiceConnection extends require('events').EventEmitter {
         break;
       }
       default:
-        // SPEAKING (op 5) etc.
-        if (op !== 5) console.log('[voice] WS op=' + op + ' recu');
+        // Opcodes vocaux connus a ignorer (bruit): 5 SPEAKING, 11 ?, 13 ?, 15 ?,
+        // 18 ?, 20 ?. On ne loggue que les opcodes vraiment inattendus.
+        if (![5, 11, 13, 15, 18, 20].includes(op)) console.log('[voice] WS op=' + op + ' recu');
         break;
     }
   }
