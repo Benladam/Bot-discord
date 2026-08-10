@@ -23,12 +23,13 @@ RUN npm install @discordjs/opus
 # Copier le reste du code
 COPY . .
 
-# Le bot ecoute sur le port 3000 pour le GUI web (Fly l'expose)
+# Le serveur GUI ecoute sur 3000 (Fly l'expose) et lance le bot en enfant (GUI_AUTOSTART=1)
 ENV GUI_PORT=3000
 ENV GUI_AUTOSTART=1
-ENV BOT_ONLY=0
+ENV HOST=0.0.0.0
 
-# Sante : Fly verifie ce port
 EXPOSE 3000
 
-CMD ["node", "bot.js"]
+# IMPORTANT : on lance le serveur GUI (pas bot.js direct), car c'est lui qui
+# ecoute sur le port web ET demarre le bot Discord en processus enfant.
+CMD ["node", "gui/server.js"]
