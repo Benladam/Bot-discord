@@ -53,6 +53,17 @@ class MusicPlayer {
   }
 
   async _connectOnce(voiceChannel) {
+    // 0) Quitter proprement tout salon vocal deja rejoint (evite session residuelle
+    //    qui fait echouer l'IDENTIFY en 4003/4006).
+    try {
+      const guild = this.client.guilds.cache.get(this.guildId);
+      if (guild && guild.members.me && guild.members.me.voice && guild.members.me.voice.channel) {
+        await guild.members.me.voice.setChannel(null);
+        await new Promise((r) => setTimeout(r, 1000));
+        console.log('[voice] session vocale residuelle quittee');
+      }
+    } catch (_) { /* pas connecte -> ignore */ }
+
     console.log('🔌 Connexion au salon vocal en cours...');
     const payload = {
       op: 4,
