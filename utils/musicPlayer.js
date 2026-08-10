@@ -91,7 +91,7 @@ class MusicPlayer {
     // 1) Rejoindre le salon via le gateway (opcode 4 VOICE STATE UPDATE)
     //    -> déclenche VOICE_SERVER_UPDATE / VOICE_STATE_UPDATE (pas l'API REST PATCH).
     console.log('🔌 Connexion au salon vocal en cours...');
-    this.client.ws.send({
+    const payload = {
       op: 4,
       d: {
         guild_id: this.guildId,
@@ -99,7 +99,16 @@ class MusicPlayer {
         self_mute: false,
         self_deaf: false,
       },
-    });
+    };
+    // discord.js v14 : client.ws.send existe, mais selon la version on passe
+    // par le shard. On essaie les deux.
+    if (typeof this.client.ws.send === 'function') {
+      this.client.ws.send(payload);
+    } else {
+      const shard = this.client.ws.shards && this.client.ws.shards.first();
+      if (shard && typeof shard.send === 'function') shard.send(payload);
+      else throw new Error('Impossible d\'envoyer l\'opcode vocal au gateway');
+    }
 
     // 2) Capturer les infos vocales via les events gateway bruts
     const voiceInfo = await this._waitVoiceInfo();
