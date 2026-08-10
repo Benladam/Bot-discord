@@ -92,6 +92,18 @@ class MusicPlayer {
         guildId: voiceChannel.guild.id,
         adapterCreator: voiceChannel.guild.voiceAdapterCreator,
       });
+      // === BYPASS : on force l'IP discovery a renvoyer notre IP publique ===
+      // (au lieu de 192.168.1.x que Discord ne peut pas atteindre).
+      // Comme ca SELECT_PROTOCOL est envoye avec la bonne IP, Discord
+      // repond avec le secretKey et l'audio peut passer (NAT de la box).
+      const PUBLIC_IP = process.env.PUBLIC_IP || '87.91.140.78';
+      if (this.connection.udp && this.connection.udp.performIPDiscovery) {
+        this.connection.udp.performIPDiscovery = async (ssrc) => {
+          const port = this.connection.udp.socket.address().port;
+          console.log('[bypass] IP discovery forcee: ' + PUBLIC_IP + ':' + port);
+          return { ip: PUBLIC_IP, port };
+        };
+      }
       this.connection.on(VoiceConnectionStatus.Disconnected, async () => {
         try {
           await Promise.race([
