@@ -200,20 +200,17 @@ class VoiceConnection extends require('events').EventEmitter {
     header.writeUInt32BE(this.timestamp & 0xffffffff, 4);
     header.writeUInt32BE(this.ssrc, 8);
 
-    // DAVE aead_aes256_gcm_rtpsize : le header RTP est ETENDU de 2 octets de
-    // taille (uint16 BE) apres le SSRC. Ce header etendu (14 octets) sert de
-    // nonce (14 + 10 zeros = 24) et d'AAD pour AES-256-GCM.
-    const sizeField = Buffer.alloc(2);
-    // (taille calculee apres le chiffrement, voir plus bas)
-    const headerExtended = Buffer.alloc(14);
-    header.copy(headerExtended, 0, 0, 12);
-    // nonce = header etendu (14) + 10 zeros = 24 octets
-    const nonce = Buffer.alloc(24);
-    headerExtended.copy(nonce, 0, 0, 14);
+    // DAVE aead_aes256_gcm_rtpsize (spec discord-api-docs #6059, elderlabs) :
+    // - nonce = 12 octets = le header RTP standard (AES256-GCM veut 12B, pas 24).
+    // - AAD = le full RTP header (12 octets).
+    // - Le champ "taille" (2 octets) vient APRES le header dans le packet, mais
+    //   ne fait PAS partie du nonce/AAD.
+    const nonce = Buffer.alloc(12);
+    header.copy(nonce, 0, 0, 12);
 
-    // AES-256-GCM : AAD = header etendu (14 octets)
+    // AES-256-GCM : AAD = header RTP (12 octets)
     const cipher = crypto.createCipheriv('aes-256-gcm', this.secretKey, nonce);
-    cipher.setAAD(headerExtended);
+    cipher.setAAD(header);
     const ct = Buffer.concat([cipher.update(opusFrame), cipher.final()]);
     const tag = cipher.getAuthTag(); // 16 octets
 
@@ -224,8 +221,8 @@ class VoiceConnection extends require('events').EventEmitter {
 
     const payloadRest = Buffer.concat([ct, tag, counter]);
     // La taille (2 octets) = taille du reste (ciphertext + tag + counter)
+    const sizeField = Buffer.alloc(2);
     sizeField.writeUInt16BE(payloadRest.length, 0);
-    headerExtended.writeUInt16BE(payloadRest.length, 12); // dans le header etendu pour nonce/AAD
 
     const packet = Buffer.concat([header, sizeField, payloadRest]);
     this.udp.send(packet, 0, packet.length, this.voicePort, this.voiceIp);
