@@ -19,6 +19,32 @@ function start(connection, url, onStart) {
   let volume = 1;
   let started = false;
 
+  // Mode test local : lire un fichier Opus directement (pas de yt-dlp/YouTube).
+  if (typeof url === 'string' && url.startsWith('local:')) {
+    const filePath = url.slice('local:'.length);
+    console.log('[audioSender] mode local: lecture de ' + filePath);
+    proc = spawn('ffmpeg', [
+      '-re', '-i', filePath,
+      '-c:a', 'libopus', '-b:a', '128k', '-ar', '48000', '-ac', '2',
+      '-f', 'opus', '-loglevel', 'error', '-',
+    ], { windowsHide: true });
+    const parser = new OggOpusParser();
+    proc.stdout.on('data', (chunk) => {
+      if (stopped) return;
+      parser.feed(chunk, (frame) => {
+        if (!connection.connected || !connection.secretKey) return;
+        const f = applyVolume(frame, volume);
+        const ok = connection.sendOpus(f);
+        if (ok && !started) { started = true; if (onStart) onStart(); }
+      });
+    });
+    proc.stderr.on('data', (d) => {
+      const s = d.toString();
+      if (/Error|invalid/i.test(s)) console.error('ffmpeg:', s.slice(0, 160));
+    });
+    return { stop, setVolume };
+  }
+
   // 1) Obtenir l'URL directe du flux (yt-dlp)
   const ytdlp = spawn('yt-dlp', [
     '-f', 'bestaudio[ext=webm]/bestaudio/best',

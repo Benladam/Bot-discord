@@ -246,7 +246,7 @@ client.once(Events.ClientReady, async (c) => {
           editReply: (o) => diag('[test-edit] ' + JSON.stringify(o).slice(0, 200)),
         };
         const play = require('./commands/play');
-        await play.execute(ctx, ['rk', 'ft', 'larry'], deps);
+        await play.execute(ctx, ['local:C:/Users/enzom/test_vocal.opus'], deps);
         diag('[TEST] play execute termine');
       } catch (e) {
         console.error('[TEST] erreur:', e);
