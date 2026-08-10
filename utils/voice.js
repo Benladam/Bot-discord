@@ -20,7 +20,10 @@ class VoiceConnection extends require('events').EventEmitter {
   constructor({ endpoint, token, sessionId, serverId, userId, publicIp }) {
     super();
     this.endpointBrut = endpoint || '';
-    this.endpoint = (endpoint || '').split(':')[0]; // WS vocal sur 443, pas le port UDP
+    // IMPORTANT: garder le port dans l'endpoint WS vocal ! Discord a change et
+    // exige desormais le port (ex: c-mrs04-xxx.discord.media:8443). Retirer le
+    // port -> connexion au mauvais endpoint -> 4006 "Session is no longer valid".
+    this.endpoint = endpoint || '';
     this.token = token;
     this.sessionId = sessionId;
     this.serverId = serverId;
