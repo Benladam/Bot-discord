@@ -231,8 +231,11 @@ client.once(Events.ClientReady, async (c) => {
         const guild = c.guilds.cache.get(GUILD_ID);
         const voiceChannel = c.channels.cache.get(VOCAL_ID);
         if (!guild || !voiceChannel) { diag('[TEST] guild ou salon introuvable'); return; }
+        // Rejoindre le salon vocal pour de vrai (opcode 4) pour que Discord
+        // mette a jour member.voice.channel, puis lancer play.
+        const player = getPlayer(GUILD_ID);
+        await player.ensureConnection(voiceChannel);
         const member = guild.members.cache.get(c.user.id);
-        member.voice.channel = voiceChannel;
         const ctx = {
           guildId: GUILD_ID,
           channel: c.channels.cache.get('1527327659955060768'),
