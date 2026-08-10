@@ -66,12 +66,12 @@ class VoiceConnection extends require('events').EventEmitter {
   _onWS(msg, resolve, reject) {
     const { op, d } = msg;
     switch (op) {
-      case 10: { // HELLO
+      case 8: { // HELLO (WS vocal : op 8 = HELLO, pas 10)
         const interval = d.heartbeat_interval;
-        console.log('[voice] HELLO recu (heartbeat', interval, 'ms)');
+        console.log('[voice] HELLO recu (heartbeat ' + interval + ' ms)');
         this._startHeartbeat(interval);
         this.ws.send(JSON.stringify({
-          op: 0,
+          op: 0, // IDENTIFY (WS vocal : op 0)
           d: {
             server_id: this.serverId,
             user_id: this.userId,
@@ -82,7 +82,7 @@ class VoiceConnection extends require('events').EventEmitter {
         console.log('[voice] IDENTIFY envoye');
         break;
       }
-      case 2: { // READY
+      case 2: { // READY (WS vocal : op 2)
         this.ssrc = d.ssrc;
         this.voiceIp = d.ip;
         this.voicePort = d.port;
