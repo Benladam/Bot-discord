@@ -232,7 +232,7 @@ client.once(Events.ClientReady, async (c) => {
         const voiceChannel = c.channels.cache.get(VOCAL_ID);
         if (!guild || !voiceChannel) { diag('[TEST] guild ou salon introuvable'); return; }
         const member = guild.members.cache.get(c.user.id);
-        member.voice = { channel: voiceChannel };
+        member.voice.channel = voiceChannel;
         const ctx = {
           guildId: GUILD_ID,
           channel: c.channels.cache.get('1527327659955060768'),
