@@ -134,8 +134,10 @@ class VoiceConnection extends require('events').EventEmitter {
   }
 
   _startHeartbeat(interval) {
+    // NE PAS envoyer de heartbeat immediatement : l'IDENTIFY doit partir en
+    // premier, sinon Discord ferme en 4003 "Not authenticated" (payload before
+    // identifying). On attend l'intervalle avant le 1er heartbeat.
     const send = () => this.ws && this.ws.send(JSON.stringify({ op: 3, d: Date.now() }));
-    send();
     this.heartbeatTimer = setInterval(send, interval * 0.9);
   }
 
