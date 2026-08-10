@@ -67,14 +67,6 @@ class MusicPlayer {
   }
 
   async _connectOnce(voiceChannel) {
-    // 0) Vider toute session vocale residuelle (opcode 4 channel_id null)
-    const leavePayload = { op: 4, d: { guild_id: this.guildId, channel_id: null, self_mute: false, self_deaf: false } };
-    try {
-      if (typeof this.client.ws.send === 'function') this.client.ws.send(leavePayload);
-      else { const sh = this.client.ws.shards && this.client.ws.shards.first(); if (sh && sh.send) sh.send(leavePayload); }
-    } catch (_) {}
-    await new Promise((r) => setTimeout(r, 300));
-
     console.log('🔌 Connexion au salon vocal en cours...');
     const payload = {
       op: 4,
@@ -123,11 +115,13 @@ class MusicPlayer {
       const check = () => {
         if (server && state) {
           this.client.removeListener('raw', onRaw);
-          setTimeout(() => resolve({
+          // Plus de delai : envoyer l'IDENTIFY au plus vite pour eviter
+          // le 4006 "Session is no longer valid" (session vocale expiree).
+          resolve({
             endpoint: server.endpoint,
             token: server.token,
             sessionId: state.session_id,
-          }), 1500);
+          });
         } else if (Date.now() > deadline) {
           this.client.removeListener('raw', onRaw);
           reject(new Error('VOCAL_UNAVAILABLE'));
