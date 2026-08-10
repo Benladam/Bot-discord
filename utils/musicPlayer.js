@@ -157,11 +157,13 @@ class MusicPlayer {
       const check = () => {
         if (server && state) {
           this.client.removeListener('raw', onRaw);
-          resolve({
+          // Laisser Discord finaliser la session vocale cote serveur avant
+          // d'ouvrir le WS (evite le 4003 en 1re tentative).
+          setTimeout(() => resolve({
             endpoint: server.endpoint,
             token: server.token,
             sessionId: state.session_id,
-          });
+          }), 800);
         } else if (Date.now() > deadline) {
           this.client.removeListener('raw', onRaw);
           reject(new Error('VOCAL_UNAVAILABLE'));
