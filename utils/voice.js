@@ -14,7 +14,7 @@
 
 const WebSocket = require('ws');
 const dgram = require('dgram');
-const sodium = require('libsodium-wrappers-sumo');
+const nacl = require('tweetnacl'); // xsalsa20-poly1305 pur JS (pas de binaire natif)
 
 class VoiceConnection extends require('events').EventEmitter {
   constructor({ endpoint, token, sessionId, serverId, userId, publicIp }) {
@@ -42,7 +42,6 @@ class VoiceConnection extends require('events').EventEmitter {
   }
 
   async connect() {
-    await sodium.ready;
     await this._openWS();
   }
 
@@ -174,7 +173,13 @@ class VoiceConnection extends require('events').EventEmitter {
     // xsalsa20_poly1305_libsodium : nonce = 24 octets = 12 zéros + 12 octets du header RTP
     const nonce = Buffer.alloc(24);
     header.copy(nonce, 12, 0, 12);
-    const ciphertext = sodium.crypto_secretbox_easy(opusFrame, nonce, this.secretKey);
+    // tweetnacl attend des Uint8Array
+    const ct = nacl.secretbox(
+      new Uint8Array(opusFrame),
+      new Uint8Array(nonce),
+      new Uint8Array(this.secretKey),
+    );
+    const ciphertext = Buffer.from(ct);
 
     const packet = Buffer.concat([header, ciphertext]);
     this.udp.send(packet, 0, packet.length, this.voicePort, this.voiceIp);
