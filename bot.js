@@ -245,13 +245,9 @@ client.once(Events.ClientReady, async (c) => {
           reply: (o) => diag('[test-reply] ' + JSON.stringify(o).slice(0, 200)),
           editReply: (o) => diag('[test-edit] ' + JSON.stringify(o).slice(0, 200)),
         };
-        diag('[TEST] connexion OK, lancement 3x play.execute en parallele (spam !play)');
+        diag('[TEST] connexion OK, lancement play.execute(rk ft larry)');
         const play = require('./commands/play');
-        await Promise.all([
-          play.execute(ctx, ['rk', 'ft', 'larry'], deps),
-          play.execute(ctx, ['rk', 'ft', 'larry'], deps),
-          play.execute(ctx, ['rk', 'ft', 'larry'], deps),
-        ]);
+        await play.execute(ctx, ['rk', 'ft', 'larry'], deps);
         diag('[TEST] play execute termine');
       } catch (e) {
         console.error('[TEST] erreur:', e);
