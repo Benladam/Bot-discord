@@ -82,6 +82,19 @@ class MusicPlayer {
       selfMute: false,
     });
     console.log('🔌 Connexion au salon vocal en cours...');
+    // Patch de l'IP discovery sur l'instance UDP (VoiceUDPSocket n'est pas exporte).
+    // On override des que conn.udp existe (etat "connecting") pour forcer l'IP publique.
+    conn.on('stateChange', () => {
+      if (conn.udp && conn.udp.performIPDiscovery && !conn.udp.__ipPatched) {
+        conn.udp.__ipPatched = true;
+        conn.udp.performIPDiscovery = async (ssrc) => {
+          let port = 50000;
+          try { port = conn.udp.localPort || 50000; } catch (_) {}
+          console.log('[bypass] IP discovery forcee : ' + PUBLIC_IP + ':' + port + ' (ssrc ' + ssrc + ')');
+          return { address: PUBLIC_IP, port, family: 'IPv4' };
+        };
+      }
+    });
     await entersState(conn, VoiceConnectionStatus.Ready, 20000);
     this.connection = conn;
     console.log('✅ Connecté au salon vocal — prêt à émettre du son.');
