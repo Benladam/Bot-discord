@@ -90,7 +90,7 @@ class VoiceConnection extends require('events').EventEmitter {
             user_id: this.userId,
             session_id: this.sessionId,
             token: this.token,
-            max_dave_protocol_version: 0,
+            // max_dave_protocol_version retire : on laisse Discord utiliser sa valeur par defaut
           },
         }));
         console.log('[voice] IDENTIFY envoye');
