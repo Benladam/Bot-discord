@@ -19,7 +19,7 @@ const nacl = require('tweetnacl'); // xsalsa20-poly1305 pur JS (pas de binaire n
 class VoiceConnection extends require('events').EventEmitter {
   constructor({ endpoint, token, sessionId, serverId, userId, publicIp }) {
     super();
-    this.endpoint = (endpoint || '').replace(/:80$|:443$/, '');
+    this.endpoint = (endpoint || '').split(':')[0]; // WS vocal sur 443, pas le port UDP
     this.token = token;
     this.sessionId = sessionId;
     this.serverId = serverId;
