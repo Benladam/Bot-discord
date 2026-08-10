@@ -129,6 +129,11 @@ class VoiceConnection extends require('events').EventEmitter {
         console.log('[voice] SESSION_DESCRIPTION recu (secretKey OK)');
         this.emit('ready');
         resolve();
+        // Discord exige un frame SPEAKING (op 5) pour activer le flux entrant.
+        // On fait un toggle 0->1 (certains serveurs ignorent un seul 1).
+        this._sendSpeaking(1);
+        setTimeout(() => { this._sendSpeaking(0); }, 150);
+        setTimeout(() => { this._sendSpeaking(1); }, 300);
         break;
       }
       default:
@@ -216,6 +221,16 @@ class VoiceConnection extends require('events').EventEmitter {
     this.seq = (this.seq + 1) & 0xffff;
     this.timestamp = (this.timestamp + 960) & 0xffffffff; // 48kHz * 20ms = 960
     return true;
+  }
+
+  /** Envoie un frame SPEAKING (op 5) sur le WS vocal pour activer le flux entrant. */
+  _sendSpeaking(flag) {
+    if (!this.ws || this.ws.readyState !== 1) return;
+    this.ws.send(JSON.stringify({
+      op: 5,
+      d: { speaking: flag ? 1 : 0, delay: 0, ssrc: this.ssrc },
+    }));
+    console.log('[voice] SPEAKING envoye (speaking=' + (flag ? 1 : 0) + ')');
   }
 
   destroy() {
