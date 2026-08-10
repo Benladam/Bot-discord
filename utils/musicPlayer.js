@@ -1,7 +1,7 @@
 /**
  * MusicPlayer — gestion de la lecture audio via notre connexion vocale maison
  * (utils/voice.js) : WebSocket vocal + UDP + IP discovery forcee sur IP publique
- * + RTP/Opus xsalsa20 (tweetnacl). Envoie audio via audioSender (Ogg Opus).
+ * + RTP/Opus DAVE (AES-256-GCM, natif Node crypto). Envoie audio via audioSender.
  */
 const { VoiceConnection } = require('./voice');
 const { OpusSender } = require('./audioSender');
