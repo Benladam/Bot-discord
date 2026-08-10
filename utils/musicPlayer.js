@@ -1,37 +1,11 @@
 /**
- * MusicPlayer — gestion de la lecture audio via @discordjs/voice
- * (connexion + handshake vocaux officiels, qui reussissent l'IDENTIFY),
- * avec IP discovery FORCEE sur l'IP publique pour contourner le NAT/Bbox
- * (qui bloque l'UDP local et empechait le secretKey d'etre recu).
- *
- * L'envoi audio se fait via createAudioResource (flux Opus Ogg) -> conn.play(),
- * sans re-encodage (@discordjs/opus pas installe).
+ * MusicPlayer — gestion de la lecture audio via notre connexion vocale maison
+ * (utils/voice.js) : WebSocket vocal + UDP + IP discovery forcee sur IP publique
+ * + RTP/Opus xsalsa20 (tweetnacl). Envoie audio via audioSender (Ogg Opus).
  */
-const {
-  joinVoiceChannel,
-  getVoiceConnection,
-  entersState,
-  VoiceConnectionStatus,
-  VoiceConnection,
-  createAudioResource,
-  StreamType,
-} = require('@discordjs/voice');
-const { createStream } = require('./streamer');
+const { VoiceConnection } = require('./voice');
+const { OpusSender } = require('./audioSender');
 const { resolveQuery } = require('./resolve');
-
-// === FORCE IP PUBLIQUE DANS LA DECOUVERTE IP (contourne NAT/Bbox) ===
-// Discord nous renvoie sinon l'IP locale (192.168.x.x) qui n'est pas
-// joignable par ses serveurs -> secretKey jamais recu (UDP bloque).
-const PUBLIC_IP = process.env.PUBLIC_IP || '87.91.140.78';
-VoiceConnection.prototype.performIPDiscovery = async function (ssrc) {
-  let port = 50000;
-  try {
-    if (this.udp && typeof this.udp.localPort === 'number') port = this.udp.localPort;
-    else if (typeof this.localPort === 'number') port = this.localPort;
-  } catch (_) {}
-  console.log('[bypass] IP discovery forcee : ' + PUBLIC_IP + ':' + port + ' (ssrc ' + ssrc + ')');
-  return { address: PUBLIC_IP, port, family: 'IPv4' };
-};
 
 function setActivityNow(player) {
   try {
@@ -50,7 +24,7 @@ class MusicPlayer {
     this.isPaused = false;
     this.loopMode = 0; // 0 off, 1 loop current, 2 loop queue
     this.volume = 1.0;
-    this.connection = null; // VoiceConnection @discordjs/voice
+    this.connection = null; // notre VoiceConnection maison
     this.sender = null;
     this.lastChannel = null;
     this.addedBy = '?';
@@ -71,40 +45,110 @@ class MusicPlayer {
   }
 
   async ensureConnection(voiceChannel) {
-    let conn = getVoiceConnection(this.guildId);
-    if (conn && conn.state.status === VoiceConnectionStatus.Ready) return conn;
-    if (conn) { try { conn.destroy(); } catch (_) {} }
-    conn = joinVoiceChannel({
-      guildId: this.guildId,
-      channelId: voiceChannel.id,
-      adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-      selfDeaf: false,
-      selfMute: false,
-    });
-    console.log('🔌 Connexion au salon vocal en cours...');
-    // Patch de l'IP discovery : on intercepte des que l'UDP interne existe.
-    let patchedProto = false;
-    conn.on('stateChange', (oldState, newState) => {
-      const udpRef = newState.udp || conn.udp || (conn.state && conn.state.udp) || (newState.networking && newState.networking.udp);
-      console.log('[diag] stateChange: ' + oldState.status + ' -> ' + newState.status + ' udp=' + (udpRef ? 'present' : 'null'));
-      if (!patchedProto && udpRef && udpRef.performIPDiscovery) {
-        patchedProto = true;
-        const proto = Object.getPrototypeOf(udpRef);
-        proto.performIPDiscovery = async function (ssrc) {
-          let port = 50000;
-          try { port = this.localPort || 50000; } catch (_) {}
-          console.log('[bypass] IP discovery forcee : ' + PUBLIC_IP + ':' + port + ' (ssrc ' + ssrc + ')');
-          return { address: PUBLIC_IP, port, family: 'IPv4' };
-        };
+    if (this.connection && this.connection.connected) return this.connection;
+
+    let lastErr = null;
+    const delays = [0, 1000, 2500];
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (attempt > 1) {
+        console.log('⏳ Nouvelle tentative dans ' + delays[attempt - 1] + 'ms...');
+        await new Promise((r) => setTimeout(r, delays[attempt - 1]));
       }
+      try {
+        this.connection = await this._connectOnce(voiceChannel);
+        return this.connection;
+      } catch (e) {
+        lastErr = e;
+        console.log('⚠️ Tentative ' + attempt + ' échouée: ' + (e && e.message));
+        if (this.connection) { try { this.connection.destroy(); } catch (_) {} this.connection = null; }
+      }
+    }
+    throw lastErr || new Error('VOCAL_UNAVAILABLE');
+  }
+
+  async _connectOnce(voiceChannel) {
+    // 0) Vider toute session vocale residuelle (opcode 4 channel_id null)
+    const leavePayload = { op: 4, d: { guild_id: this.guildId, channel_id: null, self_mute: false, self_deaf: false } };
+    try {
+      if (typeof this.client.ws.send === 'function') this.client.ws.send(leavePayload);
+      else { const sh = this.client.ws.shards && this.client.ws.shards.first(); if (sh && sh.send) sh.send(leavePayload); }
+    } catch (_) {}
+    await new Promise((r) => setTimeout(r, 300));
+
+    console.log('🔌 Connexion au salon vocal en cours...');
+    const payload = {
+      op: 4,
+      d: {
+        guild_id: this.guildId,
+        channel_id: voiceChannel.id,
+        self_mute: false,
+        self_deaf: false,
+      },
+    };
+    if (typeof this.client.ws.send === 'function') {
+      this.client.ws.send(payload);
+    } else {
+      const shard = this.client.ws.shards && this.client.ws.shards.first();
+      if (shard && typeof shard.send === 'function') shard.send(payload);
+      else throw new Error('Impossible d\'envoyer l\'opcode vocal au gateway');
+    }
+
+    const voiceInfo = await this._waitVoiceInfo();
+
+    const conn = new VoiceConnection({
+      endpoint: voiceInfo.endpoint,
+      token: voiceInfo.token,
+      sessionId: voiceInfo.sessionId,
+      serverId: this.guildId,
+      userId: this.client.user.id,
+      publicIp: process.env.PUBLIC_IP || '87.91.140.78',
     });
-    await entersState(conn, VoiceConnectionStatus.Ready, 20000);
-    this.connection = conn;
-    console.log('✅ Connecté au salon vocal — prêt à émettre du son.');
-    console.log('   [diag] status=ready ssrc=' + (conn.state?.ssrc || '?') +
-      ' secretKey=' + (conn.state?.secretKey ? 'oui' : 'NON') +
-      ' endpoint=' + (conn.state?.address || '?'));
+
+    conn.on('ready', () => {
+      console.log('✅ Connecté au salon vocal — prêt à émettre du son.');
+      console.log('   [diag] status=ready ssrc=' + (conn.ssrc || '?') +
+        ' secretKey=' + (conn.secretKey ? 'oui' : 'NON') +
+        ' endpoint=' + (conn.endpoint || '?'));
+    });
+    conn.on('error', (e) => console.error('❌ Erreur connexion vocale:', e && e.message));
+
+    await conn.connect();
     return conn;
+  }
+
+  _waitVoiceInfo() {
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + 10000;
+      let server = null, state = null;
+      const check = () => {
+        if (server && state) {
+          this.client.removeListener('raw', onRaw);
+          setTimeout(() => resolve({
+            endpoint: server.endpoint,
+            token: server.token,
+            sessionId: state.session_id,
+          }), 1500);
+        } else if (Date.now() > deadline) {
+          this.client.removeListener('raw', onRaw);
+          reject(new Error('VOCAL_UNAVAILABLE'));
+        }
+      };
+      const onRaw = (pkt) => {
+        console.log('[voice] raw event recu: ' + (pkt.t || '?'));
+        if (pkt.t === 'VOICE_SERVER_UPDATE') {
+          server = { endpoint: pkt.d.endpoint, token: pkt.d.token };
+          console.log('[voice] VOICE_SERVER_UPDATE: endpoint=' + pkt.d.endpoint);
+          check();
+        } else if (pkt.t === 'VOICE_STATE_UPDATE') {
+          console.log('[voice] VOICE_STATE_UPDATE: user=' + pkt.d.user_id + ' session=' + (pkt.d.session_id || 'aucun'));
+          if (pkt.d.session_id && pkt.d.user_id === this.client.user.id) {
+            state = { session_id: pkt.d.session_id };
+            check();
+          }
+        }
+      };
+      this.client.on('raw', onRaw);
+    });
   }
 
   async playNext(onEmbed) {
@@ -126,11 +170,10 @@ class MusicPlayer {
 
     console.log('🔍 Recherche du son : ' + (song.title || song.url));
 
-    // Attendre que la session vocale soit prête (secretKey)
     const ready = await new Promise((res) => {
       const deadline = Date.now() + 12000;
       const check = () => {
-        if (this.connection && this.connection.state?.secretKey) return res(true);
+        if (this.connection && this.connection.connected && this.connection.secretKey) return res(true);
         if (Date.now() > deadline) return res(false);
         setTimeout(check, 200);
       };
@@ -146,13 +189,16 @@ class MusicPlayer {
     }
 
     try {
-      console.log('✅ Son trouvé — préparation du flux audio (yt-dlp + ffmpeg, Opus)...');
-      const resource = await createStream(song.url);
-      this.connection.play(resource, { type: StreamType.OggOpus });
-      console.log('▶️ Lecture lancée : ' + (song.title || song.url));
-      console.log('🔊 SON ÉMIS — le bot joue maintenant dans le salon vocal.');
+      if (this.sender) { try { this.sender.stop(); } catch (_) {} }
+      console.log('✅ Son trouvé — préparation du flux audio (yt-dlp + ffmpeg, Opus RTP natif)...');
+      this.sender = await OpusSender.start(this.connection, song.url, () => {
+        console.log('▶️ Lecture lancée : ' + (song.title || song.url));
+        console.log('🔊 SON ÉMIS — le bot joue maintenant dans le salon vocal.');
+      });
+      if (this.sender.setVolume) this.sender.setVolume(this.volume);
     } catch (e) {
       console.error('❌ Erreur envoi audio:', e.message);
+      console.log('❌ Son introuvable — impossible de lire le flux audio.');
       this.isPlaying = false;
       throw e;
     }
@@ -163,26 +209,26 @@ class MusicPlayer {
   }
 
   pause() {
-    if (this.connection) this.connection.pause();
+    if (this.sender) { try { this.sender.stop(); } catch (_) {} }
     this.isPaused = true;
     setActivityNow(this);
   }
 
   resume() {
     if (!this.current) return;
-    if (this.connection) this.connection.resume();
+    this.playNext(() => {}).catch((e) => console.error('Erreur reprise:', e));
     this.isPaused = false;
-    setActivityNow(this);
   }
 
   skip() {
-    if (this.connection) { try { this.connection.pause(); } catch (_) {} }
+    if (this.sender) { try { this.sender.stop(); } catch (_) {} }
     return this.playNext(() => {}).catch((e) => console.error('Erreur skip:', e));
   }
 
   stop() {
     this.clearQueue();
-    if (this.connection) { try { this.connection.pause(); } catch (_) {} }
+    if (this.sender) { try { this.sender.stop(); } catch (_) {} }
+    this.sender = null;
     this.current = null;
     this.isPlaying = false;
     this.isPaused = false;

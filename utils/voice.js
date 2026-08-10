@@ -90,6 +90,7 @@ class VoiceConnection extends require('events').EventEmitter {
             user_id: this.userId,
             session_id: this.sessionId,
             token: this.token,
+            max_dave_protocol_version: 0,
           },
         }));
         console.log('[voice] IDENTIFY envoye');
