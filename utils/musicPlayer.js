@@ -61,7 +61,6 @@ class MusicPlayer {
     })();
     return this.connecting;
   }
-  }
 
   async _connectOnce(voiceChannel) {
     // 0) Forcer la deconnexion vocale via le GATEWAY (opcode 4 channel_id null)
