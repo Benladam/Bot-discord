@@ -42,8 +42,8 @@ const PREFS_PATH = path.join(os.homedir(), '.bot-gui-prefs.json');
 // Lien du dépôt utilisé par défaut si aucun remote n'est configuré.
 const DEFAULT_REPO = 'https://github.com/Benladam/Bot-discord.git';
 
-const PORT = process.env.GUI_PORT || 7777;
-const HOST = '127.0.0.1';
+const PORT = process.env.PORT || process.env.GUI_PORT || 7777;
+const HOST = process.env.HOST || '0.0.0.0';
 
 // --- État du bot ---
 let botProc = null;          // processus enfant du bot

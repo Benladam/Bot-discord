@@ -1,0 +1,33 @@
+app = "bot-discord-enzom"
+primary_region = "cdg"  # Paris (Frankfurt dispo aussi : fra)
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  GUI_PORT = "3000"
+  GUI_AUTOSTART = "1"
+  # Fly injecte PORT=3000 ; on mappe GUI_PORT dessus via la section ports
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[http_service.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+[vm]
+  size = "shared-cpu-1x"   # 256 Mo RAM (free tier Fly)
+  cpus = 1
+  memory = "256mb"
+
+[deploy]
+  release_command = "echo deploy-ok"
