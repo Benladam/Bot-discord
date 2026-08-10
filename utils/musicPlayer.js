@@ -25,6 +25,7 @@ class MusicPlayer {
     this.loopMode = 0; // 0 off, 1 loop current, 2 loop queue
     this.volume = 1.0;
     this.connection = null; // notre VoiceConnection maison
+    this.connecting = null;  // Promise de connexion en cours (evite 3 connexions paralleles sur spam !play)
     this.sender = null;
     this.lastChannel = null;
     this.addedBy = '?';
@@ -45,11 +46,21 @@ class MusicPlayer {
   }
 
   async ensureConnection(voiceChannel) {
+    // Si deja connecte (meme en cours de 1ere connexion), on reutilise.
     if (this.connection && this.connection.connected) return this.connection;
-    // Une seule tentative propre (leave + join + IDENTIFY rapide) pour voir le
-    // vrai code d'erreur Discord sans confusion de retry.
-    this.connection = await this._connectOnce(voiceChannel);
-    return this.connection;
+    // Mutex : si une connexion est deja en cours (spam !play), on attend le meme promise
+    // au lieu d'ouvrir 3 WS vocaux en parallele (ce qui casse le son).
+    if (this.connecting) return this.connecting;
+    this.connecting = (async () => {
+      try {
+        this.connection = await this._connectOnce(voiceChannel);
+        return this.connection;
+      } finally {
+        this.connecting = null;
+      }
+    })();
+    return this.connecting;
+  }
   }
 
   async _connectOnce(voiceChannel) {
