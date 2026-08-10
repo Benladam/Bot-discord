@@ -1,31 +1,25 @@
+/**
+ * Commande: skip (!skip / /skip)
+ */
+
 const { EmbedBuilder } = require('discord.js');
+const { tr } = require('../utils/embedI18n');
 
 module.exports = {
-  data: {
-    name: 'skip',
-    description: 'Passe à la prochaine musique',
-  },
+  data: { name: 'skip', description: 'Passe à la musique suivante' },
+  slash: true,
 
-  execute(message, args, client, getPlayer) {
-    const player = getPlayer(message.guildId);
-
-    if (!player.isPlaying || !player.audioPlayer) {
-      return message.reply({
-        embeds: [new EmbedBuilder()
-          .setTitle('❌ Erreur')
-          .setDescription('Aucune musique en cours de lecture')
-          .setColor('#FF0000')
-        ]
+  async execute(ctx, args, deps) {
+    const lang = deps.langFor ? deps.langFor(ctx.user?.id || ctx.author?.id, ctx.guild?.id) : 'fr';
+    const T = tr(lang);
+    const { getPlayer } = deps;
+    const player = getPlayer(ctx.guildId);
+    if (!player.audioPlayer || !player.isPlaying) {
+      return ctx.reply({
+        embeds: [new EmbedBuilder().setTitle(T.errorTitle).setDescription(T.notPlaying).setColor('#FF0000')],
       });
     }
-
     player.audioPlayer.stop();
-
-    message.reply({
-      embeds: [new EmbedBuilder()
-        .setTitle('⏭️ Passage à la prochaine musique...')
-        .setColor('#0000FF')
-      ]
-    });
-  }
+    return ctx.reply({ embeds: [new EmbedBuilder().setTitle(T.nextTitle).setColor('#FFA500')] });
+  },
 };

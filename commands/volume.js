@@ -1,53 +1,31 @@
+/**
+ * Commande: volume (!volume / /volume) [0-100]
+ */
+
 const { EmbedBuilder } = require('discord.js');
+const { tr } = require('../utils/embedI18n');
 
 module.exports = {
-  data: {
-    name: 'volume',
-    description: 'Ajuste le volume',
-  },
+  data: { name: 'volume', description: 'Règle le volume (0-100)' },
+  slash: true,
+  options: [
+    { name: 'niveau', description: 'Volume de 0 à 100', type: 4, required: true },
+  ],
 
-  execute(message, args, client, getPlayer) {
-    const player = getPlayer(message.guildId);
-
-    if (!args[0]) {
-      return message.reply({
-        embeds: [new EmbedBuilder()
-          .setTitle('🔊 Volume actuel')
-          .setDescription(`${Math.round(player.volume * 100)}%`)
-          .setColor('#0000FF')
-        ]
+  async execute(ctx, args, deps) {
+    const lang = deps.langFor ? deps.langFor(ctx.user?.id || ctx.author?.id, ctx.guild?.id) : 'fr';
+    const T = tr(lang);
+    const { getPlayer } = deps;
+    const player = getPlayer(ctx.guildId);
+    const raw = parseInt(args[0], 10);
+    if (isNaN(raw) || raw < 0 || raw > 100) {
+      return ctx.reply({
+        embeds: [new EmbedBuilder().setTitle(T.errorTitle).setDescription(T.volumeRange).setColor('#FF0000')],
       });
     }
-
-    const volume = parseInt(args[0]);
-
-    if (isNaN(volume) || volume < 0 || volume > 100) {
-      return message.reply({
-        embeds: [new EmbedBuilder()
-          .setTitle('❌ Erreur')
-          .setDescription('Le volume doit être entre 0 et 100')
-          .setColor('#FF0000')
-        ]
-      });
-    }
-
-    player.volume = volume / 100;
-
-    // Appliquer le volume si une chanson joue
-    if (player.audioPlayer && player.dispatcher) {
-      try {
-        player.dispatcher.volume = player.volume;
-      } catch (e) {
-        // Le volume ne peut pas être changé en direct avec certaines sources
-      }
-    }
-
-    message.reply({
-      embeds: [new EmbedBuilder()
-        .setTitle('🔊 Volume')
-        .setDescription(`Volume réglé à ${volume}%`)
-        .setColor('#0000FF')
-      ]
+    const vol = player.setVolume(raw);
+    return ctx.reply({
+      embeds: [new EmbedBuilder().setTitle(T.volTitle).setDescription(T.volumeSet(vol)).setColor('#0099FF')],
     });
-  }
+  },
 };

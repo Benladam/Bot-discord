@@ -1,173 +1,115 @@
-# 🎵 Bot Discord Musique - Node.js
+# Bot Discord Musique (YouTube + Spotify)
 
-Un bot Discord complet pour jouer de la musique avec discord.js!
+Bot de musique pour Discord, écrit en Node.js avec [discord.js v14](https://discord.js.org/).
+Il lit de l'audio **YouTube** et des liens **Spotify** (pistes, albums, playlists),
+et fonctionne avec les **commandes slash `/`** aussi bien qu'avec le **préfixe `!`**.
 
-## ⚡ Démarrage Rapide (5 minutes)
+> ⚠️ Spotify n'autorise pas le streaming audio direct. Les liens Spotify sont
+> résolus en métadonnées (titre + artiste) puis lus via l'audio YouTube équivalent.
 
-### 1. Prérequis
+## Fonctionnalités
+
+- Lecture de liens YouTube (watch / youtu.be)
+- Lecture de liens Spotify : piste, album, playlist
+- Recherche texte (joue le premier résultat YouTube)
+- File d'attente, boucle (chanson / file), mélange
+- Volume, pause / reprise, skip, stop, leave
+- Commandes slash `/` **et** préfixe `!`
+
+## Installation
+
 ```bash
-# Vérifier que vous avez Node.js 18+
-node --version
-
-# Vérifier que FFmpeg est installé
-ffmpeg -version
-```
-
-### 2. Installer les dépendances
-```bash
+git clone <repo>
+cd Bot-discord
 npm install
 ```
 
-### 3. Créer le bot Discord
-1. Allez sur https://discord.com/developers/applications
-2. Cliquez "New Application"
-3. Onglet "Bot" → "Add Bot"
-4. Copiez le TOKEN
-5. Onglet "OAuth2" → "URL Generator"
-   - Scopes: `bot`
-   - Permissions: `Send Messages`, `Connect`, `Speak`
-6. Copiez l'URL et acceptez le bot sur votre serveur
+Copiez `.env.example` en `.env` et remplissez les valeurs :
 
-### 4. Configurer le token
-1. Ouvrez `.env`
-2. Remplacez `votre_token_discord_ici` par votre token
-3. Sauvegardez
+```bash
+cp .env.example .env
+```
 
-### 5. Lancer le bot
+### Variables `.env`
+
+| Variable | Obligatoire | Description |
+|----------|-------------|-------------|
+| `DISCORD_TOKEN` | oui | Token du bot Discord |
+| `COMMAND_PREFIX` | non | Préfixe des commandes texte (défaut `!`) |
+| `SPOTIFY_CLIENT_ID` | pour Spotify | ID d'application Spotify |
+| `SPOTIFY_CLIENT_SECRET` | pour Spotify | Secret d'application Spotify |
+
+### Obtenir un token Discord
+1. https://discord.com/developers/applications → New Application
+2. Section **Bot** → Reset Token
+3. Section **OAuth2 → URL Generator** → cochez `applications.commands` + `bot`,
+   activez les intents **Server Members Intent**, **Message Content Intent** et
+   **Voice State Intent**, puis utilisez l'URL générée pour inviter le bot.
+
+### Obtenir les identifiants Spotify (uniquement pour les liens Spotify)
+1. https://developer.spotify.com/dashboard → Create app
+2. Copiez le **Client ID** et le **Client Secret** dans `.env`.
+
+## Interface graphique (GUI)
+
+À la place de `launch.bat` / `launch.sh`, une petite interface web locale permet
+de tout piloter depuis une page (serveur Node natif, **zéro dépendance externe**) :
+
+- **Mise à jour GitHub** : indiquer l'URL du dépôt puis bouton *Mettre à jour (pull)*
+- **Dépendances** : bouton *Installer / Mettre à jour* (lance `npm install` depuis `requirements.txt`)
+- **Tokens** : saisir le token du bot Discord et les identifiants Spotify, enregistrés dans `.env`
+- **Contrôle du bot** : boutons *Lancer* / *Arrêter* / *Redémarrer*
+- **Terminal en direct** : affiche en temps réel les logs du bot (les erreurs apparaissent en rouge)
+
+Lancer l'interface :
+
+```bash
+# Windows
+gui.bat
+# Linux / macOS
+bash gui.sh      # ou : chmod +x gui.sh && ./gui.sh
+```
+
+Le script ouvre automatiquement http://127.0.0.1:7777 dans le navigateur.
+Le serveur tourne tant que la fenêtre du script reste ouverte.
+
+> Astuce : le port par défaut est `7777`. Pour le changer : `GUI_PORT=8080 node gui/server.js`.
+
+## Lancement (en ligne de commande)
+
 ```bash
 npm start
 ```
 
-## 🎵 Commandes
+## Commandes
+
+| Commande | Description |
+|----------|-------------|
+| `!play` / `/play [lien/recherche]` | Joue une musique (YouTube, Spotify, ou recherche) |
+| `!pause` / `/pause` | Met en pause |
+| `!resume` / `/resume` | Reprend |
+| `!skip` / `/skip` | Passe à la suivante |
+| `!stop` / `/stop` | Arrête et vide la file |
+| `!queue` / `/queue` | Affiche la file |
+| `!now` / `/now` | Musique en cours |
+| `!volume` / `/volume [0-100]` | Règle le volume |
+| `!loop` / `/loop [off\|song\|queue]` | Mode de boucle |
+| `!shuffle` / `/shuffle` | Mélange la file |
+| `!leave` / `/leave` | Le bot quitte le canal |
+| `!help` / `/help` | Affiche l'aide |
+
+## Structure
 
 ```
-!play [lien ou recherche]   → Joue une musique
-!pause                      → Met en pause
-!resume                     → Reprend
-!skip                       → Passe à la suivante
-!stop                       → Arrête tout
-!queue                      → File d'attente
-!volume [0-100]             → Change le volume
-!now                        → Chanson en cours
-!leave                      → Bot quitte
-!help                       → Aide
+bot.js                  Point d'entrée (slash + préfixe)
+gui/                    Interface graphique locale (server.js + public/index.html)
+  gui.bat / gui.sh      Lanceurs de l'interface (remplacent launch.bat / launch.sh)
+commands/               Une commande par fichier
+utils/
+  musicPlayer.js        Logique de lecture (connexion vocale, file, boucle)
+  spotify.js            Résolution des liens Spotify -> YouTube
+  resolve.js            Résolution YouTube/Spotify/recherche
+  embeds.js             Embeds (messages enrichis)
+  respond.js            Helpers de réponse unifiés
+requirements.txt        Dépendances (installées via la GUI ou npm install)
 ```
-
-## 📁 Structure du Projet
-
-```
-discord-music-bot/
-├── bot.js              # Fichier principal
-├── package.json        # Dépendances
-├── .env                # Configuration
-└── commands/           # Dossier des commandes
-    ├── play.js
-    ├── pause.js
-    ├── resume.js
-    ├── skip.js
-    ├── stop.js
-    ├── queue.js
-    ├── volume.js
-    ├── leave.js
-    ├── now.js
-    └── help.js
-```
-
-## 🚀 Features
-
-✅ Jouer de la musique YouTube  
-✅ File d'attente  
-✅ Contrôle du volume  
-✅ Pause/Resume  
-✅ Skip/Stop  
-✅ Interface élégante avec embeds  
-✅ Gestion d'erreurs robuste  
-✅ Système de commandes modulaire  
-
-## 🐛 Dépannage
-
-**"command not found: node"**
-→ Installer Node.js depuis https://nodejs.org/
-
-**"FFmpeg not found"**
-→ Installer FFmpeg
-
-**"Invalid token"**
-→ Vérifier que le token dans .env est correct
-
-**"Cannot find module"**
-→ Lancer `npm install`
-
-**Le bot ne répond pas**
-→ Vérifier que Message Content Intent est activé sur Discord Developer Portal
-
-## 📚 Documentation Complète
-
-- **[INSTALLATION_NODEJS.md](INSTALLATION_NODEJS.md)** - Guide complet d'installation
-- **[FEATURES_BONUS_NODEJS.md](FEATURES_BONUS_NODEJS.md)** - Features additionnelles
-
-## 🔒 Sécurité
-
-⚠️ **NE JAMAIS PARTAGER VOTRE TOKEN!**
-
-Utilisez `.env` pour les secrets:
-```
-DISCORD_TOKEN=votre_token_ici
-```
-
-Ajoutez `.env` au `.gitignore`
-
-## 📞 Support
-
-- [Discord.js Documentation](https://discord.js.org/)
-- [Discord API Docs](https://discord.com/developers/docs)
-- [play-dl GitHub](https://github.com/play-dl/play-dl)
-
-## 📄 Licence
-
-MIT
-
-## 🎮 Exemples d'utilisation
-
-```
-# Jouer une chanson
-!play Never Gonna Give You Up
-
-# Jouer depuis YouTube
-!play https://www.youtube.com/watch?v=dQw4w9WgXcQ
-
-# Afficher la queue
-!queue
-
-# Mettre en pause
-!pause
-
-# Reprendre
-!resume
-
-# Passer à la suivante
-!skip
-
-# Arrêter
-!stop
-
-# Régler le volume à 50%
-!volume 50
-
-# Afficher l'aide
-!help
-```
-
-## 💡 Prochaines Étapes
-
-1. [Ajouter les features bonus](FEATURES_BONUS_NODEJS.md)
-2. [Déployer en production](INSTALLATION_NODEJS.md#-déploiement-en-production)
-3. Ajouter une base de données
-4. Implémenter Spotify
-5. Créer un site web de gestion
-
----
-
-Bon amusement! 🎶
-
-Besoin d'aide? Consultez les guides complets fournis!

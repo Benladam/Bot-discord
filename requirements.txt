@@ -1,0 +1,8 @@
+# Dependances du bot Discord musique (YouTube + Spotify)
+# Installees via les scripts launch.bat / launch.sh (npm install <pkg>)
+@discordjs/voice@^0.19.2
+discord.js@^14.27.0
+dotenv@^17.4.2
+ffmpeg-static@^5.3.0
+play-dl@^1.9.7
+spotify-web-api-node@^5.0.2

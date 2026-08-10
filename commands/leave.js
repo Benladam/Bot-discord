@@ -1,39 +1,21 @@
+/**
+ * Commande: leave (!leave / /leave)
+ * Le bot quitte le canal vocal et vide la file.
+ */
+
 const { EmbedBuilder } = require('discord.js');
+const { tr } = require('../utils/embedI18n');
 
 module.exports = {
-  data: {
-    name: 'leave',
-    description: 'Le bot quitte le canal vocal',
+  data: { name: 'leave', description: 'Le bot quitte le canal vocal' },
+  slash: true,
+
+  async execute(ctx, args, deps) {
+    const lang = deps.langFor ? deps.langFor(ctx.user?.id || ctx.author?.id, ctx.guild?.id) : 'fr';
+    const T = tr(lang);
+    const { getPlayer } = deps;
+    const player = getPlayer(ctx.guildId);
+    player.destroy();
+    return ctx.reply({ embeds: [new EmbedBuilder().setTitle(T.leaveTitle).setDescription(T.leaveDesc).setColor('#808080')] });
   },
-
-  execute(message, args, client, getPlayer) {
-    const player = getPlayer(message.guildId);
-
-    if (!player.connection) {
-      return message.reply({
-        embeds: [new EmbedBuilder()
-          .setTitle('❌ Erreur')
-          .setDescription('Le bot n\'est pas connecté')
-          .setColor('#FF0000')
-        ]
-      });
-    }
-
-    player.clearQueue();
-    player.isPlaying = false;
-
-    if (player.audioPlayer) {
-      player.audioPlayer.stop();
-    }
-
-    player.connection.destroy();
-    player.connection = null;
-
-    message.reply({
-      embeds: [new EmbedBuilder()
-        .setTitle('👋 Déconnecté du canal vocal')
-        .setColor('#808080')
-      ]
-    });
-  }
 };

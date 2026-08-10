@@ -1,19 +1,46 @@
-const { Client, Collection, GatewayIntentBits, ChannelType } = require('discord.js');
+/**
+ * bot.js — Point d'entrée du bot musique Discord (YouTube + Spotify).
+ * Supporte à la fois les commandes slash (/) et le préfixe (!).
+ */
+
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const {
+  Client,
+  Collection,
+  GatewayIntentBits,
+  Events,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+} = require('discord.js');
 require('dotenv').config();
 
-// Configuration
+const { MusicPlayer } = require('./utils/musicPlayer');
+const { setupConsole } = require('./console-commands');
+const langStore = require('./langStore');
+const { t: botT } = require('./botI18n');
+
+// --- Configuration ---
 const TOKEN = process.env.DISCORD_TOKEN;
 const PREFIX = process.env.COMMAND_PREFIX || '!';
+const CLIENT_ID = process.env.CLIENT_ID; // optionnel : fourni sinon déduit au login
 
-// Vérifier le token
 if (!TOKEN) {
-  console.error('❌ DISCORD_TOKEN non trouvé dans .env');
+  console.error('❌ DISCORD_TOKEN introuvable dans .env');
   process.exit(1);
 }
 
-// Créer le client Discord
+// Logger simple
+const Logger = {
+  info: (m) => console.log(`ℹ️  [${new Date().toLocaleTimeString()}] ${m}`),
+  success: (m) => console.log(`✅ [${new Date().toLocaleTimeString()}] ${m}`),
+  error: (m) => console.error(`❌ [${new Date().toLocaleTimeString()}] ${m}`),
+  warn: (m) => console.warn(`⚠️  [${new Date().toLocaleTimeString()}] ${m}`),
+};
+
+// --- Client ---
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -23,113 +50,339 @@ const client = new Client({
   ],
 });
 
-// Collection pour les commandes
-client.commands = new Collection();
-client.musicPlayers = new Collection();
+client.commands = new Collection(); // nom -> module de commande
+client.musicPlayers = new Collection(); // guildId -> MusicPlayer
+let botConsole = null;                  // console terminal (voir ClientReady)
+// Callbacks de présence (déclarés ici car getPlayer peut être appelé avant ClientReady)
+let c_user_setActivity = () => {};
+let c_defaultActivity = () => {};
+client.cooldowns = new Collection();
 
-// Charger les commandes
-const commandsPath = path.join(__dirname, 'commands');
-if (fs.existsSync(commandsPath)) {
-  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-  
-  for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const command = require(filePath);
-    if (command.data && command.execute) {
-      client.commands.set(command.data.name, command);
-    }
-  }
-}
-
-// Classe pour gérer la musique
-class MusicPlayer {
-  constructor(guildId) {
-    this.guildId = guildId;
-    this.queue = [];
-    this.current = null;
-    this.connection = null;
-    this.dispatcher = null;
-    this.volume = 0.5;
-    this.isPlaying = false;
-    this.isPaused = false;
-  }
-
-  addToQueue(song) {
-    this.queue.push(song);
-    return this.queue.length;
-  }
-
-  getNextSong() {
-    if (this.queue.length > 0) {
-      return this.queue.shift();
-    }
-    return null;
-  }
-
-  clearQueue() {
-    this.queue = [];
-  }
-
-  skip() {
-    if (this.dispatcher) {
-      this.dispatcher.end();
-      return true;
-    }
-    return false;
-  }
-}
-
-// Obtenir ou créer un player pour un serveur
 function getPlayer(guildId) {
   if (!client.musicPlayers.has(guildId)) {
-    client.musicPlayers.set(guildId, new MusicPlayer(guildId));
+    const p = new MusicPlayer(guildId);
+    // Quand la lecture change, on met à jour la présence (bio) du bot.
+    p.onActivityChange = (info) => {
+      if (info) c_user_setActivity(info);
+      else c_defaultActivity();
+    };
+    client.musicPlayers.set(guildId, p);
   }
   return client.musicPlayers.get(guildId);
 }
 
-// Event: Bot prêt
-client.once('ready', () => {
-  console.log(`✅ Bot connecté en tant que ${client.user.username}`);
-  client.user.setActivity(`${PREFIX}help`, { type: 'LISTENING' });
+// --- Propriétaire du bot (pour /link et commandes réservées) ---
+// Priorité : OWNER_ID du .env, sinon le propriétaire de l'application Discord.
+let ownerId = process.env.OWNER_ID || null;
+async function resolveOwnerId() {
+  try {
+    const app = await client.application?.fetch?.();
+    if (app && app.owner && app.owner.id) ownerId = app.owner.id;
+  } catch (_) { /* application peut être indisponible */ }
+  return ownerId;
+}
+function isOwner(userId) { return !!ownerId && userId === ownerId; }
+
+// Langue effective pour un utilisateur/serveur donné.
+function langFor(userId, guildId) { return langStore.resolve(userId, guildId); }
+
+const deps = { getPlayer, prefix: PREFIX, isOwner, langFor, langStore, botT };
+
+// --- Mode de lancement rapide (Phase 5) ---
+// BOT_MODE = 'all' (défaut) | 'music' (musique seule) | 'admin' (admin seule)
+const BOT_MODE = (process.env.BOT_MODE || 'all').toLowerCase();
+const MUSIC_CMDS = new Set(['play', 'pause', 'resume', 'skip', 'stop', 'queue', 'now', 'volume', 'loop', 'shuffle', 'leave', 'help']);
+const CORE_CMDS = new Set(['link', 'language']);
+function commandMode(name) {
+  if (CORE_CMDS.has(name)) return 'core';
+  if (MUSIC_CMDS.has(name)) return 'music';
+  return 'admin'; // ban, kick, timeout, nick, dm, etc.
+}
+function commandAllowed(name) {
+  const m = commandMode(name);
+  if (m === 'core') return true;
+  if (BOT_MODE === 'music') return m === 'music';
+  if (BOT_MODE === 'admin') return m === 'admin';
+  return true; // 'all'
+}
+
+// --- Chargement des commandes depuis commands/ ---
+function loadCommands() {
+  const dir = path.join(__dirname, 'commands');
+  if (!fs.existsSync(dir)) {
+    Logger.warn('Dossier commands/ introuvable');
+    return;
+  }
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js'));
+  for (const file of files) {
+    try {
+      const cmd = require(path.join(dir, file));
+      if (cmd.data && cmd.data.name && typeof cmd.execute === 'function') {
+        if (!commandAllowed(cmd.data.name)) {
+          Logger.info(`Commande désactivée (mode ${BOT_MODE}) : ${cmd.data.name}`);
+          continue;
+        }
+        client.commands.set(cmd.data.name, cmd);
+        Logger.info(`Commande chargée: ${cmd.data.name}`);
+      }
+    } catch (e) {
+      Logger.error(`Erreur chargement ${file}: ${e.message}`);
+    }
+  }
+}
+
+// --- Construction des slash commands pour l'API Discord ---
+function buildSlashCommands() {
+  const arr = [];
+  for (const cmd of client.commands.values()) {
+    if (!cmd.slash) continue;
+    let builder = new SlashCommandBuilder()
+      .setName(cmd.data.name)
+      .setDescription(cmd.data.description || 'Commande');
+    if (Array.isArray(cmd.options)) {
+      for (const opt of cmd.options) {
+        if (opt.type === 4) builder = builder.addIntegerOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
+        else if (opt.type === 3) builder = builder.addStringOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required).setAutocomplete(!!opt.autocomplete));
+        else if (opt.type === 5) builder = builder.addBooleanOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
+      }
+    }
+    arr.push(builder.toJSON());
+  }
+  return arr;
+}
+
+async function registerSlashCommands(clientId) {
+  const rest = new REST({ version: '10' }).setToken(TOKEN);
+  const commands = buildSlashCommands();
+  Logger.info(`Enregistrement de ${commands.length} slash command(s)...`);
+  await rest.put(Routes.applicationCommands(clientId), { body: commands });
+  Logger.success('Slash commands enregistrées.');
+}
+
+// --- Gestion du délai de réflexion (cooldown) ---
+function isInCooldown(userId, name, ms = 2000) {
+  const key = `${userId}-${name}`;
+  if (client.cooldowns.has(key)) return true;
+  client.cooldowns.set(key, true);
+  setTimeout(() => client.cooldowns.delete(key), ms);
+  return false;
+}
+
+// --- Events ---
+client.once(Events.ClientReady, async (c) => {
+  // Référence au client, utilisée par les callbacks de présence du player.
+  let botUser = c.user;
+  // Repli de présence (quand aucune musique ne joue).
+  c_defaultActivity = () => {
+    try { botUser.setActivity(`${PREFIX}play | 🎵`, { type: 2 }); } catch (_) { /* ignore */ }
+  };
+  // Présence personnalisée (musique en cours) — type 2 = « Écoute … ».
+  c_user_setActivity = (info = {}) => {
+    try {
+      botUser.setActivity({
+        type: 2,
+        details: (info.details || '🎵 Musique').slice(0, 128),
+        state: (info.state || 'Bot Discord musique').slice(0, 128),
+      });
+    } catch (_) { /* ignore */ }
+  };
+  // Callback partagé (player de bot.js et de la console).
+  client._onActivityChange = c_user_setActivity;
+
+  Logger.success(`Bot connecté en tant que ${c.user.username}`);
+  Logger.info(`Présent sur ${c.guilds.cache.size} serveur(s)`);
+  try {
+    await registerSlashCommands(c.user.id);
+  } catch (e) {
+    Logger.error(`Échec enregistrement slash commands: ${e.message}`);
+  }
+  await resolveOwnerId();
+  if (ownerId) Logger.info(`Propriétaire du bot : ${ownerId}`);
+  c_defaultActivity();
+
+  // Console : piloter le bot depuis le terminal, sans passer par Discord.
+  // Fonctionne dans la fenêtre noire et depuis la ligne de commande de la GUI.
+  botConsole = setupConsole({
+    client: c,
+    log: (level, text) => {
+      if (level === 'err') Logger.error(text);
+      else if (level === 'ok') Logger.success(text);
+      else console.log(text);
+    },
+    readStdin: true,
+    // Présence : on la met aussi à jour quand on lance une commande via le terminal.
+    onActivityChange: c_user_setActivity,
+    defaultActivity: c_defaultActivity,
+    langStore,
+    isOwner,
+    botT,
+  });
+  Logger.info('Console prête — tapez /help pour les commandes (ex: /call #général salut).');
+
+  // Écrit l'état de la file d'attente dans un fichier lu par le panneau GUI.
+  // On écrit dans %APPDATA% car le dossier du projet (Documents/GitHub) est
+  // souvent protégé en écriture par Windows (Controlled Folder Access / OneDrive).
+  const APPDATA = process.env.APPDATA || process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+  const QUEUE_DIR = path.join(APPDATA, 'bot-discord');
+  try { fs.mkdirSync(QUEUE_DIR, { recursive: true }); } catch (_) {}
+  const QUEUE_FILE = path.join(QUEUE_DIR, 'queue_state.json');
+  setInterval(() => {
+    try {
+      const players = client.guilds.cache.map((g) => getPlayer(g.id));
+      const states = {};
+      for (const p of players) states[p.guildId] = p.getState();
+      fs.writeFileSync(QUEUE_FILE, JSON.stringify(states), 'utf8');
+    } catch (_) { /* ignore */ }
+  }, 2000);
 });
 
-// Event: Message reçu
-client.on('messageCreate', async (message) => {
-  if (!message.content.startsWith(PREFIX) || message.author.bot) return;
+// Slash commands
+client.on(Events.InteractionCreate, async (interaction) => {
+  // Autocomplétion live de /play (recherche multi-résultats pendant la frappe)
+  if (interaction.isAutocomplete()) {
+    const cmd = client.commands.get(interaction.commandName);
+    if (cmd && typeof cmd.autocomplete === 'function') {
+      try { await cmd.autocomplete(interaction, deps); } catch (_) { /* ignore */ }
+    }
+    return;
+  }
+  if (!interaction.isChatInputCommand()) return;
+  const cmd = client.commands.get(interaction.commandName);
+  if (!cmd) return;
 
-  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-  const commandName = args.shift().toLowerCase();
+  // Commande réservée au propriétaire : /link
+  if (interaction.commandName === 'link' && !isOwner(interaction.user.id)) {
+    return interaction.reply({ content: botT(langFor(interaction.user.id, interaction.guildId)).linkOnlyOwner, ephemeral: true });
+  }
 
-  const command = client.commands.get(commandName);
-
-  if (!command) {
-    return message.reply(`❌ Commande introuvable. Tapez \`${PREFIX}help\` pour l'aide.`);
+  if (isInCooldown(interaction.user.id, interaction.commandName)) {
+    return interaction.reply({ content: '⏱️ Trop rapide !', ephemeral: true });
   }
 
   try {
-    await command.execute(message, args, client, getPlayer);
-  } catch (error) {
-    console.error('Erreur:', error);
-    message.reply(`❌ Une erreur s'est produite: ${error.message}`);
+    Logger.info(`${interaction.user.tag} a utilisé /${interaction.commandName}`);
+    const args = [];
+    for (const opt of interaction.options.data) {
+      if (opt.value !== undefined) args.push(String(opt.value));
+    }
+    await cmd.execute(interaction, args, deps);
+  } catch (e) {
+    Logger.error(`Erreur /${interaction.commandName}: ${e.message}`);
+    const err = { embeds: [{ title: '❌ Erreur', description: e.message, color: 0xff0000 }] };
+    if (interaction.deferred || interaction.replied) await interaction.editReply(err);
+    else await interaction.reply(err);
   }
 });
 
-// Event: Gestion des voix
-client.on('voiceStateUpdate', async (oldState, newState) => {
+// « Parler à travers le bot » sur Discord : un vrai membre écrit
+//   /call salut tout le monde
+// (sans #salon) dans un salon texte. Le bot supprime le message du membre
+// et le re-poste en son nom. Évite le spam : ne réagit QU'à « /call » et
+// ignore les messages du bot et ceux qui contiennent déjà un #salon.
+client.on(Events.MessageCreate, async (message) => {
+  if (message.author.bot) return;
+  const content = message.content.trim();
+  if (!content.toLowerCase().startsWith('/call ')) return;      // uniquement /call
+  const body = content.slice(6).trim();
+  if (!body || body.includes('#')) return;                     // #salon -> commande terminal, on ignore
+  try {
+    await message.delete().catch(() => {});                     // supprime le message du membre
+    await message.channel.send(`${message.member ? message.member.displayName : message.author.username} : ${body}`);
+  } catch (e) {
+    Logger.error(`/call (Discord) : ${e.message}`);
+  }
+});
+
+// Commandes préfixe (!)
+client.on(Events.MessageCreate, async (message) => {
+  if (!message.content.startsWith(PREFIX) || message.author.bot) return;
+
+  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const name = args.shift().toLowerCase();
+  const cmd = client.commands.get(name);
+  if (!cmd) return;
+
+  if (isInCooldown(message.author.id, name)) {
+    return message.reply('⏱️ Trop rapide !');
+  }
+
+  try {
+    const fullCmd = `${PREFIX}${name} ${args.join(' ')}`.trim();
+    Logger.info(`${message.author.tag} ❯ ${fullCmd}`);
+    await cmd.execute(message, args, deps);
+  } catch (e) {
+    Logger.error(`Erreur ${PREFIX}${name}: ${e.message}`);
+    await message.reply({ embeds: [{ title: '❌ Erreur', description: e.message, color: 0xff0000 }] });
+  }
+});
+
+// Déconnexion propre quand tout le monde quitte
+client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   const guild = newState.guild;
-  const player = getPlayer(guild.id);
+  const player = client.musicPlayers.get(guild.id);
+  if (!player) return;
 
-  // Si le bot a quitté le canal
+  // Le bot a été déconnecté
   if (oldState.member?.id === client.user.id && oldState.channelId && !newState.channelId) {
-    player.clearQueue();
-    player.isPlaying = false;
+    player.destroy();
+    Logger.info(`Bot déconnecté de ${guild.name}`);
+    return;
+  }
+  // Tous les membres (sauf le bot) ont quitté -> inactivité
+  if (oldState.channelId && newState.channelId === oldState.channelId) {
+    const vc = guild.channels.cache.get(oldState.channelId);
+    if (vc && vc.members.size === 1 && vc.members.has(client.user.id)) {
+      setTimeout(() => {
+        if (vc.members.size === 1) {
+          player.destroy();
+          Logger.info(`Bot quitte ${guild.name} (inactivité)`);
+        }
+      }, 5 * 60 * 1000);
+    }
   }
 });
 
-// Lancer le bot
-client.login(TOKEN);
+// Message de bienvenue automatique quand le bot rejoint un nouveau serveur.
+client.on(Events.GuildCreate, async (guild) => {
+  try {
+    // Salon système (celui défini par Discord) ou un salon "général" sinon.
+    let channel = guild.systemChannel;
+    if (!channel) {
+      channel = guild.channels.cache.find((c) =>
+        c.type === 0 && /^(général|general|accueil|welcome|bienvenue|chat)$/i.test(c.name)
+      ) || guild.channels.cache.find((c) => c.type === 0);
+    }
+    if (!channel || !channel.permissionsFor(guild.members.me).has('SendMessages')) return;
 
-// Gérer les erreurs non capturées
-process.on('unhandledRejection', error => {
-  console.error('Erreur non capturée:', error);
+    const embed = {
+      color: 0x5865f2,
+      title: `👋 Merci de m'avoir ajouté sur ${guild.name} !`,
+      description:
+        '**Heuss l\'Enfoiré** est un bot musique + modération pour ton serveur Discord.\n' +
+        'Voici comment démarrer :',
+      fields: [
+        { name: '🎵 Jouer de la musique', value: 'Rejoins un salon vocal puis tape `/play <musique ou lien>`', inline: false },
+        { name: '🖥️ Ouvrir le panneau (contrôleur)', value: 'Le panneau web s\'ouvre automatiquement au lancement du bot. Sinon tape `/controller`', inline: false },
+        { name: '🛡️ Modération', value: '`/kick` · `/ban` · `/timeout` · `/nick` · `/dm`', inline: false },
+        { name: '❓ Aide', value: 'Tape `/help` pour la liste des commandes', inline: false },
+      ],
+      footer: { text: 'Support : discord.gg/YpAyfZ9Bs7' },
+    };
+    await channel.send({ embeds: [embed] });
+    Logger.info(`Message de bienvenue envoyé sur ${guild.name}`);
+  } catch (e) {
+    Logger.error(`Erreur message de bienvenue: ${e.message}`);
+  }
 });
+
+// Erreurs non capturées
+process.on('unhandledRejection', (e) => { Logger.error(`Rejet non géré: ${e?.message}`); });
+process.on('uncaughtException', (e) => { Logger.error(`Exception: ${e?.message}`); });
+
+loadCommands();
+client.login(TOKEN).catch((e) => {
+  Logger.error(`Échec de connexion: ${e.message}`);
+  process.exit(1);
+});
+
+module.exports = { client, getPlayer };
