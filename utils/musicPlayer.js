@@ -82,13 +82,14 @@ class MusicPlayer {
       selfMute: false,
     });
     console.log('🔌 Connexion au salon vocal en cours...');
-    // Patch de l'IP discovery sur le PROTOTYPE de l'instance UDP (VoiceUDPSocket
-    // n'est pas exporte). On override des que conn.udp existe pour forcer l'IP publique.
+    // Patch de l'IP discovery : on intercepte des que l'UDP interne existe.
     let patchedProto = false;
-    conn.on('stateChange', () => {
-      if (!patchedProto && conn.udp && conn.udp.performIPDiscovery) {
+    conn.on('stateChange', (oldState, newState) => {
+      const udpRef = conn.udp || (conn.state && conn.state.udp);
+      console.log('[diag] stateChange: ' + oldState.status + ' -> ' + newState.status + ' udp=' + (udpRef ? 'present' : 'null'));
+      if (!patchedProto && udpRef && udpRef.performIPDiscovery) {
         patchedProto = true;
-        const proto = Object.getPrototypeOf(conn.udp);
+        const proto = Object.getPrototypeOf(udpRef);
         proto.performIPDiscovery = async function (ssrc) {
           let port = 50000;
           try { port = this.localPort || 50000; } catch (_) {}
