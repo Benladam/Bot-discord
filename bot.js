@@ -251,7 +251,7 @@ client.once(Events.ClientReady, async (c) => {
       } catch (e) {
         console.error('[TEST] erreur:', e);
       }
-    }, 4000);
+    }, 40000);
   }
 
   // Console : piloter le bot depuis le terminal, sans passer par Discord.
