@@ -19,6 +19,7 @@ const nacl = require('tweetnacl'); // xsalsa20-poly1305 pur JS (pas de binaire n
 class VoiceConnection extends require('events').EventEmitter {
   constructor({ endpoint, token, sessionId, serverId, userId, publicIp }) {
     super();
+    this.endpointBrut = endpoint || '';
     this.endpoint = (endpoint || '').split(':')[0]; // WS vocal sur 443, pas le port UDP
     this.token = token;
     this.sessionId = sessionId;
@@ -48,18 +49,22 @@ class VoiceConnection extends require('events').EventEmitter {
   _openWS() {
     return new Promise((resolve, reject) => {
       const url = `wss://${this.endpoint}/?v=8`;
-      console.log('[voice] ouverture WS vocal:', url);
+      console.log('[voice] ouverture WS vocal:', url, '(endpoint brut:', this.endpointBrut + ')');
       this.ws = new WebSocket(url);
       this.ws.on('open', () => {
         console.log('[voice] WS vocal ouvert');
       });
       this.ws.on('message', (data) => {
+        const raw = data.toString();
         let msg;
-        try { msg = JSON.parse(data.toString()); } catch { return; }
+        try { msg = JSON.parse(raw); } catch { console.log('[voice] WS message non-JSON:', raw.slice(0, 200)); return; }
         this._onWS(msg, resolve, reject);
       });
       this.ws.on('error', (e) => { console.error('[voice] WS erreur:', e.message); this.emit('error', e); reject(e); });
-      this.ws.on('close', () => { console.log('[voice] WS ferme'); this.connected = false; this.emit('close'); });
+      this.ws.on('close', (code, reason) => {
+        console.log('[voice] WS ferme code=' + code + ' reason=' + (reason ? reason.toString() : ''));
+        this.connected = false; this.emit('close');
+      });
     });
   }
 
