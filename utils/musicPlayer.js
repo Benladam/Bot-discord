@@ -89,7 +89,12 @@ class MusicPlayer {
     if (this.connection && this.connection.connected) return this.connection;
 
     let lastErr = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    const delays = [0, 1000, 2500]; // backoff entre tentatives
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (attempt > 1) {
+        console.log('⏳ Nouvelle tentative dans ' + delays[attempt - 1] + 'ms...');
+        await new Promise((r) => setTimeout(r, delays[attempt - 1]));
+      }
       try {
         this.connection = await this._connectOnce(voiceChannel);
         return this.connection;
