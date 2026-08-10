@@ -1,5 +1,10 @@
+# fly.toml app configuration file generated for bot-discord-enzom on 2026-08-10T11:53:41Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
 app = "bot-discord-enzom"
-primary_region = "cdg"  # Paris (Frankfurt dispo aussi : fra)
+primary_region = 'cdg'
 
 [build]
   dockerfile = "Dockerfile"
@@ -12,7 +17,7 @@ primary_region = "cdg"  # Paris (Frankfurt dispo aussi : fra)
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = false
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 1
 
@@ -30,4 +35,9 @@ primary_region = "cdg"  # Paris (Frankfurt dispo aussi : fra)
   memory = "256mb"
 
 [deploy]
-  release_command = "echo deploy-ok"
+  release_command = 'echo deploy-ok'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  cpus = 1
+  memory = '256mb'
