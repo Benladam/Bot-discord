@@ -85,7 +85,7 @@ class MusicPlayer {
     // Patch de l'IP discovery : on intercepte des que l'UDP interne existe.
     let patchedProto = false;
     conn.on('stateChange', (oldState, newState) => {
-      const udpRef = conn.udp || (conn.state && conn.state.udp);
+      const udpRef = newState.udp || conn.udp || (conn.state && conn.state.udp) || (newState.networking && newState.networking.udp);
       console.log('[diag] stateChange: ' + oldState.status + ' -> ' + newState.status + ' udp=' + (udpRef ? 'present' : 'null'));
       if (!patchedProto && udpRef && udpRef.performIPDiscovery) {
         patchedProto = true;
