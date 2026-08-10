@@ -245,8 +245,8 @@ client.once(Events.ClientReady, async (c) => {
           reply: (o) => diag('[test-reply] ' + JSON.stringify(o).slice(0, 200)),
           editReply: (o) => diag('[test-edit] ' + JSON.stringify(o).slice(0, 200)),
         };
-        diag('[TEST] connexion OK, lancement playNext local');
-        player.queue.push({ url: 'local:C:/Users/enzom/test_vocal.opus', title: 'Test vocal 440Hz' });
+        diag('[TEST] connexion OK, lancement playNext YouTube');
+        player.queue.push({ url: 'https://www.youtube.com/watch?v=tWIDtMcAan0', title: 'RK ft Larry - Woin Woin' });
         await player.playNext((song) => diag('[TEST] embed: ' + (song && song.title)));
         diag('[TEST] playNext termine');
       } catch (e) {
