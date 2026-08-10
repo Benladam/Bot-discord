@@ -46,24 +46,10 @@ class MusicPlayer {
 
   async ensureConnection(voiceChannel) {
     if (this.connection && this.connection.connected) return this.connection;
-
-    let lastErr = null;
-    const delays = [0, 1000, 2500];
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      if (attempt > 1) {
-        console.log('⏳ Nouvelle tentative dans ' + delays[attempt - 1] + 'ms...');
-        await new Promise((r) => setTimeout(r, delays[attempt - 1]));
-      }
-      try {
-        this.connection = await this._connectOnce(voiceChannel);
-        return this.connection;
-      } catch (e) {
-        lastErr = e;
-        console.log('⚠️ Tentative ' + attempt + ' échouée: ' + (e && e.message));
-        if (this.connection) { try { this.connection.destroy(); } catch (_) {} this.connection = null; }
-      }
-    }
-    throw lastErr || new Error('VOCAL_UNAVAILABLE');
+    // Une seule tentative propre (leave + join + IDENTIFY rapide) pour voir le
+    // vrai code d'erreur Discord sans confusion de retry.
+    this.connection = await this._connectOnce(voiceChannel);
+    return this.connection;
   }
 
   async _connectOnce(voiceChannel) {
