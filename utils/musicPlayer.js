@@ -91,6 +91,10 @@ class MusicPlayer {
         channelId: voiceChannel.id,
         guildId: voiceChannel.guild.id,
         adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+        // On desactive l'IP discovery : sur une IP publique (VPS/Fly), le bot
+        // utilise directement l'IP/port fournis par Discord sans attendre de
+        // reponse UDP (qui echoue si l'UDP sortant est filtre).
+        ipDiscoveryTimeout: 0,
       });
       this.connection.on(VoiceConnectionStatus.Disconnected, async () => {
         try {
