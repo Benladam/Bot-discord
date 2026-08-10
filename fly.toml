@@ -10,6 +10,8 @@ release_command = "echo deploy-ok"
 [env]
 GUI_AUTOSTART = "1"
 GUI_PORT = "3000"
+# Mets un mot de passe pour protéger le site (optionnel mais recommande)
+GUI_PASSWORD = ""
 
 [http_service]
 auto_start_machines = true
@@ -17,6 +19,13 @@ auto_stop_machines = false
 force_https = true
 internal_port = 3000
 min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "get"
+    path = "/api/status"
 
 [[vm]]
 cpus = 1

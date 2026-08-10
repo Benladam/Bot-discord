@@ -555,6 +555,18 @@ const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, `http://${req.headers.host}`);
   const p = u.pathname;
 
+  // --- Protection par mot de passe (basic auth) si GUI_PASSWORD est défini ---
+  const GUI_PWD = process.env.GUI_PASSWORD || '';
+  if (GUI_PWD && !p.startsWith('/api/status')) {
+    const auth = req.headers['authorization'] || '';
+    const expected = 'Basic ' + Buffer.from(':' + GUI_PWD).toString('base64');
+    if (auth !== expected) {
+      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Bot Discord"' });
+      res.end('Accès protégé — mot de passe requis.');
+      return;
+    }
+  }
+
   // --- Flux SSE (terminal live) ---
   if (p === '/api/logs' && req.method === 'GET') {
     res.writeHead(200, {
