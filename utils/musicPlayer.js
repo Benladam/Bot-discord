@@ -137,7 +137,7 @@ class MusicPlayer {
         } else if (pkt.t === 'VOICE_STATE_UPDATE') {
           console.log('[voice] VOICE_STATE_UPDATE: user=' + pkt.d.user_id + ' session=' + (pkt.d.session_id || 'aucun'));
           if (pkt.d.session_id && pkt.d.user_id === this.client.user.id) {
-            if (!state) state = { session_id: pkt.d.session_id }; // GARDER le 1er session_id (pas overwrite)
+            state = { session_id: pkt.d.session_id }; // dernier session_id (apres leave+join, c'est la session active)
             check();
           }
         }
