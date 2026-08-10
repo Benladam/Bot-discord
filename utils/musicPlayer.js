@@ -82,14 +82,16 @@ class MusicPlayer {
       selfMute: false,
     });
     console.log('🔌 Connexion au salon vocal en cours...');
-    // Patch de l'IP discovery sur l'instance UDP (VoiceUDPSocket n'est pas exporte).
-    // On override des que conn.udp existe (etat "connecting") pour forcer l'IP publique.
+    // Patch de l'IP discovery sur le PROTOTYPE de l'instance UDP (VoiceUDPSocket
+    // n'est pas exporte). On override des que conn.udp existe pour forcer l'IP publique.
+    let patchedProto = false;
     conn.on('stateChange', () => {
-      if (conn.udp && conn.udp.performIPDiscovery && !conn.udp.__ipPatched) {
-        conn.udp.__ipPatched = true;
-        conn.udp.performIPDiscovery = async (ssrc) => {
+      if (!patchedProto && conn.udp && conn.udp.performIPDiscovery) {
+        patchedProto = true;
+        const proto = Object.getPrototypeOf(conn.udp);
+        proto.performIPDiscovery = async function (ssrc) {
           let port = 50000;
-          try { port = conn.udp.localPort || 50000; } catch (_) {}
+          try { port = this.localPort || 50000; } catch (_) {}
           console.log('[bypass] IP discovery forcee : ' + PUBLIC_IP + ':' + port + ' (ssrc ' + ssrc + ')');
           return { address: PUBLIC_IP, port, family: 'IPv4' };
         };
