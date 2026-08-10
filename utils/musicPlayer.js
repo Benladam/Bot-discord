@@ -111,6 +111,12 @@ class MusicPlayer {
         ' endpoint=' + (conn.endpoint || '?'));
     });
     conn.on('error', (e) => console.error('❌ Erreur connexion vocale:', e && e.message));
+    // Si le bot est kické ou quitte le salon (WS fermé), on oublie la connexion
+    // morte pour que le prochain !play en recrée une propre (avec leave gateway).
+    conn.on('close', () => {
+      if (this.connection === conn) this.connection = null;
+      if (this.connecting === null || this.connecting === undefined) this.connecting = null;
+    });
 
     await conn.connect();
     return conn;
