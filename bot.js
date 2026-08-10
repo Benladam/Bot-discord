@@ -74,7 +74,7 @@ client.cooldowns = new Collection();
 
 function getPlayer(guildId) {
   if (!client.musicPlayers.has(guildId)) {
-    const p = new MusicPlayer(guildId);
+    const p = new MusicPlayer(guildId, client);
     // Quand la lecture change, on met à jour la présence (bio) du bot.
     p.onActivityChange = (info) => {
       if (info) c_user_setActivity(info);

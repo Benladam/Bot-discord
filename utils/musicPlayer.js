@@ -1,38 +1,33 @@
 /**
- * MusicPlayer — gère la lecture audio pour un serveur (guild).
- *
- * Connexion vocale via discord.js (joinVoiceChannel) mais ENVIRON audio
- * envoyé DIRECTEMENT en RTP/Opus via un socket UDP natif (utils/audioSender),
- * car @discordjs/voice échoue sur certains réseaux ("Cannot perform IP
- * discovery - socket closed"). ffmpeg encode l'Opus (déjà présent).
+ * MusicPlayer — gestion de la lecture audio (maison, sans @discordjs/voice).
+ * Connexion vocale 100% custom via utils/voice.js (WS vocal + UDP + IP discovery
+ * forcee sur IP publique). Envoi RTP/Opus via utils/audioSender.
  */
 
-const { joinVoiceChannel, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
-const play = require('play-dl');
-const { sendAudio } = require('./audioSender');
+const { VoiceConnection } = require('./voice');
+const { OpusSender } = require('./audioSender');
 
-/** Appelé par le player quand la lecture change, pour mettre à jour la présence. */
 function setActivityNow(player) {
   if (player && typeof player.setActivity === 'function') player.setActivity();
 }
 
 class MusicPlayer {
-  constructor(guildId) {
+  constructor(guildId, client) {
     this.guildId = guildId;
+    this.client = client;
     this.queue = [];
     this.current = null;
-    this.connection = null;
-    this.sender = null; // { stop } de audioSender
+    this.connection = null;     // notre VoiceConnection maison
+    this.sender = null;         // OpusSender { stop }
     this.volume = 0.5;
     this.isPlaying = false;
     this.isPaused = false;
-    this.loopMode = 0; // 0: off, 1: chanson, 2: file
-    this.lastChannel = null;
+    this.loopMode = 0;
     this.createdAt = Date.now();
   }
 
   addToQueue(song) {
-    if (!song || !song.url) throw new Error('La chanson doit avoir une propriété url');
+    if (!song || !song.url) throw new Error('La chanson doit avoir une propriete url');
     this.queue.push(song);
     return this.queue.length;
   }
@@ -58,6 +53,7 @@ class MusicPlayer {
 
   setVolume(percent) {
     this.volume = Math.max(0, Math.min(100, percent)) / 100;
+    if (this.sender && this.sender.setVolume) this.sender.setVolume(this.volume);
     return Math.round(this.volume * 100);
   }
 
@@ -85,63 +81,75 @@ class MusicPlayer {
     this.connection = null;
   }
 
+  /**
+   * Rejoint le salon vocal et établit la connexion maison.
+   * @param {VoiceChannel} voiceChannel
+   */
   async ensureConnection(voiceChannel) {
-    if (!this.connection || this.connection.state.status !== VoiceConnectionStatus.Ready) {
-      this.connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId: voiceChannel.guild.id,
-        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-      });
-      // === BYPASS : on force l'IP discovery a renvoyer notre IP publique ===
-      // (au lieu de 192.168.1.x que Discord ne peut pas atteindre).
-      // Comme ca SELECT_PROTOCOL est envoye avec la bonne IP, Discord
-      // repond avec le secretKey et l'audio peut passer (NAT de la box).
-      const PUBLIC_IP = process.env.PUBLIC_IP || '87.91.140.78';
-      if (this.connection.udp && this.connection.udp.performIPDiscovery) {
-        this.connection.udp.performIPDiscovery = async (ssrc) => {
-          const port = this.connection.udp.socket.address().port;
-          console.log('[bypass] IP discovery forcee: ' + PUBLIC_IP + ':' + port);
-          return { ip: PUBLIC_IP, port };
-        };
-      }
-      this.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-        try {
-          await Promise.race([
-            entersState(this.connection, VoiceConnectionStatus.Signalling, 5_000),
-            entersState(this.connection, VoiceConnectionStatus.Connecting, 5_000),
-          ]);
-        } catch (e) { this.destroy(); }
-      });
-      this.connection.on(VoiceConnectionStatus.Ready, () => {
-        const st = this.connection.state;
-        console.log('✅ Connecté au salon vocal — prêt à émettre du son.');
-        console.log('   [diag] status=' + st.status + ' ssrc=' + (st.ssrc || '?') + ' secretKey=' + (st.secretKey ? 'oui' : 'NON') + ' endpoint=' + (st.endpoint || '?'));
-      });
-      this.connection.on(VoiceConnectionStatus.Connecting, () => {
-        console.log('🔌 Connexion au salon vocal en cours...');
-      });
-      this.connection.on('error', (e) => console.error('❌ Erreur connexion vocale:', e && e.message));
-    }
-    // Attendre que la session vocale (ssrc/secretKey) soit disponible.
-    const s = this.connection.state;
-    if (!s || !s.secretKey || !s.ssrc) {
-      // forcer l'attente de l'état Ready+session
-      await new Promise((res) => {
-        const check = () => {
-          const st = this.connection.state;
-          if (st && st.secretKey && st.ssrc) return res();
-          setTimeout(check, 200);
-        };
-        check();
-      });
-    }
+    if (this.connection && this.connection.connected) return this.connection;
+
+    // 1) Rejoindre le salon via l'API Discord (déclenche VOICE_SERVER_UPDATE / VOICE_STATE_UPDATE)
+    console.log('🔌 Connexion au salon vocal en cours...');
+    await voiceChannel.guild.members.me.voice.setChannel(voiceChannel.id);
+
+    // 2) Capturer les infos vocales via les events gateway bruts
+    const voiceInfo = await this._waitVoiceInfo();
+
+    // 3) Créer notre connexion vocale maison
+    this.connection = new VoiceConnection({
+      endpoint: voiceInfo.endpoint,
+      token: voiceInfo.token,
+      sessionId: voiceInfo.sessionId,
+      serverId: this.guildId,
+      userId: this.client.user.id,
+      publicIp: process.env.PUBLIC_IP || '87.91.140.78',
+    });
+
+    this.connection.on('ready', () => {
+      console.log('✅ Connecté au salon vocal — prêt à émettre du son.');
+      console.log('   [diag] status=ready ssrc=' + (this.connection.ssrc || '?') +
+        ' secretKey=' + (this.connection.secretKey ? 'oui' : 'NON') +
+        ' endpoint=' + (this.connection.endpoint || '?'));
+    });
+    this.connection.on('error', (e) => console.error('❌ Erreur connexion vocale:', e && e.message));
+
+    await this.connection.connect();
     return this.connection;
   }
 
-  /**
-   * Joue la prochaine chanson. Renvoie la chanson jouée ou null.
-   * @param {function} onEmbed callback(song)
-   */
+  /** Attend VOICE_SERVER_UPDATE + VOICE_STATE_UPDATE pour récupérer endpoint/token/sessionId. */
+  _waitVoiceInfo() {
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + 10000;
+      let server = null, state = null;
+      const check = () => {
+        if (server && state) {
+          this.client.removeListener('raw', onRaw);
+          resolve({
+            endpoint: server.endpoint,
+            token: server.token,
+            sessionId: state.session_id,
+          });
+        } else if (Date.now() > deadline) {
+          this.client.removeListener('raw', onRaw);
+          reject(new Error('VOCAL_UNAVAILABLE'));
+        }
+      };
+      const onRaw = (pkt) => {
+        if (pkt.t === 'VOICE_SERVER_UPDATE') {
+          server = { endpoint: pkt.d.endpoint, token: pkt.d.token };
+          check();
+        } else if (pkt.t === 'VOICE_STATE_UPDATE') {
+          if (pkt.d.session_id && pkt.d.user_id === this.client.user.id) {
+            state = { session_id: pkt.d.session_id };
+            check();
+          }
+        }
+      };
+      this.client.on('raw', onRaw);
+    });
+  }
+
   async playNext(onEmbed) {
     if (this.loopMode === 1 && this.current) {
       this.queue.unshift(this.current);
@@ -161,13 +169,11 @@ class MusicPlayer {
 
     console.log('🔍 Recherche du son : ' + (song.title || song.url));
 
-    // Attendre que la session vocale soit prête (ssrc/secretKey) — sinon le son
-    // ne peut pas être émis. Timeout pour ne pas rester bloqué indéfiniment.
+    // Attendre que la session vocale soit prête (secretKey)
     const ready = await new Promise((res) => {
       const deadline = Date.now() + 12000;
       const check = () => {
-        const st = this.connection && this.connection.state;
-        if (st && st.secretKey && st.ssrc) return res(true);
+        if (this.connection && this.connection.connected && this.connection.secretKey) return res(true);
         if (Date.now() > deadline) return res(false);
         setTimeout(check, 200);
       };
@@ -185,10 +191,11 @@ class MusicPlayer {
     try {
       if (this.sender) { try { this.sender.stop(); } catch (_) {} }
       console.log('✅ Son trouvé — préparation du flux audio (yt-dlp + ffmpeg, Opus RTP natif)...');
-      this.sender = await sendAudio(this.connection, song.url, () => {
+      this.sender = await OpusSender.start(this.connection, song.url, () => {
         console.log('▶️ Lecture lancée : ' + (song.title || song.url));
         console.log('🔊 SON ÉMIS — le bot joue maintenant dans le salon vocal.');
       });
+      if (this.sender.setVolume) this.sender.setVolume(this.volume);
     } catch (e) {
       console.error('❌ Erreur envoi audio:', e.message);
       console.log('❌ Son introuvable — impossible de lire le flux audio.');
@@ -228,7 +235,6 @@ class MusicPlayer {
     setActivityNow(this);
   }
 
-  /** État complet (pour le GUI). */
   getState() {
     return {
       current: this.current ? {
@@ -249,14 +255,12 @@ class MusicPlayer {
     };
   }
 
-  /** Recherche multi-résultats (GUI + choix Discord). */
-  static async search(query, limit = 8) {
-    const results = await play.search(query, { limit });
-    return results.map((r) => ({
-      title: r.title, url: r.url,
-      thumbnail: r.thumbnail && r.thumbnail.url ? r.thumbnail.url : null,
-      duration: r.durationInSec || 0,
-    }));
+  setActivity() {
+    // Mise à jour de la présence (Rich Presence) si besoin
+    try {
+      const name = this.isPlaying && this.current ? this.current.title : 'En attente';
+      this.client.user.setActivity(name, { type: 2 }).catch(() => {});
+    } catch (_) {}
   }
 }
 
