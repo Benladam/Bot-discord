@@ -14,6 +14,7 @@
 
 const WebSocket = require('ws');
 const dgram = require('dgram');
+const crypto = require('crypto');
 const nacl = require('tweetnacl'); // xsalsa20-poly1305 pur JS (pas de binaire natif)
 
 class VoiceConnection extends require('events').EventEmitter {
@@ -34,7 +35,8 @@ class VoiceConnection extends require('events').EventEmitter {
     this.voiceIp = null;     // IP du serveur vocal Discord (pour envoyer l'audio)
     this.voicePort = null;   // port du serveur vocal Discord
     this.secretKey = null;   // Buffer 32
-    this.mode = 'xsalsa20_poly1305_libsodium';
+    this.mode = 'aead_aes256_gcm_rtpsize'; // DAVE/E2EE requis par Discord (xsalsa20 supprime)
+    this.nonceCounter = 0;   // compteur 4 octets appendu au payload (rtpsize)
     this.ws = null;
     this.udp = null;
     this.udpPort = null;     // port local de notre socket UDP
@@ -178,7 +180,9 @@ class VoiceConnection extends require('events').EventEmitter {
   }
 
   /**
-   * Envoie une frame Opus brute (20ms @ 48kHz) chiffrée xsalsa20.
+   * Envoie une frame Opus brute (20ms @ 48kHz) chiffree DAVE (aead_aes256_gcm_rtpsize).
+   * Format : header RTP 12 octets (clair) + ciphertext GCM + tag(16) + nonceCounter(4).
+   * Nonce = header RTP (12) + 12 zeros ; AAD = header RTP (12).
    * @param {Buffer} opusFrame
    */
   sendOpus(opusFrame) {
@@ -190,18 +194,23 @@ class VoiceConnection extends require('events').EventEmitter {
     header.writeUInt32BE(this.timestamp & 0xffffffff, 4);
     header.writeUInt32BE(this.ssrc, 8);
 
-    // xsalsa20_poly1305_libsodium : nonce = 24 octets = 12 zéros + 12 octets du header RTP
+    // Nonce 24 octets = header RTP (12) + 12 zeros
     const nonce = Buffer.alloc(24);
-    header.copy(nonce, 12, 0, 12);
-    // tweetnacl attend des Uint8Array
-    const ct = nacl.secretbox(
-      new Uint8Array(opusFrame),
-      new Uint8Array(nonce),
-      new Uint8Array(this.secretKey),
-    );
-    const ciphertext = Buffer.from(ct);
+    header.copy(nonce, 0, 0, 12);
 
-    const packet = Buffer.concat([header, ciphertext]);
+    // AES-256-GCM : AAD = header RTP (12 octets)
+    const cipher = crypto.createCipheriv('aes-256-gcm', this.secretKey, nonce);
+    cipher.setAAD(header);
+    const ct = Buffer.concat([cipher.update(opusFrame), cipher.final()]);
+    const tag = cipher.getAuthTag(); // 16 octets
+
+    // Nonce counter 4 octets (incremental) appendu au payload (rtpsize)
+    const counter = Buffer.alloc(4);
+    counter.writeUInt32BE(this.nonceCounter & 0xffffffff, 0);
+    this.nonceCounter = (this.nonceCounter + 1) & 0xffffffff;
+
+    const payload = Buffer.concat([ct, tag, counter]);
+    const packet = Buffer.concat([header, payload]);
     this.udp.send(packet, 0, packet.length, this.voicePort, this.voiceIp);
 
     this.seq = (this.seq + 1) & 0xffff;
