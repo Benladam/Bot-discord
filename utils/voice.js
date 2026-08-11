@@ -15,7 +15,8 @@
 const WebSocket = require('ws');
 const dgram = require('dgram');
 const crypto = require('crypto');
-const nacl = require('tweetnacl'); // xsalsa20-poly1305 pur JS (pas de binaire natif)
+const nacl = require('tweetnacl'); // xsalsa20-poly1305 pur JS (transport, pas E2EE)
+const { DaveManager } = require('./dave'); // protocole DAVE maison (crypto via @snazzah/davey)
 
 class VoiceConnection extends require('events').EventEmitter {
   constructor({ endpoint, token, sessionId, serverId, userId, publicIp }) {
@@ -60,9 +61,14 @@ class VoiceConnection extends require('events').EventEmitter {
         console.log('[voice] WS vocal ouvert');
       });
       this.ws.on('message', (data) => {
+        // Les opcodes DAVE (25/27/29/30) sont BINAIRES (Buffer), pas JSON.
+        if (Buffer.isBuffer(data)) {
+          this._onBinary(data);
+          return;
+        }
         const raw = data.toString();
         let msg;
-        try { msg = JSON.parse(raw); } catch { return; } // messages binaires (RTP control) = ignores
+        try { msg = JSON.parse(raw); } catch { return; }
         this._onWS(msg, resolve, reject);
       });
       this.ws.on('error', (e) => { console.error('[voice] WS erreur:', e.message); this.emit('error', e); reject(e); });
@@ -73,6 +79,65 @@ class VoiceConnection extends require('events').EventEmitter {
         if (!this.connected) reject(new Error('WS ferme code=' + code + ' (' + (reason ? reason.toString() : '') + ')'));
       });
     });
+  }
+
+  // --- Protocole DAVE : messages binaires (opcodes 25/27/29/30) ---
+
+  _sendBinary(opcode, payload) {
+    // Format: uint16 sequence_number + uint8 opcode + payload
+    const seq = this.dave ? this.dave.nextSeq() : 0;
+    const head = Buffer.alloc(3);
+    head.writeUInt16BE(seq & 0xffff, 0);
+    head.writeUInt8(opcode, 2);
+    this.ws.send(Buffer.concat([head, payload]));
+  }
+
+  _onBinary(data) {
+    if (!Buffer.isBuffer(data) || data.length < 3) return;
+    const seq = data.readUInt16BE(0);
+    const opcode = data.readUInt8(2);
+    const payload = data.slice(3);
+    if (!this.dave) {
+      console.log('[dave] message binaire op=' + opcode + ' mais session DAVE absente (ignore)');
+      return;
+    }
+    if (opcode === 25) { // dave_mls_external_sender_package
+      this.dave.setExternalSender(payload);
+      const kp = this.dave.getKeyPackage();
+      if (kp) this._sendBinary(26, kp);
+      console.log('[dave] key package envoye (op 26)');
+    } else if (opcode === 27) { // dave_mls_proposals
+      const res = this.dave.processProposals(payload);
+      if (res && res.commit) {
+        const tid = Buffer.alloc(2);
+        tid.writeUInt16BE(this.dave.transitionId & 0xffff, 0);
+        const out = Buffer.concat([tid, res.commit, res.welcome || Buffer.alloc(0)]);
+        this._sendBinary(28, out);
+        console.log('[dave] commit+welcome envoye (op 28)');
+      }
+    } else if (opcode === 29) { // dave_mls_announce_commit_transition
+      if (payload.length >= 2) {
+        this.dave.transitionId = payload.readUInt16BE(0);
+        const commit = payload.slice(2);
+        this.dave.processCommit(commit);
+        const tid = Buffer.alloc(2);
+        tid.writeUInt16BE(this.dave.transitionId & 0xffff, 0);
+        this._sendBinary(23, tid);
+        console.log('[dave] pret pour transition (op 23) tid=' + this.dave.transitionId);
+      }
+    } else if (opcode === 30) { // dave_mls_welcome
+      if (payload.length >= 2) {
+        this.dave.transitionId = payload.readUInt16BE(0);
+        const welcome = payload.slice(2);
+        this.dave.processWelcome(welcome);
+        const tid = Buffer.alloc(2);
+        tid.writeUInt16BE(this.dave.transitionId & 0xffff, 0);
+        this._sendBinary(23, tid);
+        console.log('[dave] welcome traite + pret (op 23)');
+      }
+    } else {
+      console.log('[dave] op binaire recu op=' + opcode + ' (non gere)');
+    }
   }
 
   _onWS(msg, resolve, reject) {
@@ -95,8 +160,7 @@ class VoiceConnection extends require('events').EventEmitter {
             user_id: this.userId,
             session_id: this.sessionId,
             token: this.token,
-            // max_dave_protocol_version volontairement OMIS : on garde xsalsa20 maison
-            // (DAVE/E2EE necessite MLS, trop lourd a implementer nous-memes pour l'instant).
+            max_dave_protocol_version: 1, // DAVE/E2EE requis par Discord (xsalsa20 desactive)
           },
         }));
         console.log('[voice] IDENTIFY envoye');
@@ -130,6 +194,13 @@ class VoiceConnection extends require('events').EventEmitter {
       case 4: { // SESSION_DESCRIPTION
         this.secretKey = Buffer.from(d.secret_key);
         this.connected = true;
+        // DAVE/E2EE : si Discord negocie une version DAVE, on initialise la session MLS.
+        const daveVer = d.dave_protocol_version || 0;
+        if (daveVer > 0 && !this.dave) {
+          this.dave = new DaveManager(this.userId, this.channelId || this.serverId);
+          this.dave.init();
+          console.log('[dave] protocole DAVE v' + daveVer + ' active, session MLS cree');
+        }
         console.log('[voice] SESSION_DESCRIPTION recu (secretKey OK)');
         this.emit('ready');
         resolve();
@@ -196,6 +267,14 @@ class VoiceConnection extends require('events').EventEmitter {
    */
   sendOpus(opusFrame) {
     if (!this.connected || !this.secretKey || !this.udp) return false;
+    // DAVE/E2EE : chiffre le frame Opus AVANT le transport xsalsa20.
+    if (this.dave && this.dave.ready) {
+      try {
+        opusFrame = this.dave.encryptOpus(opusFrame);
+      } catch (e) {
+        console.error('[dave] encryptOpus echec:', e.message);
+      }
+    }
     const header = Buffer.alloc(12);
     header[0] = 0x80;
     header[1] = 0x78; // payload type Opus
