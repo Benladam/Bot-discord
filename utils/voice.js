@@ -61,15 +61,16 @@ class VoiceConnection extends require('events').EventEmitter {
         console.log('[voice] WS vocal ouvert');
       });
       this.ws.on('message', (data) => {
-        // Les opcodes DAVE (25/27/29/30) sont BINAIRES (Buffer), pas JSON.
-        if (Buffer.isBuffer(data)) {
+        // Discord envoie HELLO/READY/SESSION_DESCRIPTION en JSON (parfois en Buffer).
+        // Les opcodes DAVE (25/27/29/30) sont binaires. On tente JSON d'abord.
+        const str = Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
+        let msg = null;
+        try { msg = JSON.parse(str); } catch { /* pas du JSON -> binaire DAVE */ }
+        if (msg && typeof msg === 'object' && msg.op !== undefined) {
+          this._onWS(msg, resolve, reject);
+        } else if (Buffer.isBuffer(data)) {
           this._onBinary(data);
-          return;
         }
-        const raw = data.toString();
-        let msg;
-        try { msg = JSON.parse(raw); } catch { return; }
-        this._onWS(msg, resolve, reject);
       });
       this.ws.on('error', (e) => { console.error('[voice] WS erreur:', e.message); this.emit('error', e); reject(e); });
       this.ws.on('close', (code, reason) => {
