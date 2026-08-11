@@ -35,7 +35,7 @@ class VoiceConnection extends require('events').EventEmitter {
     this.voiceIp = null;     // IP du serveur vocal Discord (pour envoyer l'audio)
     this.voicePort = null;   // port du serveur vocal Discord
     this.secretKey = null;   // Buffer 32
-    this.mode = 'aead_aes256_gcm_rtpsize'; // DAVE/E2EE requis par Discord (xsalsa20 supprime)
+    this.mode = 'xsalsa20_poly1305'; // mode par defaut (DAVE desactive: on garde xsalsa20 maison)
     this.nonceCounter = 0;   // compteur 4 octets appendu au payload (rtpsize)
     this.ws = null;
     this.udp = null;
@@ -95,7 +95,8 @@ class VoiceConnection extends require('events').EventEmitter {
             user_id: this.userId,
             session_id: this.sessionId,
             token: this.token,
-            max_dave_protocol_version: 1, // DAVE/E2EE requis par Discord -> activer
+            // max_dave_protocol_version volontairement OMIS : on garde xsalsa20 maison
+            // (DAVE/E2EE necessite MLS, trop lourd a implementer nous-memes pour l'instant).
           },
         }));
         console.log('[voice] IDENTIFY envoye');
@@ -106,6 +107,9 @@ class VoiceConnection extends require('events').EventEmitter {
         this.voiceIp = d.ip;
         this.voicePort = d.port;
         this.modes = d.modes;
+        // Choisisr un mode xsalsa20 si Discord le propose (DAVE desactive cote client).
+        const pref = ['xsalsa20_poly1305', 'xsalsa20_poly1305_lite', 'xsalsa20_poly1305_suffix'];
+        this.mode = pref.find((m) => (d.modes || []).includes(m)) || d.modes[0] || this.mode;
         console.log('[voice] READY: ssrc=' + d.ssrc + ' ip=' + d.ip + ':' + d.port + ' modes=' + (d.modes || []).join(','));
         this._openUDP().then(() => {
           console.log('[voice] UDP local port=' + this.udpPort + ' -> SELECT_PROTOCOL ip=' + this.publicIp);
@@ -186,9 +190,8 @@ class VoiceConnection extends require('events').EventEmitter {
   }
 
   /**
-   * Envoie une frame Opus brute (20ms @ 48kHz) chiffree DAVE (aead_aes256_gcm_rtpsize).
-   * Format : header RTP 12 octets (clair) + ciphertext GCM + tag(16) + nonceCounter(4).
-   * Nonce = header RTP (12) + 12 zeros ; AAD = header RTP (12).
+   * Envoie une frame Opus brute (20ms @ 48kHz) chiffree xsalsa20_poly1305 (maison, tweetnacl).
+   * Nonce = header RTP (12) + 12 zeros = 24 octets.
    * @param {Buffer} opusFrame
    */
   sendOpus(opusFrame) {
@@ -200,31 +203,29 @@ class VoiceConnection extends require('events').EventEmitter {
     header.writeUInt32BE(this.timestamp & 0xffffffff, 4);
     header.writeUInt32BE(this.ssrc, 8);
 
-    // DAVE aead_aes256_gcm_rtpsize (spec discord-api-docs #6059, elderlabs) :
-    // - nonce = 12 octets = le header RTP standard (AES256-GCM veut 12B, pas 24).
-    // - AAD = le full RTP header (12 octets).
-    // - Le champ "taille" (2 octets) vient APRES le header dans le packet, mais
-    //   ne fait PAS partie du nonce/AAD.
-    const nonce = Buffer.alloc(12);
+    // Nonce 24 octets = header RTP (12) + 12 zeros (format xsalsa20_poly1305)
+    const nonce = Buffer.alloc(24);
     header.copy(nonce, 0, 0, 12);
 
-    // AES-256-GCM : AAD = header RTP (12 octets)
-    const cipher = crypto.createCipheriv('aes-256-gcm', this.secretKey, nonce);
-    cipher.setAAD(header);
-    const ct = Buffer.concat([cipher.update(opusFrame), cipher.final()]);
-    const tag = cipher.getAuthTag(); // 16 octets
+    // xsalsa20-poly1305 (tweetnacl secretbox)
+    const ciphertext = nacl.secretbox(new Uint8Array(opusFrame), new Uint8Array(nonce), new Uint8Array(this.secretKey));
 
-    // Nonce counter 4 octets (incremental) appendu au payload (rtpsize)
-    const counter = Buffer.alloc(4);
-    counter.writeUInt32BE(this.nonceCounter & 0xffffffff, 0);
-    this.nonceCounter = (this.nonceCounter + 1) & 0xffffffff;
+    let packet;
+    if (this.mode === 'xsalsa20_poly1305_lite') {
+      // 4 octets du nonce (uint32 BE) ajoutes a la fin
+      const nonceTail = Buffer.alloc(4);
+      nonceTail.writeUInt32BE(this.nonceCounter & 0xffffffff, 0);
+      this.nonceCounter = (this.nonceCounter + 1) & 0xffffffff;
+      packet = Buffer.concat([header, Buffer.from(ciphertext), nonceTail]);
+    } else if (this.mode === 'xsalsa20_poly1305_suffix') {
+      // 24 octets aleatoires ajoutes a la fin
+      const random = nacl.randomBytes(24);
+      packet = Buffer.concat([header, Buffer.from(ciphertext), Buffer.from(random)]);
+    } else {
+      // xsalsa20_poly1305 (simple) : header + ciphertext
+      packet = Buffer.concat([header, Buffer.from(ciphertext)]);
+    }
 
-    const payloadRest = Buffer.concat([ct, tag, counter]);
-    // La taille (2 octets) = taille du reste (ciphertext + tag + counter)
-    const sizeField = Buffer.alloc(2);
-    sizeField.writeUInt16BE(payloadRest.length, 0);
-
-    const packet = Buffer.concat([header, sizeField, payloadRest]);
     this.udp.send(packet, 0, packet.length, this.voicePort, this.voiceIp);
 
     this.seq = (this.seq + 1) & 0xffff;
