@@ -50,11 +50,14 @@ class DaveManager {
   }
 
   processProposals(buf) {
-    if (!this.session) return null;
+    if (!this.session || !buf || buf.length < 1) return null;
     try {
+      // Format DAVE op 27: uint16 seq + uint8 opcode + ProposalsOperationType(1) + MLSMessage vector
+      const opType = buf.readUInt8(0); // 0 = append, 1 = revoke
+      const proposalsBuffer = buf.slice(1);
       const res = this.session.processProposals(
-        ProposalsOperationType.APPEND,
-        buf,
+        opType === 1 ? ProposalsOperationType.REVOKE : ProposalsOperationType.APPEND,
+        proposalsBuffer,
         this.recognizedUserIds.length ? this.recognizedUserIds : null
       );
       return res; // { commit?: Buffer, welcome?: Buffer }

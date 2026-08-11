@@ -107,20 +107,15 @@ class VoiceConnection extends require('events').EventEmitter {
       const kp = this.dave.getKeyPackage();
       if (kp) this._sendBinary(26, kp);
       console.log('[dave] key package envoye (op 26)');
-    } else if (opcode === 27) { // dave_mls_proposals = uint16 transition_id + MLS proposals
-      if (payload.length >= 2) {
-        this.dave.transitionId = payload.readUInt16BE(0);
-        const proposals = payload.slice(2);
-        const res = this.dave.processProposals(proposals);
-        if (res && res.commit) {
-          const tid = Buffer.alloc(2);
-          tid.writeUInt16BE(this.dave.transitionId & 0xffff, 0);
-          const out = Buffer.concat([tid, res.commit, res.welcome || Buffer.alloc(0)]);
-          this._sendBinary(28, out);
-          console.log('[dave] commit+welcome envoye (op 28) tid=' + this.dave.transitionId);
-        }
+    } else if (opcode === 27) { // dave_mls_proposals = operation_type(1) + MLSMessage vector (PAS de transition_id)
+      const res = this.dave.processProposals(payload);
+      if (res && res.commit) {
+        // op 28: uint8 opcode + MLSMessage commit + [Welcome] (PAS de transition_id)
+        const out = Buffer.concat([res.commit, res.welcome || Buffer.alloc(0)]);
+        this._sendBinary(28, out);
+        console.log('[dave] commit+welcome envoye (op 28)');
       }
-    } else if (opcode === 29) { // dave_mls_announce_commit_transition
+    } else if (opcode === 29) { // dave_mls_announce_commit_transition (a transition_id)
       if (payload.length >= 2) {
         this.dave.transitionId = payload.readUInt16BE(0);
         const commit = payload.slice(2);
