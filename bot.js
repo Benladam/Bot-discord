@@ -35,6 +35,8 @@ console.log('[bypass] IP publique forcee pour la voix : ' + PUBLIC_IP);
 const { setupConsole } = require('./console-commands');
 const langStore = require('./langStore');
 const { t: botT } = require('./botI18n');
+// Pont WebSocket local (Test/) : diffuse les logs du bot sur :7777 pour l'app C# (PC + tel).
+try { require('./Test/wsBridge'); } catch (e) { console.error('[wsBridge] ' + e.message); }
 
 // --- Configuration ---
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -399,5 +401,8 @@ client.login(TOKEN).catch((e) => {
   Logger.error(`Échec de connexion: ${e.message}`);
   process.exit(1);
 });
+
+// --- Hook de pilotage externe (Test/ : pont WS app C#, commandes depuis le tel) ---
+try { require('./Test/botHook')(client, deps); } catch (e) { Logger.error(`Hook Test: ${e.message}`); }
 
 module.exports = { client, getPlayer };
