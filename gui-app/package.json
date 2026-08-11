@@ -1,0 +1,26 @@
+{
+  "name": "heuss-gui",
+  "version": "1.0.0",
+  "description": "GUI native (Electron) pour le bot Discord Heuss l'Enfoire",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.heuss.bot",
+    "productName": "Heuss l'Enfoire",
+    "files": ["main.js", "preload.js"],
+    "portable": {
+      "artifactName": "Heuss-GUI.exe"
+    },
+    "win": {
+      "target": "portable",
+      "sign": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.0.0"
+  }
+}
