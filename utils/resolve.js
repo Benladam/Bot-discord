@@ -115,9 +115,16 @@ async function resolveQuery(query) {
   }];
 }
 
-async function resolveDeezerLink(url) {
-  const entry = await play.deezer(url);
-  const tracks = entry.type === 'track' ? [entry] : await entry.all_tracks();
+async function resolveDeezerTracks(tracks, {
+  search = play.search,
+  searchSoundCloud = async (query) => {
+    if (!configureSoundCloud()) return [];
+    return play.search(query, { limit: 5, source: { soundcloud: 'tracks' } });
+  },
+  onSearchError = (trackName, error) => {
+    console.warn(`[catalogue] Recherche musicale échouée pour « ${trackName} »: ${error.message}`);
+  },
+} = {}) {
   const candidates = tracks.slice(0, 100);
   const songs = new Array(candidates.length);
   for (let offset = 0; offset < candidates.length; offset += 4) {
@@ -125,24 +132,54 @@ async function resolveDeezerLink(url) {
     const resolved = await Promise.all(batch.map(async (track) => {
       const title = track.title || track.name || 'Musique inconnue';
       const artist = track.artist?.name || '';
-      const results = await play.search(`${artist} - ${title}`, { limit: 1 });
-      const video = results[0];
-      if (!video) return null;
+      const query = [artist, title].filter(Boolean).join(' - ');
+      let media;
+      try {
+        const results = await search(query, { limit: 1 });
+        const video = Array.isArray(results) ? results[0] : null;
+        if (video?.url && youtubeVideoId(video.url)) media = video;
+      } catch (error) {
+        try { onSearchError(query, error); } catch (_) { /* garder la recherche indépendante du logger */ }
+      }
+      if (!media) {
+        try {
+          const alternatives = await searchSoundCloud(query);
+          for (const candidate of Array.isArray(alternatives) ? alternatives : []) {
+            const url = candidate?.permalink || candidate?.url;
+            try {
+              const parsed = new URL(url);
+              if (parsed.protocol === 'https:' && /(^|\.)soundcloud\.com$/i.test(parsed.hostname)) {
+                media = { ...candidate, url };
+                break;
+              }
+            } catch (_) { /* résultat incomplet */ }
+          }
+        } catch (error) {
+          try { onSearchError(query, error); } catch (_) { /* garder la playlist disponible */ }
+        }
+      }
+      if (!media) return null;
       return {
         title: `${title}${artist ? ` - ${artist}` : ''}`,
-        url: video.url,
-        duration: track.durationInSec || video.durationInSec || 0,
+        url: media.url,
+        duration: track.durationInSec || media.durationInSec || 0,
         thumbnail: track.album?.cover?.medium || track.album?.cover_medium || null,
         source: 'deezer',
-        fallbackQuery: `${artist} - ${title}`.trim(),
+        fallbackQuery: query,
       };
     }));
     resolved.forEach((song, index) => { songs[offset + index] = song; });
   }
   const ready = songs.filter(Boolean);
-  if (!ready.length) throw new Error('Aucun équivalent YouTube trouvé pour ce lien Deezer.');
+  if (!ready.length) throw new Error('Aucun équivalent YouTube ou SoundCloud trouvé pour ce lien Deezer. Le repli SoundCloud nécessite SOUNDCLOUD_CLIENT_ID.');
   if (tracks.length > candidates.length) console.info('[catalogue] liste Deezer limitée aux 100 premiers titres.');
   return ready;
 }
 
-module.exports = { resolveQuery, youtubeVideoId, normalizeSoundCloudTrack };
+async function resolveDeezerLink(url) {
+  const entry = await play.deezer(url);
+  const tracks = entry.type === 'track' ? [entry] : await entry.all_tracks();
+  return resolveDeezerTracks(tracks);
+}
+
+module.exports = { resolveQuery, youtubeVideoId, normalizeSoundCloudTrack, resolveDeezerTracks };
