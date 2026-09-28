@@ -2,6 +2,7 @@
 node_modules/
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 npm-debug.log
@@ -11,3 +12,4 @@ queue_state.json
 .bot-gui-prefs.json
 bot.log
 gui_build/
+.bot-gui-logs/

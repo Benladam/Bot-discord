@@ -68,22 +68,26 @@ class DaveManager {
   }
 
   processCommit(buf) {
-    if (!this.session) return;
+    if (!this.session) return false;
     try {
       this.session.processCommit(buf);
       console.log('[dave] commit traite');
+      return true;
     } catch (e) {
       console.error('[dave] processCommit erreur:', e.message);
+      return false;
     }
   }
 
   processWelcome(buf) {
-    if (!this.session) return;
+    if (!this.session) return false;
     try {
       this.session.processWelcome(buf);
       console.log('[dave] welcome traite');
+      return true;
     } catch (e) {
       console.error('[dave] processWelcome erreur:', e.message);
+      return false;
     }
   }
 
@@ -92,18 +96,23 @@ class DaveManager {
     if (!this.recognizedUserIds.includes(id)) this.recognizedUserIds.push(id);
   }
 
+  removeRecognizedUser(id) {
+    id = String(id);
+    this.recognizedUserIds = this.recognizedUserIds.filter((userId) => userId !== id);
+  }
+
   get ready() {
     return this.session ? this.session.ready : false;
   }
 
-  /** Chiffre un frame Opus (E2EE DAVE) avant le transport xsalsa20. */
+  /** Chiffre un frame Opus (E2EE DAVE) avant le chiffrement AEAD du transport. */
   encryptOpus(packet) {
     if (!this.session || !this.session.ready) return packet;
     try {
       return Buffer.from(this.session.encryptOpus(new Uint8Array(packet)));
     } catch (e) {
       console.error('[dave] encryptOpus erreur:', e.message);
-      return packet;
+      throw e;
     }
   }
 

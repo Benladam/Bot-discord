@@ -17,19 +17,8 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install
 
-# Encodeur Opus natif (requis pour le son vocal)
-RUN npm install @discordjs/opus
-
 # Copier le reste du code
 COPY . .
 
-# Le serveur GUI ecoute sur 3000 (Fly l'expose) et lance le bot en enfant (GUI_AUTOSTART=1)
-ENV GUI_PORT=3000
-ENV GUI_AUTOSTART=1
-ENV HOST=0.0.0.0
-
-EXPOSE 3000
-
-# IMPORTANT : on lance le serveur GUI (pas bot.js direct), car c'est lui qui
-# ecoute sur le port web ET demarre le bot Discord en processus enfant.
-CMD ["node", "gui/server.js"]
+# Le conteneur est un worker Discord : il n'a pas besoin d'ouvrir un port HTTP.
+CMD ["node", "bot.js"]

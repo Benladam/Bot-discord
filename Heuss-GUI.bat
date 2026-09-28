@@ -1,4 +1,11 @@
 @echo off
-REM Lance l'app native (fenetre Electron unique) qui demarre le bot + le GUI.
-REM Le bot demarre en arriere-plan (pas de fenetre CMD separee).
-start "" "C:\Users\enzom\gui_staging\gui-app\dist-pack\HeussGUI-win32-x64\HeussGUI.exe"
+setlocal
+set "ROOT=%~dp0"
+where powershell.exe >nul 2>nul
+if errorlevel 1 (
+  echo PowerShell est introuvable. Windows PowerShell est requis.
+  pause
+  exit /b 1
+)
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%gui-app\launcher.ps1"
+exit /b %ERRORLEVEL%

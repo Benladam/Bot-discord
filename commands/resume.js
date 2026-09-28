@@ -14,13 +14,12 @@ module.exports = {
     const T = tr(lang);
     const { getPlayer } = deps;
     const player = getPlayer(ctx.guildId);
-    if (!player.audioPlayer) {
+    if (!player.isPlaying || !player.isPaused) {
       return ctx.reply({
         embeds: [new EmbedBuilder().setTitle(T.errorTitle).setDescription(T.notPlaying).setColor('#FF0000')],
       });
     }
-    player.audioPlayer.unpause();
-    player.isPaused = false;
+    player.resume();
     return ctx.reply({ embeds: [new EmbedBuilder().setTitle('▶️').setDescription(T.resumed).setColor('#00FF00')] });
   },
 };

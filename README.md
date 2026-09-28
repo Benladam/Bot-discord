@@ -18,11 +18,41 @@ et fonctionne avec les **commandes slash `/`** aussi bien qu'avec le **préfixe 
 
 ## Installation
 
+Prérequis : Node.js 20+ et npm.
+
 ```bash
 git clone <repo>
 cd Bot-discord
 npm install
 ```
+
+Le lanceur Windows `Heuss-GUI.bat` ouvre le panneau local. Le lanceur Linux
+`bash launch.sh` démarre le bot dans le terminal. Au premier lancement, chaque
+lanceur crée `.env` depuis `.env.example` et demande le token Discord si celui-ci
+est vide. Le token reste dans `.env`, ignoré par Git.
+
+La voix utilise une implémentation maison : WebSocket vocal Discord, découverte
+UDP, RTP/Opus, chiffrement du transport et gestion DAVE sont gérés dans le
+projet. Aucune IP publique ne doit être renseignée : la découverte UDP se fait
+automatiquement derrière une box/NAT ou sur un serveur. Pour lire YouTube,
+`yt-dlp` et FFmpeg restent nécessaires comme outils de décodage/extraction.
+
+Sous Windows, installe ou mets à jour yt-dlp avec Python (une version ancienne
+peut renvoyer une vignette au lieu de l'audio) :
+
+```powershell
+py -m pip install --user --upgrade yt-dlp
+```
+
+Si tu utilises le binaire autonome `yt-dlp.exe`, indique son chemin si besoin :
+
+```env
+YTDLP_PATH=C:\\outils\\yt-dlp.exe
+FFMPEG_PATH=C:\\outils\\ffmpeg\\bin\\ffmpeg.exe
+```
+
+Sur le serveur Linux, installez simplement `yt-dlp` et `ffmpeg` avec le
+gestionnaire de paquets. L'image Docker du projet les installe déjà.
 
 Copiez `.env.example` en `.env` et remplissez les valeurs :
 
@@ -36,8 +66,10 @@ cp .env.example .env
 |----------|-------------|-------------|
 | `DISCORD_TOKEN` | oui | Token du bot Discord |
 | `COMMAND_PREFIX` | non | Préfixe des commandes texte (défaut `!`) |
-| `SPOTIFY_CLIENT_ID` | pour Spotify | ID d'application Spotify |
-| `SPOTIFY_CLIENT_SECRET` | pour Spotify | Secret d'application Spotify |
+| `SPOTIFY_CLIENT_ID` | recherche Spotify, albums/playlists | ID d'application Spotify |
+| `SPOTIFY_CLIENT_SECRET` | recherche Spotify, albums/playlists | Secret d'application Spotify |
+| `YTDLP_PATH` | non | Chemin vers `yt-dlp` si absent du PATH |
+| `FFMPEG_PATH` | non | Chemin vers FFmpeg si absent du PATH |
 
 ### Obtenir un token Discord
 1. https://discord.com/developers/applications → New Application
@@ -46,36 +78,24 @@ cp .env.example .env
    activez les intents **Server Members Intent**, **Message Content Intent** et
    **Voice State Intent**, puis utilisez l'URL générée pour inviter le bot.
 
-### Obtenir les identifiants Spotify (uniquement pour les liens Spotify)
+### Obtenir les identifiants Spotify (albums et playlists)
 1. https://developer.spotify.com/dashboard → Create app
 2. Copiez le **Client ID** et le **Client Secret** dans `.env`.
 
-## Interface graphique (GUI)
+Les liens Spotify vers une piste (`/track/…`) fonctionnent aussi sans ces
+identifiants grâce aux métadonnées publiques Spotify. Les albums et playlists
+utilisent l'API Spotify et demandent les deux variables ci-dessus.
 
-À la place de `launch.bat` / `launch.sh`, une petite interface web locale permet
-de tout piloter depuis une page (serveur Node natif, **zéro dépendance externe**) :
+## Interface Windows
 
-- **Mise à jour GitHub** : indiquer l'URL du dépôt puis bouton *Mettre à jour (pull)*
-- **Dépendances** : bouton *Installer / Mettre à jour* (lance `npm install` depuis `requirements.txt`)
-- **Tokens** : saisir le token du bot Discord et les identifiants Spotify, enregistrés dans `.env`
-- **Contrôle du bot** : boutons *Lancer* / *Arrêter* / *Redémarrer*
-- **Terminal en direct** : affiche en temps réel les logs du bot (les erreurs apparaissent en rouge)
+`Heuss-GUI.bat` (ou l'alias `Heus-GUI.bat`) utilise Windows PowerShell, inclus dans Windows. Le panneau peut
+démarrer ou arrêter le bot, configurer le token et afficher les journaux. Il
+installe les dépendances npm au premier démarrage. Les journaux sont écrits dans
+`.bot-gui-logs/`.
 
-Lancer l'interface :
+Pour Linux ou macOS, utilise `bash launch.sh` ou `npm start`.
 
-```bash
-# Windows
-gui.bat
-# Linux / macOS
-bash gui.sh      # ou : chmod +x gui.sh && ./gui.sh
-```
-
-Le script ouvre automatiquement http://127.0.0.1:7777 dans le navigateur.
-Le serveur tourne tant que la fenêtre du script reste ouverte.
-
-> Astuce : le port par défaut est `7777`. Pour le changer : `GUI_PORT=8080 node gui/server.js`.
-
-## Lancement (en ligne de commande)
+## Lancement en ligne de commande
 
 ```bash
 npm start
@@ -102,8 +122,7 @@ npm start
 
 ```
 bot.js                  Point d'entrée (slash + préfixe)
-gui/                    Interface graphique locale (server.js + public/index.html)
-  gui.bat / gui.sh      Lanceurs de l'interface (remplacent launch.bat / launch.sh)
+gui-app/                Interface native locale optionnelle
 commands/               Une commande par fichier
 utils/
   musicPlayer.js        Logique de lecture (connexion vocale, file, boucle)
@@ -111,5 +130,8 @@ utils/
   resolve.js            Résolution YouTube/Spotify/recherche
   embeds.js             Embeds (messages enrichis)
   respond.js            Helpers de réponse unifiés
-requirements.txt        Dépendances (installées via la GUI ou npm install)
+package.json            Dépendances JavaScript
+.env.example            Modèle de configuration (sans secret)
+launch.sh               Lanceur Linux/macOS
+Heuss-GUI.bat           Lanceur GUI Windows
 ```

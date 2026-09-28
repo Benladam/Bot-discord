@@ -12,12 +12,58 @@
 
 const play = require('play-dl');
 
+let spotifySearchApi = null;
+let spotifySearchClientId = null;
+let spotifySearchTokenExpiresAt = 0;
+let spotifySearchTokenRequest = null;
+
+async function getSpotifyApi() {
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return null;
+
+  const SpotifyWebApi = require('spotify-web-api-node');
+  if (!spotifySearchApi || spotifySearchClientId !== clientId) {
+    spotifySearchApi = new SpotifyWebApi({ clientId, clientSecret });
+    spotifySearchClientId = clientId;
+    spotifySearchTokenExpiresAt = 0;
+  }
+  if (Date.now() < spotifySearchTokenExpiresAt - 60_000) return spotifySearchApi;
+
+  if (!spotifySearchTokenRequest) {
+    spotifySearchTokenRequest = spotifySearchApi.clientCredentialsGrant()
+      .then(({ body }) => {
+        spotifySearchApi.setAccessToken(body.access_token);
+        spotifySearchTokenExpiresAt = Date.now() + (body.expires_in || 3600) * 1000;
+        return spotifySearchApi;
+      })
+      .finally(() => { spotifySearchTokenRequest = null; });
+  }
+  return spotifySearchTokenRequest;
+}
+
+/** Résultats de recherche Spotify pour les suggestions de /play. */
+async function searchSpotify(query, limit = 10) {
+  const api = await getSpotifyApi();
+  if (!api) return [];
+  const { body } = await api.searchTracks(query, { limit: Math.min(10, Math.max(1, limit)) });
+  return (body.tracks?.items || []).map((track) => {
+    const artists = (track.artists || []).map((artist) => artist.name).join(', ');
+    return {
+      title: `${track.name}${artists ? ` — ${artists}` : ''}`,
+      url: track.external_urls?.spotify || `https://open.spotify.com/track/${track.id}`,
+      source: 'spotify',
+    };
+  }).filter((track) => track.url);
+}
+
 function isSpotifyUrl(query) {
-  return /open\.spotify\.com/i.test(query);
+  return /(?:open\.spotify\.com|spotify\.com)\//i.test(query) || /^spotify:(?:track|album|playlist):/i.test(query);
 }
 
 function parseSpotifyUrl(url) {
-  const m = url.match(/open\.spotify\.com\/(track|playlist|album|artist)\/([A-Za-z0-9]+)/i);
+  const m = url.match(/(?:open\.)?spotify\.com\/(track|playlist|album|artist)\/([A-Za-z0-9]+)/i)
+    || url.match(/^spotify:(track|playlist|album|artist):([A-Za-z0-9]+)/i);
   if (!m) return { type: 'unknown', id: null };
   return { type: m[1].toLowerCase(), id: m[2] };
 }
@@ -58,11 +104,12 @@ async function resolveSpotifyLink(url) {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 
+  // Le mode oEmbed permet au minimum de lire un lien de piste sans créer
+  // d'application Spotify. Les albums/playlists nécessitent encore l'API.
   if (!clientId || !clientSecret) {
-    throw new Error(
-      'Identifiants Spotify manquants. Ajoutez SPOTIFY_CLIENT_ID et SPOTIFY_CLIENT_SECRET dans votre .env ' +
-      '(voir .env.example).'
-    );
+    const fallback = await resolveTrackWithoutApi(url);
+    if (fallback) return [fallback];
+    throw new Error('Ajoutez SPOTIFY_CLIENT_ID et SPOTIFY_CLIENT_SECRET dans .env pour les albums/playlists Spotify.');
   }
 
   const api = new SpotifyWebApi({ clientId, clientSecret });
@@ -108,4 +155,22 @@ async function resolveSpotifyLink(url) {
   return songs;
 }
 
-module.exports = { isSpotifyUrl, resolveSpotifyLink };
+async function resolveTrackWithoutApi(url) {
+  const parsed = parseSpotifyUrl(url);
+  if (parsed.type !== 'track') return null;
+  const canonical = `https://open.spotify.com/track/${parsed.id}`;
+  try {
+    const response = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(canonical)}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data.title) return null;
+    const yt = await searchYouTube(data.title);
+    if (!yt) return null;
+    yt.title = data.title;
+    yt.thumbnail = data.thumbnail_url || yt.thumbnail;
+    yt.source = 'spotify';
+    return yt;
+  } catch (_) { return null; }
+}
+
+module.exports = { isSpotifyUrl, resolveSpotifyLink, searchSpotify };

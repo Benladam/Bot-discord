@@ -1,174 +1,121 @@
-/**
- * audioSender.js — Envoi audio RTP/Opus via notre VoiceConnection maison.
- * Récupère le flux via yt-dlp + ffmpeg (Ogg Opus), parse le Ogg pour extraire
- * les frames Opus, et les envoie via connection.sendOpus() (RTP xsalsa20).
- */
-
+/** Envoi audio maison : yt-dlp -> FFmpeg Ogg/Opus -> RTP/UDP. */
+const fs = require('fs');
 const { spawn } = require('child_process');
+const ffmpegStatic = require('ffmpeg-static');
 
-/**
- * Démarre l'envoi audio pour une chanson.
- * @param {VoiceConnection} connection - notre connexion maison (sendOpus)
- * @param {string} url - URL YouTube/Spotify
- * @param {function} onStart - appelé quand la 1re frame est envoyée
- * @returns {{ stop: function, setVolume: function }}
- */
-function start(connection, url, onStart) {
-  let stopped = false;
-  let proc = null;
-  let volume = 1;
-  let started = false;
+function bin(name, env) { if (process.env[env]) return process.env[env]; if (name === 'ffmpeg' && ffmpegStatic && fs.existsSync(ffmpegStatic)) return ffmpegStatic; return process.platform === 'win32' ? `${name}.exe` : name; }
+function isAudioUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:')
+      && !/(^|\.)ytimg\.com$/i.test(parsed.hostname);
+  } catch (_) { return false; }
+}
 
-  // Mode test local : lire un fichier Opus directement (pas de yt-dlp/YouTube).
-  if (typeof url === 'string' && url.startsWith('local:')) {
-    const filePath = url.slice('local:'.length);
-    console.log('[audioSender] mode local: lecture de ' + filePath);
-    proc = spawn('ffmpeg', [
-      '-re', '-i', filePath,
-      '-c:a', 'libopus', '-b:a', '128k', '-ar', '48000', '-ac', '2',
-      '-f', 'opus', '-loglevel', 'error', '-',
-    ], { windowsHide: true });
-    const parser = new OggOpusParser();
-    proc.stdout.on('data', (chunk) => {
-      if (stopped) return;
-      parser.feed(chunk, (frame) => {
-        if (!connection.connected || !connection.secretKey) return;
-        const f = applyVolume(frame, volume);
-        const ok = connection.sendOpus(f);
-        if (ok && !started) { started = true; if (onStart) onStart(); }
+function streamUrl(url) {
+  return new Promise((resolve, reject) => {
+    const list = [];
+    if (process.env.YTDLP_PATH) list.push([process.env.YTDLP_PATH, []]);
+    if (process.platform === 'win32') {
+      // py -m yt_dlp permet de privilégier la version mise à jour par pip même
+      // si un ancien yt-dlp.exe est encore prioritaire dans le PATH Windows.
+      list.push(['py', ['-m', 'yt_dlp']], ['py', ['-3.12', '-m', 'yt_dlp']], ['yt-dlp.exe', []], [process.env.PYTHON || 'python', ['-m', 'yt_dlp']]);
+    } else {
+      list.push(['python3', ['-m', 'yt_dlp']], ['yt-dlp', []]);
+    }
+    let i = 0; let error = '';
+    const next = () => {
+      if (i >= list.length) return reject(new Error(error || 'Aucun flux audio valide renvoyé par yt-dlp. Mets à jour yt-dlp puis réessaie.'));
+      const [cmd, pre] = list[i++];
+      const p = spawn(cmd, [...pre, '--no-playlist', '-f', 'bestaudio/best', '-g', url], { windowsHide: true });
+      let out = ''; let err = ''; let done = false;
+      const retry = (message) => { if (done) return; done = true; error = message; next(); };
+      p.stdout.on('data', d => { out += d; });
+      p.stderr.on('data', d => { err += d; });
+      p.on('error', e => retry(e.message));
+      p.on('close', c => {
+        const u = out.trim().split(/\r?\n/).pop();
+        if (c === 0 && isAudioUrl(u)) { done = true; resolve(u); return; }
+        const reason = c === 0 && u && !isAudioUrl(u)
+          ? 'yt-dlp a renvoyé une vignette au lieu du flux audio (version probablement obsolète).'
+          : err.trim().slice(-300);
+        retry(reason || `yt-dlp s'est arrêté avec le code ${c}.`);
       });
-    });
-    proc.stderr.on('data', (d) => {
-      const s = d.toString();
-      if (/Error|invalid/i.test(s)) console.error('ffmpeg:', s.slice(0, 160));
-    });
-    return { stop, setVolume };
-  }
+    };
+    next();
+  });
+}
 
-  // 1) Obtenir l'URL directe du flux (yt-dlp)
-  const ytdlp = spawn('yt-dlp', [
-    '-f', 'bestaudio[ext=webm]/bestaudio/best',
-    '-g', url,
+async function start(connection, url, onStart, onEnd, onError) {
+  const source = await streamUrl(url);
+  const ffmpeg = spawn(bin('ffmpeg', 'FFMPEG_PATH'), [
+    '-hide_banner', '-loglevel', 'error', '-re', '-i', source, '-vn',
+    '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+    '-c:a', 'libopus', '-application', 'audio', '-vbr', 'on', '-compression_level', '10',
+    '-frame_duration', '20', '-ar', '48000', '-ac', '2', '-b:a', '160k',
+    '-f', 'opus', 'pipe:1',
   ], { windowsHide: true });
-
-  let streamUrl = '';
-  let ytdlpErr = '';
-  ytdlp.stdout.on('data', (d) => { streamUrl += d.toString(); });
-  ytdlp.stderr.on('data', (d) => { ytdlpErr += d.toString(); });
-  ytdlp.on('close', (code) => {
+  const parser = new OggParser(); let frames = []; let paused = false; let started = false; let stopped = false;
+  let ffmpegError = ''; let errorReported = false;
+  let readinessTimer = null;
+  const reportFfmpegError = (error) => {
+    if (stopped || errorReported) return;
+    errorReported = true;
+    stopped = true;
+    clearInterval(tick);
+    if (readinessTimer) clearTimeout(readinessTimer);
+    try { ffmpeg.kill(); } catch (_) {}
+    onError?.(error);
+  };
+  const tick = setInterval(() => {
+    if (stopped || paused || !connection.connected || !frames.length) return;
+    if (connection.daveRequired && (!connection.dave || !connection.dave.ready)) return;
+    let ok;
+    try { ok = connection.sendOpus(frames[0]); }
+    catch (error) { reportFfmpegError(error); return; }
+    if (!ok) return;
+    frames.shift();
+    if (readinessTimer) { clearTimeout(readinessTimer); readinessTimer = null; }
+    if (!started) { started = true; onStart?.(); }
+  }, 20);
+  readinessTimer = setTimeout(() => {
+    if (connection.daveRequired && (!connection.dave || !connection.dave.ready)) {
+      reportFfmpegError(new Error('La session DAVE de Discord ne s’est pas initialisée. Réessaie de rejoindre le vocal.'));
+    }
+  }, 30_000);
+  ffmpeg.stdout.on('data', chunk => parser.feed(chunk, frame => {
+    frames.push(frame);
+    if (frames.length > 250) frames.shift();
+  }));
+  ffmpeg.stderr.on('data', d => { ffmpegError = (ffmpegError + d.toString()).slice(-1000); });
+  ffmpeg.on('error', e => {
+    console.error('[ffmpeg] démarrage impossible:', e.message);
+    reportFfmpegError(e);
+  });
+  ffmpeg.on('close', code => {
     if (stopped) return;
-    streamUrl = (streamUrl || '').trim().split('\n').pop();
-    if (!streamUrl) {
-      console.error('❌ yt-dlp: aucune URL de flux. ' + ytdlpErr.slice(0, 200));
+    if (code !== 0) {
+      const message = ffmpegError.trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' ').replace(/https?:\/\/\S+/g, '[URL audio]').slice(-300);
+      reportFfmpegError(new Error(message || `FFmpeg s'est arrêté avec le code ${code}.`));
       return;
     }
-    launchFfmpeg(streamUrl);
+    const wait = setInterval(() => { if (!frames.length) { clearInterval(wait); if (!stopped) { if (readinessTimer) clearTimeout(readinessTimer); onEnd?.(); } } }, 100);
   });
-
-  // 2) ffmpeg -> Ogg Opus brut (stdout)
-  function launchFfmpeg(src) {
-    proc = spawn('ffmpeg', [
-      '-re', '-i', src,
-      '-c:a', 'libopus', '-b:a', '128k', '-ar', '48000', '-ac', '2',
-      '-f', 'opus', '-loglevel', 'error', '-',
-    ], { windowsHide: true });
-
-    const parser = new OggOpusParser();
-    proc.stdout.on('data', (chunk) => {
-      if (stopped) return;
-      parser.feed(chunk, (frame) => {
-        if (!connection.connected || !connection.secretKey) return;
-        const f = applyVolume(frame, volume);
-        const ok = connection.sendOpus(f);
-        if (ok && !started) { started = true; if (onStart) onStart(); }
-      });
-    });
-    proc.stderr.on('data', (d) => {
-      const s = d.toString();
-      if (/Error|invalid/i.test(s)) console.error('ffmpeg:', s.slice(0, 160));
-    });
-    proc.on('close', () => { /* fin de chanson -> géré par musicPlayer */ });
-  }
-
-  function stop() {
-    stopped = true;
-    if (proc) try { proc.kill('SIGKILL'); } catch {}
-    ytdlp.kill && ytdlp.kill('SIGKILL');
-  }
-  function setVolume(v) { volume = Math.max(0, Math.min(1, v)); }
-
-  return { stop, setVolume };
+  return { pause() { paused = true; }, resume() { paused = false; }, setVolume() {}, stop() { stopped = true; clearInterval(tick); if (readinessTimer) clearTimeout(readinessTimer); try { ffmpeg.kill(); } catch (_) {} } };
 }
 
-/** Parser Ogg Opus -> émet chaque packet Opus (après les 2 entêtes Opus). */
-class OggOpusParser {
-  constructor() {
-    this.buf = Buffer.alloc(0);
-    this.packetCount = 0; // 0=OpusHead, 1=OpusTags, >=2 = frames audio
-    this.inPacket = false;
-    this.packetData = [];
-    this.expectedSegs = 0;
-    this.segIdx = 0;
-    this.segSizes = [];
-    this.leftover = 0;
-    this.curPacket = [];
-  }
-
-  feed(chunk, onFrame) {
+class OggParser {
+  constructor() { this.buf = Buffer.alloc(0); this.count = 0; this.packet = []; }
+  feed(chunk, emit) {
     this.buf = Buffer.concat([this.buf, chunk]);
-    while (this._parsePage(onFrame)) {}
-  }
-
-  _parsePage(onFrame) {
-    const b = this.buf;
-    if (b.length < 27) return false;
-    if (b.toString('ascii', 0, 4) !== 'OggS') return false;
-    const nsegs = b[26];
-    const segsStart = 27;
-    const segsEnd = segsStart + nsegs;
-    if (b.length < segsEnd) return false;
-    const segSizes = [];
-    for (let i = 0; i < nsegs; i++) segSizes.push(b[segsStart + i]);
-    // taille des données de la page
-    let dataLen = 0;
-    for (const s of segSizes) dataLen += s;
-    const pageEnd = segsEnd + dataLen;
-    if (b.length < pageEnd) return false;
-
-    // Reconstituer les packets (segments de 255 continuent le packet)
-    let pos = segsEnd;
-    let packet = [];
-    let continued = false;
-    for (let i = 0; i < segSizes.length; i++) {
-      const size = segSizes[i];
-      packet.push(b.slice(pos, pos + size));
-      pos += size;
-      if (size < 255) {
-        // fin de packet
-        const full = Buffer.concat(packet);
-        this._handlePacket(full, onFrame);
-        packet = [];
-      }
+    while (this.buf.length >= 27) {
+      if (this.buf.toString('ascii', 0, 4) !== 'OggS') { this.buf = this.buf.slice(1); continue; }
+      const n = this.buf[26]; if (this.buf.length < 27 + n) return;
+      const sizes = [...this.buf.slice(27, 27 + n)]; const total = sizes.reduce((a, b) => a + b, 0); const end = 27 + n + total; if (this.buf.length < end) return;
+      let pos = 27 + n;
+      for (const size of sizes) { this.packet.push(this.buf.slice(pos, pos + size)); pos += size; if (size < 255) { const full = Buffer.concat(this.packet); this.packet = []; this.count++; if (this.count > 2 && full.length) emit(full); } }
+      this.buf = this.buf.slice(end);
     }
-    this.buf = b.slice(pageEnd);
-    return true;
-  }
-
-  _handlePacket(pkt, onFrame) {
-    this.packetCount++;
-    if (this.packetCount <= 2) return; // skip OpusHead + OpusTags
-    // pkt = frame Opus brute
-    if (pkt.length > 0) onFrame(pkt);
   }
 }
-
-function applyVolume(frame, vol) {
-  if (vol >= 0.99) return frame;
-  // Le volume via Opus est complexe ; on utilise le gain RTP ? Pour l'instant
-  // on ajuste via le champ "gain" de l'entête Opus si présent, sinon on laisse.
-  // (Le réglage fin du volume se fera plus tard ; ici on garde le frame tel quel
-  // pour ne pas casser le décodage.)
-  return frame;
-}
-
 module.exports = { OpusSender: { start } };

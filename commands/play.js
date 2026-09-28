@@ -5,6 +5,8 @@
  */
 
 const { resolveQuery } = require('../utils/resolve');
+const { cleanMediaQuery } = require('../utils/mediaQuery');
+const { searchSpotify } = require('../utils/spotify');
 const embeds = require('../utils/embeds');
 const { tr } = require('../utils/embedI18n');
 const play = require('play-dl');
@@ -34,17 +36,25 @@ module.exports = {
   async autocomplete(interaction, deps) {
     const q = interaction.options.getFocused().toString().trim();
     if (!q) return interaction.respond({ choices: [] });
-    const results = await searchWithRetry(q, 10);
-    const choices = results.slice(0, 10).map((r) => ({
-      name: `${r.title}`.slice(0, 100),
-      value: r.url, // on stocke l'URL directe comme valeur
-    }));
+    const [youtube, spotify] = await Promise.all([
+      searchWithRetry(q, 10).catch(() => []),
+      searchSpotify(q, 10).catch((error) => {
+        if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
+          console.warn('[spotify] recherche indisponible:', error.message);
+        }
+        return [];
+      }),
+    ]);
+    const choices = [
+      ...youtube.map((r) => ({ name: `▶ YouTube · ${r.title}`.slice(0, 100), value: r.url })),
+      ...spotify.map((r) => ({ name: `🟢 Spotify · ${r.title}`.slice(0, 100), value: r.url })),
+    ].filter((choice) => typeof choice.value === 'string' && choice.value.length <= 100).slice(0, 25);
     return interaction.respond({ choices });
   },
 
   async execute(ctx, args, deps) {
     const { getPlayer } = deps;
-    const query = args.join(' ').trim();
+    const query = cleanMediaQuery(args.join(' '));
     const lang = deps.langFor ? deps.langFor(ctx.user?.id || ctx.author?.id, ctx.guild?.id) : 'fr';
     const T = tr(lang);
 
@@ -65,9 +75,12 @@ module.exports = {
     try {
       const player = getPlayer(ctx.guildId);
       player.lastChannel = ctx.channel;
-      // Si la valeur vient de l'autocomplétion, c'est déjà une URL -> on la joue direct.
-      const isUrl = query.startsWith('http');
-      const songs = isUrl ? [{ title: query, url: query, source: 'youtube' }] : await resolveQuery(query);
+      // Seuls les liens YouTube peuvent être envoyés directement au lecteur.
+      // Un lien Spotify doit d'abord être résolu en une vidéo YouTube équivalente.
+      const isYoutubeUrl = /(?:youtube\.com|youtu\.be)/i.test(query);
+      const songs = isYoutubeUrl
+        ? [{ title: query, url: query, source: 'youtube' }]
+        : await resolveQuery(query);
 
       for (const song of songs) player.addToQueue(song);
 

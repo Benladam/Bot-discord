@@ -17,20 +17,16 @@
  */
 
 const { ChannelType, PermissionsBitField } = require('discord.js');
-const {
-  joinVoiceChannel,
-  getVoiceConnection,
-} = require('@discordjs/voice');
 
 // Pour lancer les commandes musique depuis le terminal, on simule un
 // « contexte » comme si la commande venait de Discord, en s'appuyant sur
 // l'état réel du vocal (membre déjà connecté) récupéré via le gateway.
-function makeMusicContext(client, guild, query) {
+function makeMusicContext(client, guild, query, getPlayer) {
   // On cherche d'abord un membre du bot déjà en vocal, sinon un humain en vocal.
   let voiceChannel = null;
-  const conn = guild && getVoiceConnection(guild.id);
-  if (conn && conn.joinConfig && conn.joinConfig.channelId) {
-    voiceChannel = client.channels.cache.get(conn.joinConfig.channelId);
+  const player = guild && getPlayer(guild.id);
+  if (player && player.connection && player.connection.channelId) {
+    voiceChannel = client.channels.cache.get(player.connection.channelId);
   }
   if (!voiceChannel) {
     for (const [, m] of guild.members.cache) {
@@ -63,7 +59,7 @@ function makeMusicContext(client, guild, query) {
  * Le salon vocal est découvert depuis l'état réel (membre humain en vocal
  * ou le bot déjà connecté) — aucun besoin d'être soi-même en vocal.
  */
-async function musicCommand(client, name, arg, { ok, err }) {
+async function musicCommand(client, name, arg, { ok, err, getPlayer, prefix, langFor, langStore, botT }) {
   const guild = client.guilds.cache.first();
   if (!guild) return err('Le bot n’est sur aucun serveur.');
   const cmd = client.commands.get(name);
@@ -71,12 +67,12 @@ async function musicCommand(client, name, arg, { ok, err }) {
 
   if (name === 'play' && client.commands.get('play')) {
     // /play exige un membre dans un vocal (déjà géré dans commands/play.js).
-    const ctx = makeMusicContext(client, guild, arg);
+    const ctx = makeMusicContext(client, guild, arg, getPlayer);
     if (!ctx.member.voice.channel) {
       return err('Aucun salon vocal actif trouvé (un membre doit être en vocal sur Discord).');
     }
     try {
-      await cmd.execute(ctx, arg.split(/\s+/).filter(Boolean), { getPlayer: (id) => makePlayer(client, id) });
+      await cmd.execute(ctx, arg.split(/\s+/).filter(Boolean), { getPlayer, prefix, langFor, langStore, botT });
       ok(`🎵 /play lancé : ${arg}`);
     } catch (e) {
       err(`/play : ${e.message}`);
@@ -84,34 +80,20 @@ async function musicCommand(client, name, arg, { ok, err }) {
     return;
   }
 
-  const ctx = makeMusicContext(client, guild, arg);
+  const ctx = makeMusicContext(client, guild, arg, getPlayer);
   try {
-    await cmd.execute(ctx, arg.split(/\s+/).filter(Boolean), { getPlayer: (id) => makePlayer(client, id), prefix: '!' });
+    await cmd.execute(ctx, arg.split(/\s+/).filter(Boolean), { getPlayer, prefix: prefix || '!', langFor, langStore, botT });
     ok(`🎶 /${name} exécuté.`);
   } catch (e) {
     err(`/${name} : ${e.message}`);
   }
 }
 
-// Récupère (ou crée) le player, en branchant la présence sur l'activité réelle.
-function makePlayer(client, guildId) {
-  if (!client.musicPlayers.has(guildId)) {
-    const p = new (require('./utils/musicPlayer').MusicPlayer)(guildId);
-    // La présence est déjà branchée dans bot.js (getPlayer), mais le player
-    // créé ici peut être nouveau : on le branche sur le même callback.
-    if (typeof client._onActivityChange === 'function') {
-      p.onActivityChange = client._onActivityChange;
-    }
-    client.musicPlayers.set(guildId, p);
-  }
-  return client.musicPlayers.get(guildId);
-}
-
 /**
  * /join — rejoint le salon vocal où UN utilisateur est déjà connecté sur
  * Discord (découvert via le gateway). Pas de nom à taper.
  */
-async function joinUserCurrentVoice(client, { ok, err }) {
+async function joinUserCurrentVoice(client, getPlayer, { ok, err }) {
   let target = null;
   let who = null;
   for (const [, g] of client.guilds.cache) {
@@ -123,12 +105,7 @@ async function joinUserCurrentVoice(client, { ok, err }) {
   if (!target) {
     return err('Aucun membre n’est dans un salon vocal sur Discord. /join sert à rejoindre une personne déjà en vocal.');
   }
-  joinVoiceChannel({
-    channelId: target.id,
-    guildId: target.guild.id,
-    adapterCreator: target.guild.voiceAdapterCreator,
-    selfDeaf: false,
-  });
+  await getPlayer(target.guild.id).ensureConnection(target);
   ok(`🔊 Le bot a rejoint le vocal « ${target.name} » (où est ${who}).`);
 }
 
@@ -241,7 +218,7 @@ const HELP = [
  * @param {(level:string, text:string)=>void} opts.log  affichage (cmd + GUI)
  * @param {boolean} opts.readStdin  lire le clavier de la fenêtre noire
  */
-function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT }) {
+function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT, getPlayer, langFor }) {
   const say = (t) => log('out', t);
   const ok = (t) => log('ok', t);
   const err = (t) => log('err', t);
@@ -249,6 +226,7 @@ function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT 
   // Langue du terminal/GUI (l'opérateur local)
   const termLang = () => (langStore && langStore.getTerminal()) || 'fr';
   const STR = () => (botT ? botT(termLang()) : { linkTitle: 'Lien', linkOpen: (u) => u, langSetPersonal: (l) => l, langSetServer: (l) => l, langUnknown: (l) => l, langList: 'fr en es ar' });
+  const runMusicCommand = (name, arg = '') => musicCommand(client, name, arg, { ok, err, getPlayer, prefix: '!', langFor, langStore, botT });
 
   /** Serveur par défaut : le seul, sinon le premier. */
   function defaultGuild() {
@@ -297,14 +275,14 @@ function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT 
         // l'utilisateur sur Discord (pas de nom à taper). C'est le pont entre
         // le terminal et un utilisateur déjà en vocal — sans ça le bot ne peut
         // pas deviner où aller.
-        return joinUserCurrentVoice(client, { ok, err });
+        return joinUserCurrentVoice(client, getPlayer, { ok, err });
       }
 
       case 'leave': {
         const g = defaultGuild();
-        const conn = g && getVoiceConnection(g.id);
-        if (!conn) return err('Le bot n’est dans aucun salon vocal.');
-        conn.destroy();
+        const player = g && getPlayer(g.id);
+        if (!player || !player.connection) return err('Le bot n’est dans aucun salon vocal.');
+        player.destroy();
         ok('👋 Le bot a quitté le salon vocal.');
         return;
       }
@@ -442,32 +420,32 @@ function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT 
       case 'play': {
         const q = rest.trim();
         if (!q) return err('Utilisation : /play <recherche ou lien YouTube/Spotify>');
-        return musicCommand(client, 'play', q, { ok, err });
+        return runMusicCommand('play', q);
       }
       case 'skip':
-        return musicCommand(client, 'skip', '', { ok, err });
+        return runMusicCommand('skip');
       case 'pause':
-        return musicCommand(client, 'pause', '', { ok, err });
+        return runMusicCommand('pause');
       case 'resume':
-        return musicCommand(client, 'resume', '', { ok, err });
+        return runMusicCommand('resume');
       case 'stop':
-        return musicCommand(client, 'stop', '', { ok, err });
+        return runMusicCommand('stop');
       case 'leave':
-        return musicCommand(client, 'leave', '', { ok, err });
+        return runMusicCommand('leave');
       case 'now':
       case 'np':
-        return musicCommand(client, 'now', '', { ok, err });
+        return runMusicCommand('now');
       case 'queue':
       case 'q':
-        return musicCommand(client, 'queue', '', { ok, err });
+        return runMusicCommand('queue');
       case 'volume': {
         if (!rest.trim()) return err('Utilisation : /volume <0-100>');
-        return musicCommand(client, 'volume', rest.trim(), { ok, err });
+        return runMusicCommand('volume', rest.trim());
       }
       case 'loop':
-        return musicCommand(client, 'loop', rest.trim(), { ok, err });
+        return runMusicCommand('loop', rest.trim());
       case 'shuffle':
-        return musicCommand(client, 'shuffle', '', { ok, err });
+        return runMusicCommand('shuffle');
 
       // ---------- Lien de configuration (propriétaire) + Langue ----------
       case 'link': {

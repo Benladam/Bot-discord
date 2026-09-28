@@ -18,20 +18,6 @@ const {
 require('dotenv').config();
 const { MusicPlayer } = require('./utils/musicPlayer');
 
-// === BYPASS vocal local : on force discord.js a annoncer l'IP publique ===
-// (au lieu de 192.168.1.x) lors de la IP discovery, sinon Discord envoie
-// l'audio vers une IP inateignable et le son ne sort jamais.
-const PUBLIC_IP = process.env.PUBLIC_IP || '87.91.140.78';
-const _networkInterfaces = os.networkInterfaces.bind(os);
-os.networkInterfaces = function () {
-  const orig = _networkInterfaces();
-  // Injecte une fausse interface avec l'IP publique en premier
-  return Object.assign({}, orig, {
-    '__public__': [{ address: PUBLIC_IP, family: 'IPv4', internal: false }],
-  });
-};
-// discord.js lit parfois via dns ou une autre methode ; on patch aussi si besoin.
-console.log('[bypass] IP publique forcee pour la voix : ' + PUBLIC_IP);
 const { setupConsole } = require('./console-commands');
 const langStore = require('./langStore');
 const { t: botT } = require('./botI18n');
@@ -155,8 +141,11 @@ function buildSlashCommands() {
     let builder = new SlashCommandBuilder()
       .setName(cmd.data.name)
       .setDescription(cmd.data.description || 'Commande');
-    if (Array.isArray(cmd.options)) {
-      for (const opt of cmd.options) {
+    // Les options sont définies dans `data.options` par les modules de commande.
+    // Accepte aussi `cmd.options` pour rester compatible avec d'anciens modules.
+    const options = Array.isArray(cmd.data.options) ? cmd.data.options : cmd.options;
+    if (Array.isArray(options)) {
+      for (const opt of options) {
         if (opt.type === 4) builder = builder.addIntegerOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
         else if (opt.type === 3) builder = builder.addStringOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required).setAutocomplete(!!opt.autocomplete));
         else if (opt.type === 5) builder = builder.addBooleanOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
@@ -233,6 +222,8 @@ client.once(Events.ClientReady, async (c) => {
     langStore,
     isOwner,
     botT,
+    getPlayer,
+    langFor,
   });
   Logger.info('Console prête — tapez /help pour les commandes (ex: /call #général salut).');
 
@@ -278,10 +269,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   try {
     Logger.info(`${interaction.user.tag} a utilisé /${interaction.commandName}`);
-    const args = [];
-    for (const opt of interaction.options.data) {
-      if (opt.value !== undefined) args.push(String(opt.value));
-    }
+    // N'inclut que le texte dans les arguments: /play expose aussi
+    // l'option booléenne "insert-first", qui ne doit pas devenir un mot recherché.
+    const args = interaction.options.data
+      .filter((opt) => typeof opt.value === 'string' || typeof opt.value === 'number')
+      .map((opt) => String(opt.value));
     await cmd.execute(interaction, args, deps);
   } catch (e) {
     Logger.error(`Erreur /${interaction.commandName}: ${e.message}`);
