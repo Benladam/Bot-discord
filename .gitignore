@@ -17,6 +17,8 @@ data/
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
+*cookies*.txt
+.cookies/
 .bot-gui-prefs.json
 bot.log
 gui_build/

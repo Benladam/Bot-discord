@@ -34,6 +34,21 @@ function isSoundCloudUrl(value) {
   } catch (_) { return false; }
 }
 
+function isYouTubeUrl(value) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase().replace(/^www\./, '');
+    return hostname === 'youtu.be'
+      || hostname === 'youtube-nocookie.com'
+      || hostname === 'youtube.com'
+      || hostname.endsWith('.youtube.com');
+  } catch (_) { return false; }
+}
+
+function needsYouTubeAuthentication(error) {
+  return /sign in to confirm|confirm (?:that )?you(?:'|’)re not a bot|not a bot|--(?:from-browser|cookies(?:-from-browser)?).{0,100}authentication/i
+    .test(String(error || ''));
+}
+
 async function soundCloudStream(url) {
   if (!configureSoundCloud()) throw new Error('Les liens SoundCloud nécessitent SOUNDCLOUD_CLIENT_ID dans le fichier .env.');
   const result = await play.stream(url);
@@ -88,11 +103,15 @@ function ytDlpCandidates() {
   return candidates;
 }
 
-function buildYtDlpArgs(preArgs, url) {
-  return [...preArgs, '--js-runtimes', `node:${process.execPath}`, '--no-playlist', '-f', 'bestaudio/best', '-g', url];
+function buildYtDlpArgs(preArgs, url, { playerClient, cookiesPath = process.env.YOUTUBE_COOKIES_PATH } = {}) {
+  const args = [...preArgs, '--js-runtimes', `node:${process.execPath}`];
+  if (isYouTubeUrl(url) && cookiesPath) args.push('--cookies', cookiesPath);
+  if (isYouTubeUrl(url) && playerClient) args.push('--extractor-args', `youtube:player_client=${playerClient}`);
+  args.push('--no-playlist', '-f', 'bestaudio/best', '-g', url);
+  return args;
 }
 
-function runYtDlp(command, preArgs, url, spawnImpl = spawn) {
+function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
@@ -107,7 +126,7 @@ function runYtDlp(command, preArgs, url, spawnImpl = spawn) {
       resolve(result);
     };
     try {
-      child = spawnImpl(command, buildYtDlpArgs(preArgs, url), { windowsHide: true });
+      child = spawnImpl(command, buildYtDlpArgs(preArgs, url, options), { windowsHide: true });
     } catch (error) {
       finish({ error: error.message, missing: error.code === 'ENOENT' });
       return;
@@ -144,13 +163,14 @@ function runYtDlp(command, preArgs, url, spawnImpl = spawn) {
 async function streamUrl(url, { candidates = ytDlpCandidates(), install = ensureManagedYtDlpOnce, spawnImpl = spawn } = {}) {
   const errors = [];
   let missingOnly = true;
-  let youtubeBlocked = false;
+  let authCandidate = null;
+  const youtubeUrl = isYouTubeUrl(url);
   for (const [command, args] of candidates) {
     const result = await runYtDlp(command, args, url, spawnImpl);
     if (result.audioUrl) return result.audioUrl;
     errors.push(result.error);
     if (!result.missing) missingOnly = false;
-    if (/sign in to confirm|confirm you(?:'|’)re not a bot|not a bot/i.test(result.error || '')) youtubeBlocked = true;
+    if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) authCandidate = [command, args];
   }
 
   if (missingOnly) {
@@ -159,13 +179,19 @@ async function streamUrl(url, { candidates = ytDlpCandidates(), install = ensure
       const result = await runYtDlp(managed, [], url, spawnImpl);
       if (result.audioUrl) return result.audioUrl;
       errors.push(result.error);
-      if (/sign in to confirm|confirm you(?:'|’)re not a bot|not a bot/i.test(result.error || '')) youtubeBlocked = true;
+      if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) authCandidate = [managed, []];
     } catch (error) {
       errors.push(`installation automatique impossible : ${error.message}`);
     }
   }
 
-  if (youtubeBlocked) throw new Error('YouTube bloque cette requête de lecture depuis l’hébergeur.');
+  if (authCandidate) {
+    const [command, args] = authCandidate;
+    const embedded = await runYtDlp(command, args, url, spawnImpl, { playerClient: 'web_embedded' });
+    if (embedded.audioUrl) return embedded.audioUrl;
+    errors.push(embedded.error);
+    throw new Error('YouTube demande une vérification depuis cet hébergeur; le mode lecteur intégré sans compte n’a pas réussi pour ce titre. Configure YOUTUBE_COOKIES_PATH avec un fichier de cookies local seulement si ce contenu exige un compte, ou choisis un autre titre.');
+  }
   const detail = errors.filter(Boolean).at(-1);
   throw new Error(detail || 'Aucun flux audio valide renvoyé par yt-dlp. Vérifie yt-dlp et YTDLP_PATH.');
 }

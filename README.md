@@ -59,6 +59,7 @@ vers GitHub. Une installation personnelle peut être forcée avec `YTDLP_PATH` :
 
 ```env
 YTDLP_PATH=C:\\outils\\yt-dlp.exe
+YOUTUBE_COOKIES_PATH=
 FFMPEG_PATH=C:\\outils\\ffmpeg\\bin\\ffmpeg.exe
 ```
 
@@ -90,6 +91,7 @@ cp .env.example .env
 | `MINECRAFT_CHANNEL_ID` | pont Minecraft | Salon réservé aux changelogs Minecraft publiés après un redémarrage réussi |
 | `PORT` | pont Minecraft | Port attribué au WebSocket du bot sur Kinetic (`SERVER_PORT` est aussi reconnu) |
 | `YTDLP_PATH` | non | Chemin vers `yt-dlp` si absent du PATH |
+| `YOUTUBE_COOKIES_PATH` | non | Chemin local d’un fichier cookies YouTube au format Netscape, seulement si YouTube l’exige. Place-le dans `data/` (ignoré par Git) et ne le publie jamais; l’usage de cookies de compte peut entraîner des restrictions du compte. |
 | `FFMPEG_PATH` | non | Chemin vers FFmpeg si absent du PATH |
 | `BOT_PRESENCE_STATUS` | non | Présence initiale : `online`, `dnd`, `idle` ou `invisible` |
 | `BOT_PRESENCE_TYPE` | non | Activité initiale : `playing`, `listening`, `watching` ou `competing` |

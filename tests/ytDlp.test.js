@@ -27,6 +27,15 @@ test('active explicitement le runtime JavaScript Node de yt-dlp', () => {
   assert.ok(args.includes('--no-playlist'));
 });
 
+test('n’ajoute les cookies YouTube que si un chemin local est configuré', () => {
+  const args = buildYtDlpArgs([], 'https://youtube.com/watch?v=test', {
+    cookiesPath: 'private/youtube-cookies.txt',
+  });
+  assert.deepEqual(args.slice(2, 4), ['--cookies', 'private/youtube-cookies.txt']);
+  assert.ok(!buildYtDlpArgs([], 'https://youtube.com/watch?v=test', { cookiesPath: '' }).includes('--cookies'));
+  assert.ok(!buildYtDlpArgs([], 'https://example.com/audio', { cookiesPath: 'private/youtube-cookies.txt' }).includes('--cookies'));
+});
+
 test('SoundCloud reste désactivé proprement si aucun identifiant client n’est fourni', () => {
   assert.equal(getSoundCloudClientId({}), '');
   assert.equal(getSoundCloudClientId({ SOUNDCLOUD_CLIENT_ID: '  test-client  ' }), 'test-client');
@@ -90,8 +99,38 @@ test('ne tente pas de réinstaller yt-dlp si YouTube bloque une version déjà p
     candidates: [['yt-dlp', []]],
     install: async () => { installs++; return 'managed-yt-dlp'; },
     spawnImpl: fakeSpawn,
-  }), /YouTube bloque/);
+  }), /YouTube demande une vérification/);
   assert.equal(installs, 0);
+});
+
+test('réessaie une vidéo YouTube bloquée avec le client intégré sans compte', async () => {
+  const calls = [];
+  const fakeSpawn = (command, args) => {
+    calls.push({ command, args });
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    setImmediate(() => {
+      child.stdout.end(args.includes('youtube:player_client=web_embedded')
+        ? 'https://audio.example/stream\n'
+        : '');
+      child.stderr.end(args.includes('youtube:player_client=web_embedded')
+        ? ''
+        : '-from-browser or --cookies for the authentication. See https://github.com/yt-dlp/yt-dlp/wiki/FAQ');
+      setImmediate(() => child.emit('close', args.includes('youtube:player_client=web_embedded') ? 0 : 1));
+    });
+    return child;
+  };
+
+  const audioUrl = await streamUrl('https://www.youtube.com/watch?v=test', {
+    candidates: [['yt-dlp', []]],
+    install: async () => { throw new Error('should not install'); },
+    spawnImpl: fakeSpawn,
+  });
+  assert.equal(audioUrl, 'https://audio.example/stream');
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].args.includes('youtube:player_client=web_embedded'));
 });
 
 test('lit uniquement le checksum de l’asset demandé', () => {
