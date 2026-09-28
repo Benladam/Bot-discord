@@ -73,4 +73,18 @@ function toAutocompleteChoice(item) {
   };
 }
 
-module.exports = { formatDuration, formatChoiceName, selectAutocompleteItems, toAutocompleteChoice };
+function toSearchFallbackChoice(query, { worldChart = false } = {}) {
+  const value = String(worldChart ? 'top mondial' : query).trim().slice(0, 100) || 'top mondial';
+  const name = worldChart
+    ? '🌍 Rechercher « Top mondial »'
+    : `🔎 Rechercher « ${value} »`;
+  return { name: trimChoiceName(name), value };
+}
+
+module.exports = {
+  formatDuration,
+  formatChoiceName,
+  selectAutocompleteItems,
+  toAutocompleteChoice,
+  toSearchFallbackChoice,
+};

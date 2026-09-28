@@ -300,7 +300,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isAutocomplete()) {
     const cmd = client.commands.get(interaction.commandName);
     if (cmd && typeof cmd.autocomplete === 'function') {
-      try { await cmd.autocomplete(interaction, deps); } catch (_) { /* ignore */ }
+      try { await cmd.autocomplete(interaction, deps); }
+      catch (e) {
+        Logger.error(`Erreur autocomplétion /${interaction.commandName}: ${e.message}`);
+        if (!interaction.responded) await interaction.respond({ choices: [] }).catch(() => {});
+      }
+    } else if (!interaction.responded) {
+      await interaction.respond({ choices: [] }).catch(() => {});
     }
     return;
   }

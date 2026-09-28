@@ -4,13 +4,25 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelect
 const { resolveQuery } = require('../utils/resolve');
 const { cleanMediaQuery } = require('../utils/mediaQuery');
 const { searchCatalog, getArtistAlbums, getWorldTopTracks } = require('../utils/musicCatalog');
-const { selectAutocompleteItems, toAutocompleteChoice } = require('../utils/catalogAutocomplete');
+const { selectAutocompleteItems, toAutocompleteChoice, toSearchFallbackChoice } = require('../utils/catalogAutocomplete');
 const embeds = require('../utils/embeds');
 const { tr } = require('../utils/embedI18n');
 
 const PAGE_SIZE = 25;
+const AUTOCOMPLETE_TIMEOUT_MS = 1_800;
 const sessions = new Map();
 const SESSION_TTL = 10 * 60 * 1000;
+const AUTOCOMPLETE_TIMEOUT = Symbol('autocomplete timeout');
+
+function withinAutocompleteBudget(task, timeoutMs) {
+  let timer;
+  return Promise.race([
+    Promise.resolve().then(task),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(AUTOCOMPLETE_TIMEOUT), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 function providerLabel(provider) { return provider === 'spotify' ? '🟢 Spotify' : provider === 'deezer' ? '🟣 Deezer' : provider === 'soundcloud' ? '🟠 SoundCloud' : '▶ YouTube'; }
 function userIdOf(ctx) { return ctx.user?.id || ctx.author?.id; }
@@ -150,18 +162,40 @@ module.exports = {
   slash: true,
   handleCatalogInteraction,
 
-  async autocomplete(interaction) {
+  async autocomplete(interaction, deps = {}) {
     const query = interaction.options.getFocused().toString().trim();
+    const timeoutMs = Number.isFinite(deps.autocompleteTimeoutMs)
+      ? Math.max(1, Math.min(2500, deps.autocompleteTimeoutMs))
+      : AUTOCOMPLETE_TIMEOUT_MS;
     if (!query) {
-      const items = await getWorldTopTracks().catch((error) => {
+      const getChart = deps.getWorldTopTracks || getWorldTopTracks;
+      const items = await withinAutocompleteBudget(() => getChart({ timeoutMs: Math.max(250, timeoutMs - 200) }), timeoutMs)
+        .catch((error) => {
         console.warn(`[catalogue] Top mondial Deezer indisponible: ${error.message}`);
         return [];
       });
+      if (items === AUTOCOMPLETE_TIMEOUT) {
+        console.warn('[catalogue] Le Top 25 Deezer dépasse le délai d’autocomplétion Discord.');
+        return interaction.respond({ choices: [toSearchFallbackChoice('', { worldChart: true })] });
+      }
+      if (!items.length) return interaction.respond({ choices: [toSearchFallbackChoice('', { worldChart: true })] });
       const choices = selectAutocompleteItems(items, 25).map(toAutocompleteChoice);
       return interaction.respond({ choices });
     }
     if (query.length < 2) return interaction.respond({ choices: [] });
-    const items = await searchCatalog(query, { limit: 10 }).catch(() => []);
+    const search = deps.searchCatalog || searchCatalog;
+    const items = await withinAutocompleteBudget(() => search(query, {
+      limit: 10,
+      sourceTimeoutMs: Math.max(100, timeoutMs - 300),
+    }), timeoutMs)
+      .catch((error) => {
+        console.warn(`[catalogue] Autocomplétion indisponible: ${error.message}`);
+        return [];
+      });
+    if (items === AUTOCOMPLETE_TIMEOUT || !items?.length) {
+      if (items === AUTOCOMPLETE_TIMEOUT) console.warn('[catalogue] Recherche musicale au-delà du délai d’autocomplétion Discord.');
+      return interaction.respond({ choices: [toSearchFallbackChoice(query)] });
+    }
     const choices = selectAutocompleteItems(items).map(toAutocompleteChoice);
     return interaction.respond({ choices });
   },
