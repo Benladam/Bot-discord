@@ -1,5 +1,7 @@
 # Fichiers et dossiers ignores par git
 node_modules/
+.venv
+.venv/
 .env
 .env.*
 !.env.example
@@ -18,3 +20,4 @@ data/
 bot.log
 gui_build/
 .bot-gui-logs/
+Bot-discord-kinetic-*.zip
