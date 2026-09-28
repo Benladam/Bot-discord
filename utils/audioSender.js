@@ -60,6 +60,30 @@ function needsYouTubeAuthentication(error) {
     .test(String(error || ''));
 }
 
+function sanitizeYtDlpDiagnostic(value) {
+  return String(value || '')
+    .replace(/\b(set-cookie|cookie|authorization|proxy-authorization)\s*:\s*[^\r\n]*/gi, '$1: [redacted]')
+    .replace(/\b(__Secure-[A-Za-z0-9_-]+|SID|HSID|SSID|APISID|SAPISID|LOGIN_INFO|YSC|VISITOR_INFO1_LIVE)\s*=\s*[^;,\s]+/gi, '$1=[redacted]')
+    .replace(/\b(access_token|refresh_token|id_token|token|signature|sig)\s*=\s*[^&#\s]+/gi, '$1=[redacted]')
+    .replace(/https?:\/\/[^\s]+/gi, '[URL]')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(-450);
+}
+
+function describeCookiesFile(cookiesPath) {
+  if (!cookiesPath) return 'cookies=not-configured';
+  try {
+    const stat = fs.statSync(cookiesPath);
+    if (!stat.isFile()) return 'cookies=not-a-file';
+    fs.accessSync(cookiesPath, fs.constants.R_OK);
+    return `cookies=readable,${stat.size}B`;
+  } catch (error) {
+    return `cookies=unreadable(${error.code || 'error'})`;
+  }
+}
+
 function normalizeCookiesPath(value, projectRoot = PROJECT_ROOT) {
   const configured = String(value || '').trim();
   if (!configured) return '';
@@ -444,6 +468,7 @@ async function streamUrl(url, {
     });
     if (embedded.audioUrl) return embedded.audioUrl;
     errors.push(embedded.error);
+    console.warn(`[yt-dlp] Repli YouTube refusé; binaire=${path.basename(command)}; ${describeCookiesFile(cookiesPath)}; ${sanitizeYtDlpDiagnostic(embedded.error) || 'aucun détail fourni'}`);
     const error = new Error('YouTube demande une vérification depuis cet hébergeur; le mode lecteur intégré sans compte n’a pas réussi pour ce titre. Configure YOUTUBE_COOKIES_PATH avec un fichier de cookies local seulement si ce contenu exige un compte, ou choisis un autre titre.');
     error.code = 'YOUTUBE_AUTH_BLOCKED';
     throw error;

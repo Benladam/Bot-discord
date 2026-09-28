@@ -207,6 +207,48 @@ test('ne tente pas de réinstaller yt-dlp si YouTube bloque une version déjà p
   assert.equal(installs, 0);
 });
 
+test('journalise la cause du repli YouTube en masquant cookies, jetons et URLs', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-yt-dlp-diagnostic-'));
+  const cookiesPath = path.join(dataDir, 'cookies.txt');
+  await fs.writeFile(cookiesPath, '# Netscape HTTP Cookie File\n');
+  const warnings = [];
+  const originalWarn = console.warn;
+  let attempt = 0;
+  console.warn = (...args) => warnings.push(args.join(' '));
+
+  const fakeSpawn = (_command, args) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    setImmediate(() => {
+      attempt++;
+      child.stdout.end();
+      child.stderr.end(attempt === 1
+        ? 'Sign in to confirm you are not a bot'
+        : 'ERROR: challenge solver failed https://example.test/path?token=private-token\nCookie: SID=private-cookie');
+      setImmediate(() => child.emit('close', 1));
+    });
+    return child;
+  };
+
+  try {
+    await assert.rejects(streamUrl('https://youtube.com/watch?v=test', {
+      candidates: [['yt-dlp', []]],
+      cookiesPaths: [cookiesPath],
+      install: async () => { throw new Error('should not install'); },
+      spawnImpl: fakeSpawn,
+    }), error => error.code === 'YOUTUBE_AUTH_BLOCKED');
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /cookies=readable,/);
+    assert.match(warnings[0], /challenge solver failed/);
+    assert.doesNotMatch(warnings[0], /private-token|private-cookie|example\.test/);
+  } finally {
+    console.warn = originalWarn;
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('réessaie une vidéo YouTube bloquée avec le client intégré sans compte', async () => {
   const calls = [];
   const fakeSpawn = (command, args) => {
