@@ -2,6 +2,7 @@
 const play = require('play-dl');
 const { searchSpotifyCatalog, getSpotifyArtistAlbums } = require('./spotify');
 const { configureSoundCloud } = require('./soundcloud');
+const { searchYouTubeCandidates } = require('./audioSender');
 
 const cache = new Map();
 const pendingSearches = new Map();
@@ -128,8 +129,8 @@ async function searchCatalog(query, { limit = 10, fresh = false, sourceTimeoutMs
   const searchRequest = (async () => {
     const perType = Math.min(10, Math.max(1, limit));
     const tasks = [
-      safeSearch('YouTube vidéos', async () => (await play.search(normalized, {
-        limit: perType, source: { youtube: 'video' },
+      safeSearch('YouTube vidéos', async () => (await searchYouTubeCandidates(normalized, {
+        limit: perType,
       })).map((item) => normalizeYoutube(item, 'track')), sourceWaitMs),
       safeSearch('YouTube playlists', async () => (await play.search(normalized, {
         limit: Math.min(5, perType), source: { youtube: 'playlist' },

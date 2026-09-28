@@ -105,7 +105,7 @@ async function soundCloudSearchStream(query) {
 async function youtubeSearchStream(query) {
   const normalized = String(query || '').trim().slice(0, 200);
   if (normalized.length < 2) throw new Error('Recherche YouTube trop courte.');
-  const videos = await play.search(normalized, { limit: 5, source: { youtube: 'video' } });
+  const videos = await searchYouTubeCandidates(normalized, { limit: 5 });
   let lastError = null;
   let attempted = 0;
   for (const video of videos.slice(0, 3)) {
@@ -157,6 +157,177 @@ function buildYtDlpArgs(preArgs, url, { playerClient, cookiesPath, projectRoot =
   if (isYouTubeUrl(url) && playerClient) args.push('--extractor-args', `youtube:player_client=${playerClient}`);
   args.push('--no-playlist', '-f', 'bestaudio/best', '-g', url);
   return args;
+}
+
+function buildYtDlpSearchArgs(preArgs, query, {
+  playerClient,
+  cookiesPath,
+  projectRoot = PROJECT_ROOT,
+  env = process.env,
+  limit = 5,
+} = {}) {
+  const normalized = String(query || '').trim().slice(0, 200);
+  const safeLimit = Math.max(1, Math.min(10, Number(limit) || 5));
+  const args = [
+    ...preArgs,
+    '--js-runtimes', `node:${process.execPath}`,
+    '--no-warnings', '--flat-playlist', '--dump-single-json', '--skip-download',
+    '--playlist-end', String(safeLimit),
+  ];
+  const resolvedCookiesPath = cookiesPath === undefined
+    ? getYouTubeCookiesPath({ env, projectRoot })
+    : normalizeCookiesPath(cookiesPath, projectRoot);
+  if (resolvedCookiesPath) args.push('--cookies', resolvedCookiesPath);
+  if (playerClient) args.push('--extractor-args', `youtube:player_client=${playerClient}`);
+  args.push(`ytsearch${safeLimit}:${normalized}`);
+  return args;
+}
+
+function youtubeUrlFromSearchItem(item) {
+  const directUrl = item?.webpage_url || item?.original_url;
+  if (isYouTubeUrl(directUrl)) return directUrl;
+  if (isYouTubeUrl(item?.url)) return item.url;
+  const id = String(item?.id || item?.video_id || '').trim();
+  if (/^[A-Za-z0-9_-]{6,}$/.test(id)) return `https://www.youtube.com/watch?v=${id}`;
+  return '';
+}
+
+function normalizeYtDlpSearchItem(item) {
+  const url = youtubeUrlFromSearchItem(item);
+  if (!url) return null;
+  return {
+    title: item.title || 'Musique inconnue',
+    url,
+    durationInSec: Number(item.duration) || 0,
+    duration: Number(item.duration) || 0,
+    thumbnail: item.thumbnail || null,
+    channel: item.channel ? { name: item.channel } : item.uploader ? { name: item.uploader } : undefined,
+  };
+}
+
+function parseYtDlpSearch(output) {
+  const text = String(output || '').trim();
+  if (!text) return [];
+  const payloads = [];
+  try {
+    payloads.push(JSON.parse(text));
+  } catch (_) {
+    for (const line of text.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean)) {
+      try { payloads.push(JSON.parse(line)); } catch (_) { /* ignorer les lignes non JSON */ }
+    }
+  }
+  return payloads.flatMap((payload) => {
+    if (Array.isArray(payload)) return payload;
+    return Array.isArray(payload?.entries) ? payload.entries : [payload];
+  }).map(normalizeYtDlpSearchItem).filter(Boolean);
+}
+
+function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}) {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timer;
+    let child;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    try {
+      child = spawnImpl(command, buildYtDlpSearchArgs(preArgs, query, options), { windowsHide: true });
+    } catch (error) {
+      finish({ items: [], error: error.message, missing: error.code === 'ENOENT' });
+      return;
+    }
+    timer = setTimeout(() => {
+      try { child.kill(); } catch (_) { /* processus déjà terminé */ }
+      finish({ items: [], error: `Recherche YouTube dépassée après ${YTDLP_TIMEOUT_MS / 1000} secondes.` });
+    }, YTDLP_TIMEOUT_MS);
+    child.stdout.on('data', (chunk) => {
+      if (stdout.length < YTDLP_OUTPUT_LIMIT) stdout += chunk.toString().slice(0, YTDLP_OUTPUT_LIMIT - stdout.length);
+      else {
+        try { child.kill(); } catch (_) { /* processus déjà terminé */ }
+        finish({ items: [], error: 'La réponse de recherche YouTube est trop volumineuse.' });
+      }
+    });
+    child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-4_000); });
+    child.on('error', (error) => finish({ items: [], error: error.message, missing: error.code === 'ENOENT' }));
+    child.on('close', (code) => {
+      if (settled) return;
+      const items = code === 0 ? parseYtDlpSearch(stdout) : [];
+      if (items.length) {
+        finish({ items });
+        return;
+      }
+      const missingModule = /No module named ['"]?yt_dlp['"]?/i.test(stderr);
+      const error = stderr.trim().slice(-300) || (code === 0
+        ? 'YouTube n’a renvoyé aucun résultat exploitable.'
+        : `yt-dlp recherche s’est arrêté avec le code ${code}.`);
+      finish({ items: [], error, missing: missingModule });
+    });
+  });
+}
+
+async function searchYouTubeCandidates(query, {
+  limit = 5,
+  candidates = ytDlpCandidates(),
+  install = ensureManagedYtDlpOnce,
+  spawnImpl = spawn,
+  cookiesPaths,
+  projectRoot = PROJECT_ROOT,
+  env = process.env,
+} = {}) {
+  const normalized = String(query || '').trim().slice(0, 200);
+  if (normalized.length < 2) throw new Error('Recherche YouTube trop courte.');
+  const safeLimit = Math.max(1, Math.min(10, Number(limit) || 5));
+  const configuredCookiesPaths = cookiesPaths === undefined
+    ? getYouTubeCookiesPaths({ env, projectRoot })
+    : (Array.isArray(cookiesPaths) ? cookiesPaths : [cookiesPaths])
+      .flatMap((entry) => splitCookiesPaths(entry))
+      .map((entry) => normalizeCookiesPath(entry, projectRoot));
+  const cookieAttempts = configuredCookiesPaths.length ? configuredCookiesPaths : [''];
+  const errors = [];
+  let missingOnly = true;
+  let authCandidate = null;
+
+  const attempt = async (command, args, cookiesPath, playerClient) => {
+    const result = await runYtDlpSearch(command, args, normalized, spawnImpl, {
+      limit: safeLimit, cookiesPath, playerClient, projectRoot, env,
+    });
+    if (result.items.length) return result.items.slice(0, safeLimit);
+    errors.push(result.error);
+    if (!result.missing) missingOnly = false;
+    if (!authCandidate && needsYouTubeAuthentication(result.error)) {
+      authCandidate = [command, args, cookiesPath];
+    }
+    return null;
+  };
+
+  for (const [command, args] of candidates) {
+    for (const cookiesPath of cookieAttempts) {
+      const found = await attempt(command, args, cookiesPath);
+      if (found) return found;
+    }
+  }
+  if (missingOnly) {
+    try {
+      const managed = await install();
+      for (const cookiesPath of cookieAttempts) {
+        const found = await attempt(managed, [], cookiesPath);
+        if (found) return found;
+      }
+    } catch (error) {
+      errors.push(`installation automatique impossible : ${error.message}`);
+    }
+  }
+  if (authCandidate) {
+    const [command, args, cookiesPath] = authCandidate;
+    const found = await attempt(command, args, cookiesPath, 'web_embedded');
+    if (found) return found;
+  }
+  throw new Error(errors.filter(Boolean).at(-1) || 'Aucun résultat YouTube trouvé.');
 }
 
 function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
@@ -394,8 +565,11 @@ module.exports = {
   OpusSender: { start },
   streamUrl,
   buildYtDlpArgs,
+  buildYtDlpSearchArgs,
   getYouTubeCookiesPath,
   getYouTubeCookiesPaths,
+  parseYtDlpSearch,
   prepareInput,
+  searchYouTubeCandidates,
   youtubeSearchStream,
 };

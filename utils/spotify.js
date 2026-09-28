@@ -11,6 +11,7 @@
  */
 
 const play = require('play-dl');
+const { searchYouTubeCandidates } = require('./audioSender');
 const MAX_SPOTIFY_TRACKS = 100;
 
 let spotifySearchApi = null;
@@ -135,7 +136,7 @@ function parseSpotifyUrl(url) {
 }
 
 async function searchYouTube(query) {
-  const results = await play.search(query, { limit: 1 });
+  const results = await searchYouTubeCandidates(query, { limit: 1 });
   if (!results.length) return null;
   const r = results[0];
   return {
@@ -144,7 +145,7 @@ async function searchYouTube(query) {
     duration: r.durationInSec || 0,
     thumbnail: r.thumbnail && r.thumbnail.url ? r.thumbnail.url : null,
     source: 'spotify',
-    fallbackQuery: searchQuery,
+    fallbackQuery: query,
   };
 }
 

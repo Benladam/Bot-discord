@@ -6,6 +6,7 @@
 const play = require('play-dl');
 const { isSpotifyUrl, resolveSpotifyLink } = require('./spotify');
 const { configureSoundCloud } = require('./soundcloud');
+const { searchYouTubeCandidates } = require('./audioSender');
 
 function youtubeVideoId(value) {
   try {
@@ -100,7 +101,7 @@ async function resolveQuery(query) {
   }
 
   // 3) Recherche texte sur YouTube
-  const results = await play.search(query, { limit: 1 });
+  const results = await searchYouTubeCandidates(query, { limit: 1 });
   if (!results.length) {
     throw new Error(`Aucun résultat trouvé pour: \`${query}\``);
   }
@@ -116,7 +117,7 @@ async function resolveQuery(query) {
 }
 
 async function resolveDeezerTracks(tracks, {
-  search = play.search,
+  search = searchYouTubeCandidates,
   searchSoundCloud = async (query) => {
     if (!configureSoundCloud()) return [];
     return play.search(query, { limit: 5, source: { soundcloud: 'tracks' } });

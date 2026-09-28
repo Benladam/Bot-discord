@@ -7,7 +7,15 @@ const os = require('node:os');
 const path = require('node:path');
 const { PassThrough } = require('node:stream');
 const { ensureManagedYtDlp, parseChecksum, releaseAsset } = require('../utils/ytDlp');
-const { buildYtDlpArgs, getYouTubeCookiesPath, getYouTubeCookiesPaths, streamUrl } = require('../utils/audioSender');
+const {
+  buildYtDlpArgs,
+  buildYtDlpSearchArgs,
+  getYouTubeCookiesPath,
+  getYouTubeCookiesPaths,
+  parseYtDlpSearch,
+  searchYouTubeCandidates,
+  streamUrl,
+} = require('../utils/audioSender');
 const { getSoundCloudClientId } = require('../utils/soundcloud');
 
 test('sélectionne le binaire yt-dlp officiel pour les plateformes courantes', () => {
@@ -25,6 +33,73 @@ test('active explicitement le runtime JavaScript Node de yt-dlp', () => {
   const args = buildYtDlpArgs([], 'https://youtube.com/watch?v=test');
   assert.deepEqual(args.slice(0, 2), ['--js-runtimes', `node:${process.execPath}`]);
   assert.ok(args.includes('--no-playlist'));
+});
+
+test('construit une recherche yt-dlp avec limite et cookies locaux', () => {
+  const projectRoot = path.resolve(os.tmpdir(), 'bot-discord-search-test');
+  const args = buildYtDlpSearchArgs([], 'Artiste - Titre', {
+    projectRoot,
+    cookiesPath: 'data/cookies.txt',
+    limit: 3,
+  });
+  assert.ok(args.includes('--dump-single-json'));
+  assert.ok(args.includes('--flat-playlist'));
+  assert.ok(args.includes('--playlist-end'));
+  assert.ok(args.includes('3'));
+  assert.ok(args.includes('ytsearch3:Artiste - Titre'));
+  assert.deepEqual(args.slice(args.indexOf('--cookies'), args.indexOf('--cookies') + 2), [
+    '--cookies', path.join(projectRoot, 'data', 'cookies.txt'),
+  ]);
+});
+
+test('parse les résultats JSON yt-dlp en URLs YouTube jouables', () => {
+  const results = parseYtDlpSearch(JSON.stringify({ entries: [
+    { id: 'abc1234', title: 'Titre', duration: 164, channel: 'Artiste' },
+    { id: 'xyz9876', title: 'Autre titre', webpage_url: 'https://www.youtube.com/watch?v=xyz9876' },
+  ] }));
+  assert.equal(results.length, 2);
+  assert.equal(results[0].url, 'https://www.youtube.com/watch?v=abc1234');
+  assert.equal(results[0].durationInSec, 164);
+  assert.equal(results[0].channel.name, 'Artiste');
+  assert.equal(results[1].url, 'https://www.youtube.com/watch?v=xyz9876');
+});
+
+test('recherche YouTube installe le binaire géré après ENOENT et conserve le cookie', async () => {
+  const calls = [];
+  let installs = 0;
+  const cookiePath = path.resolve(os.tmpdir(), 'youtube-account.txt');
+  const fakeSpawn = (command, args) => {
+    calls.push({ command, args });
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    setImmediate(() => {
+      if (command !== 'managed-yt-dlp') {
+        const error = new Error(`spawn ${command} ENOENT`);
+        error.code = 'ENOENT';
+        child.emit('error', error);
+        return;
+      }
+      child.stdout.end(JSON.stringify({ entries: [{ id: 'abc1234', title: 'Titre', duration: 164 }] }));
+      child.stderr.end();
+      setImmediate(() => child.emit('close', 0));
+    });
+    return child;
+  };
+
+  const results = await searchYouTubeCandidates('Artiste - Titre', {
+    candidates: [['yt-dlp', []]],
+    cookiesPaths: [cookiePath],
+    install: async () => { installs++; return 'managed-yt-dlp'; },
+    spawnImpl: fakeSpawn,
+    limit: 1,
+  });
+  assert.equal(results[0].url, 'https://www.youtube.com/watch?v=abc1234');
+  assert.equal(installs, 1);
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].args.includes(cookiePath));
+  assert.ok(calls[1].args.includes('ytsearch1:Artiste - Titre'));
 });
 
 test('n’ajoute les cookies YouTube que si un chemin local est configuré', () => {
