@@ -25,8 +25,12 @@ const { PresenceManager } = require('./utils/presenceManager');
 const { setupConsole } = require('./console-commands');
 const langStore = require('./langStore');
 const { t: botT } = require('./botI18n');
-// Pont WebSocket local (Test/) : diffuse les logs du bot sur :7777 pour l'app C# (PC + tel).
-try { require('./Test/wsBridge'); } catch (e) { console.error('[wsBridge] ' + e.message); }
+// Les ponts de Test exposent une commande distante sans authentification.
+// Ils restent désactivés par défaut, en particulier sur l'hébergement public.
+const ENABLE_TEST_MODULES = /^(1|true|yes)$/i.test(String(process.env.ENABLE_TEST_MODULES || 'false'));
+if (ENABLE_TEST_MODULES) {
+  try { require('./Test/wsBridge'); } catch (e) { console.error('[wsBridge] ' + e.message); }
+}
 
 // --- Configuration ---
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -447,7 +451,9 @@ client.login(TOKEN).catch((e) => {
   process.exit(1);
 });
 
-// --- Hook de pilotage externe (Test/ : pont WS app C#, commandes depuis le tel) ---
-try { require('./Test/botHook')(client, deps); } catch (e) { Logger.error(`Hook Test: ${e.message}`); }
+// --- Hook de pilotage externe (Test/ : réservé aux essais sur machine privée) ---
+if (ENABLE_TEST_MODULES) {
+  try { require('./Test/botHook')(client, deps); } catch (e) { Logger.error(`Hook Test: ${e.message}`); }
+}
 
 module.exports = { client, getPlayer };

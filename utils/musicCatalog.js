@@ -4,6 +4,57 @@ const { searchSpotifyCatalog, getSpotifyArtistAlbums } = require('./spotify');
 
 const cache = new Map();
 const CACHE_TTL = 30_000;
+const WORLD_CHART_TTL = 10 * 60_000;
+let worldChartCache = null;
+let worldChartRequest = null;
+
+function normalizeWorldChart(payload) {
+  if (payload?.error) {
+    throw new Error(payload.error.message || 'Le classement Deezer est indisponible.');
+  }
+  if (!Array.isArray(payload?.data)) {
+    throw new Error('Réponse invalide du classement Deezer.');
+  }
+
+  return payload.data.slice(0, 25).flatMap((track, index) => {
+    const url = track.link || (track.id ? `https://www.deezer.com/track/${track.id}` : null);
+    if (!url || !track.title) return [];
+    return [{
+      provider: 'deezer',
+      kind: 'track',
+      title: track.title,
+      subtitle: track.artist?.name || '',
+      url,
+      duration: Number(track.duration) || 0,
+      chartPosition: index + 1,
+      worldChart: true,
+    }];
+  });
+}
+
+async function getWorldTopTracks({ fetchImpl = globalThis.fetch, fresh = false } = {}) {
+  if (!fresh && worldChartCache?.expiresAt > Date.now()) return worldChartCache.items;
+  if (worldChartRequest) return worldChartRequest;
+  if (typeof fetchImpl !== 'function') throw new Error('fetch n’est pas disponible dans cette version de Node.js.');
+
+  worldChartRequest = (async () => {
+    const response = await fetchImpl('https://api.deezer.com/chart/0/tracks?limit=25', {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!response.ok) throw new Error(`API Deezer indisponible (HTTP ${response.status}).`);
+    const items = normalizeWorldChart(await response.json());
+    if (!items.length) throw new Error('Le classement Deezer ne contient aucun morceau.');
+    worldChartCache = { expiresAt: Date.now() + WORLD_CHART_TTL, items };
+    return items;
+  })();
+
+  try {
+    return await worldChartRequest;
+  } finally {
+    worldChartRequest = null;
+  }
+}
 
 function describe(item) {
   const provider = item.provider === 'youtube' ? 'YouTube' : item.provider === 'spotify' ? 'Spotify' : 'Deezer';
@@ -82,4 +133,4 @@ async function searchCatalog(query, { limit = 10, fresh = false } = {}) {
 
 function getArtistAlbums(artistId) { return getSpotifyArtistAlbums(artistId); }
 
-module.exports = { searchCatalog, getArtistAlbums, describe };
+module.exports = { searchCatalog, getArtistAlbums, getWorldTopTracks, normalizeWorldChart, describe };

@@ -43,6 +43,20 @@ async function runGit(args) {
   }
 }
 
+async function hasGitCheckout(root = ROOT) {
+  try {
+    const result = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 10_000,
+      windowsHide: true,
+    });
+    return String(result.stdout || '').trim() === 'true';
+  } catch (_) {
+    return false;
+  }
+}
+
 function githubRepoFromRemote(remoteUrl) {
   let repoPath = '';
   const https = String(remoteUrl).match(/^https?:\/\/github\.com\/([^?#]+)$/i);
@@ -79,6 +93,9 @@ function createUpdater({ client, database, log }) {
   }
 
   async function fetchStatus() {
+    if (!(await hasGitCheckout())) {
+      throw new Error('Ce dossier ne contient pas de dépôt Git (.git). Utilise une installation Kinetic reliée à GitHub pour activer /update.');
+    }
     if (!/^[A-Za-z0-9._-]+$/.test(REMOTE) || REMOTE.startsWith('-')) {
       throw new Error('UPDATE_REMOTE contient un nom de remote Git invalide.');
     }
@@ -357,16 +374,31 @@ function createUpdater({ client, database, log }) {
     }
   }
 
-  function start() {
+  let startPromise = null;
+
+  async function start() {
     if (!CHECK_ENABLED) {
       logWith(log, 'info', 'Vérification automatique des mises à jour désactivée (UPDATE_CHECK_ENABLED=false).');
-      return;
+      return false;
     }
-    if (interval) return;
-    void checkOnce();
-    interval = setInterval(() => { void checkOnce(); }, CHECK_INTERVAL_MINUTES * 60 * 1000);
-    interval.unref?.();
-    logWith(log, 'info', `Vérification GitHub toutes les ${CHECK_INTERVAL_MINUTES} minute(s).`);
+    if (interval) return true;
+    if (startPromise) return startPromise;
+    startPromise = (async () => {
+      if (!(await hasGitCheckout())) {
+        logWith(log, 'info', 'Mise à jour Git interne ignorée : aucun dépôt .git dans ce déploiement.');
+        return false;
+      }
+      await checkOnce();
+      interval = setInterval(() => { void checkOnce(); }, CHECK_INTERVAL_MINUTES * 60 * 1000);
+      interval.unref?.();
+      logWith(log, 'info', `Vérification GitHub toutes les ${CHECK_INTERVAL_MINUTES} minute(s).`);
+      return true;
+    })();
+    try {
+      return await startPromise;
+    } finally {
+      startPromise = null;
+    }
   }
 
   return {
@@ -404,4 +436,4 @@ async function restartProcess() {
   process.exit(0);
 }
 
-module.exports = { createUpdater };
+module.exports = { createUpdater, hasGitCheckout };

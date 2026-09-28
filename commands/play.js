@@ -3,10 +3,10 @@ const crypto = require('crypto');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 const { resolveQuery } = require('../utils/resolve');
 const { cleanMediaQuery } = require('../utils/mediaQuery');
-const { searchCatalog, getArtistAlbums } = require('../utils/musicCatalog');
+const { searchCatalog, getArtistAlbums, getWorldTopTracks } = require('../utils/musicCatalog');
+const { selectAutocompleteItems, toAutocompleteChoice } = require('../utils/catalogAutocomplete');
 const embeds = require('../utils/embeds');
 const { tr } = require('../utils/embedI18n');
-const play = require('play-dl');
 
 const PAGE_SIZE = 25;
 const sessions = new Map();
@@ -117,6 +117,9 @@ async function handleCatalogInteraction(interaction, deps) {
       return true;
     }
     const songs = await resolveQuery(item.url);
+    if (item.provider === 'youtube' && songs[0]) {
+      songs[0] = { ...songs[0], title: item.title || songs[0].title, duration: item.duration || songs[0].duration };
+    }
     const { added, queued } = await queueSongs(interaction, deps, songs);
     await interaction.editReply({
       content: `${added} titre${added === 1 ? '' : 's'} ajouté${added === 1 ? '' : 's'}${queued ? ' à la file d’attente' : ' · lecture lancée'}.`,
@@ -134,7 +137,7 @@ module.exports = {
     name: 'play',
     description: 'Cherche et joue musique sur YouTube, Spotify et Deezer',
     options: [
-      { name: 'query', description: 'Titre, artiste, album, playlist ou lien', type: 3, required: true, autocomplete: true },
+      { name: 'query', description: 'Titre, artiste, lien ; vide = Top 25 mondial', type: 3, required: true, autocomplete: true },
       { name: 'insert-first', description: 'Mettre la musique en haut de la file', type: 5, required: false },
     ],
   },
@@ -143,11 +146,17 @@ module.exports = {
 
   async autocomplete(interaction) {
     const query = interaction.options.getFocused().toString().trim();
+    if (!query) {
+      const items = await getWorldTopTracks().catch((error) => {
+        console.warn(`[catalogue] Top mondial Deezer indisponible: ${error.message}`);
+        return [];
+      });
+      const choices = selectAutocompleteItems(items, 25).map(toAutocompleteChoice);
+      return interaction.respond({ choices });
+    }
     if (query.length < 2) return interaction.respond({ choices: [] });
-    const items = await searchCatalog(query, { limit: 5 }).catch(() => []);
-    const choices = items.map((item) => ({
-      name: `${providerLabel(item.provider)} · ${item.kind} · ${item.title}`.slice(0, 100), value: item.url,
-    })).filter((item) => item.value?.length <= 100).slice(0, 25);
+    const items = await searchCatalog(query, { limit: 10 }).catch(() => []);
+    const choices = selectAutocompleteItems(items).map(toAutocompleteChoice);
     return interaction.respond({ choices });
   },
 
@@ -195,10 +204,7 @@ module.exports = {
     if (!ctx.member?.voice?.channel) return reply({ embeds: [embeds.errorEmbed(tr(lang).needVoice, lang)] });
     await reply({ embeds: [embeds.searchEmbed(query, lang)] });
     try {
-      const validation = /(?:youtube\.com|youtu\.be)/i.test(query) ? await play.validate(query) : null;
-      const songs = validation === 'yt_video'
-        ? [{ title: query, url: query, source: 'youtube' }]
-        : await resolveQuery(query);
+      const songs = await resolveQuery(query);
       const { queued, player } = await queueSongs(ctx, deps, songs);
       if (queued) return edit({ embeds: [embeds.addedEmbed(songs[0], player.queue.length, player.queue.length, lang)] });
       return edit({ embeds: [embeds.playingEmbed(songs[0], player, lang)] });

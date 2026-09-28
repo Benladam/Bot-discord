@@ -36,9 +36,12 @@ function streamUrl(url) {
       p.on('close', c => {
         const u = out.trim().split(/\r?\n/).pop();
         if (c === 0 && isAudioUrl(u)) { done = true; resolve(u); return; }
-        const reason = c === 0 && u && !isAudioUrl(u)
+        let reason = c === 0 && u && !isAudioUrl(u)
           ? 'yt-dlp a renvoyé une vignette au lieu du flux audio (version probablement obsolète).'
           : err.trim().slice(-300);
+        if (/sign in to confirm|confirm you(?:'|’)re not a bot|not a bot/i.test(reason)) {
+          reason = 'YouTube bloque cette requête de lecture depuis l’hébergeur. Essaie un autre résultat ou une autre source.';
+        }
         retry(reason || `yt-dlp s'est arrêté avec le code ${c}.`);
       });
     };

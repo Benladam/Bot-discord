@@ -53,20 +53,33 @@ class MusicPlayer {
     if (this.sender) this.sender.stop();
     this.current = song; this.isPlaying = true; this.isPaused = false;
     const generation = ++this._generation;
-    this.sender = await OpusSender.start(this.connection, song.url, () => console.log('🔊 SON ÉMIS — lecture maison active.'), async () => {
-      if (generation === this._generation && this.isPlaying) await this.playNext();
-    }, async (error) => {
-      if (generation !== this._generation || !this.isPlaying) return;
-      console.error('[audio] lecture impossible:', error.message);
-      this.isPlaying = false;
-      this.isPaused = false;
-      this.current = null;
-      this.sender = null;
-      this._activity();
-      try {
-        await this.lastChannel?.send(`❌ Lecture impossible : ${error.message}`);
-      } catch (_) { /* salon supprimé ou permissions manquantes */ }
-    });
+    try {
+      this.sender = await OpusSender.start(this.connection, song.url, () => console.log('🔊 SON ÉMIS — lecture maison active.'), async () => {
+        if (generation === this._generation && this.isPlaying) await this.playNext();
+      }, async (error) => {
+        if (generation !== this._generation || !this.isPlaying) return;
+        console.error('[audio] lecture impossible:', error.message);
+        this.isPlaying = false;
+        this.isPaused = false;
+        this.current = null;
+        this.sender = null;
+        this._activity();
+        try {
+          await this.lastChannel?.send(`❌ Lecture impossible : ${error.message}`);
+        } catch (_) { /* salon supprimé ou permissions manquantes */ }
+      });
+    } catch (error) {
+      // L'extraction du flux peut échouer avant que le processus audio existe.
+      // Réinitialiser l'état évite qu'une tentative ratée bloque toute la file.
+      if (generation === this._generation) {
+        this.isPlaying = false;
+        this.isPaused = false;
+        this.current = null;
+        this.sender = null;
+        this._activity();
+      }
+      throw error;
+    }
     this.sender.setVolume(this.volume);
     if (onEmbed) await onEmbed(song);
     this._activity(); return song;

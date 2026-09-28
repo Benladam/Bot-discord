@@ -6,6 +6,20 @@
 const play = require('play-dl');
 const { isSpotifyUrl, resolveSpotifyLink } = require('./spotify');
 
+function youtubeVideoId(value) {
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    if (host === 'youtu.be') return parsed.pathname.split('/').filter(Boolean)[0] || null;
+    if (!['youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtube-nocookie.com'].includes(host)) return null;
+    const fromQuery = parsed.searchParams.get('v');
+    if (fromQuery) return fromQuery;
+    return parsed.pathname.match(/^\/(?:shorts|embed|live)\/([^/?]+)/i)?.[1] || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /**
  * Résout une requête utilisateur en une ou plusieurs chansons jouables.
  * @returns {Promise<Array<{title,url,duration,thumbnail,source}>>}
@@ -23,6 +37,13 @@ async function resolveQuery(query) {
 
   // 2) Lien YouTube
   if (query.includes('youtube.com') || query.includes('youtu.be')) {
+    const videoId = youtubeVideoId(query);
+    // Ne pas demander les métadonnées par play-dl avant la lecture : YouTube
+    // bloque souvent ces requêtes d'hébergeur avec "Sign in to confirm...".
+    // yt-dlp récupère le flux audio dans audioSender.js au démarrage de la lecture.
+    if (videoId) {
+      return [{ title: `YouTube · ${videoId}`, url: query, duration: 0, thumbnail: null, source: 'youtube' }];
+    }
     const valid = await play.validate(query);
     if (!valid) {
       throw new Error('Lien YouTube invalide.');
@@ -93,4 +114,4 @@ async function resolveDeezerLink(url) {
   return ready;
 }
 
-module.exports = { resolveQuery };
+module.exports = { resolveQuery, youtubeVideoId };

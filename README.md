@@ -205,13 +205,21 @@ permet de lire le contenu que d'une playlist appartenant au compte OAuth ou
 auquel ce compte collabore. Le mode identifiants d'application seul ne permet
 donc pas de lire les titres de toutes les playlists publiques.
 
-`/play query niska` ouvre un menu privé paginé pour choisir un morceau, un album,
-un artiste ou une playlist YouTube/Spotify/Deezer. Choisir un artiste Spotify
+En saisissant `/play query niska`, l’autocomplétion native propose jusqu’à 25
+morceaux avec artiste/durée, puis des playlists et autres résultats. Si tu envoies
+la requête sans choisir une suggestion, un menu privé paginé permet de parcourir
+les morceaux, albums, artistes et playlists YouTube/Spotify/Deezer. Choisir un artiste Spotify
 ouvre sa discographie publique. Les playlists affichées sont celles visibles
 par la recherche du catalogue ; l’API Spotify actuelle peut toutefois refuser
 leurs titres si le compte OAuth de l’application n’en est ni propriétaire ni
 collaborateur. Une liste privée n’est pas accessible avec les seuls identifiants
 d’application.
+
+En laissant le champ `query` vide, l’autocomplétion propose le Top 25 mondial
+Deezer, avec rang, artiste et durée. Les choix renvoient vers les morceaux Deezer,
+que le lecteur résout ensuite pour la lecture. Le classement est mis en cache
+10 minutes ; si l’API Deezer ne répond pas, cette liste peut être temporairement
+indisponible.
 
 `/playlist action:create name:...` crée une playlist pour le serveur. Les actions
 `add`, `list`, `play`, `remove` et `delete` permettent aux membres de partager
@@ -314,3 +322,8 @@ package.json            Dépendances JavaScript
 launch.sh               Lanceur Linux/macOS
 Heuss-GUI.bat           Lanceur GUI Windows
 ```
+
+Les modules de contrôle de `Test/` sont désactivés par défaut. Ils ouvrent un pont
+de commande local sans authentification et ne doivent pas être activés sur Kinetic.
+Le bot ignore aussi ses vérifications Git internes quand le dossier déployé n'a pas
+de dépôt `.git`; dans ce cas, utilise le déploiement GitHub de Kinetic.

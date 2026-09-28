@@ -70,7 +70,8 @@ async function searchSpotifyCatalog(query, limit = 5) {
     const artist = (track.artists || []).map((item) => item.name).join(', ');
     results.push({
       provider: 'spotify', kind: 'track', title: track.name,
-      subtitle: artist, url: track.external_urls?.spotify || `https://open.spotify.com/track/${track.id}`,
+      subtitle: artist, duration: Math.floor((track.duration_ms || 0) / 1000),
+      url: track.external_urls?.spotify || `https://open.spotify.com/track/${track.id}`,
     });
   }
   for (const album of body.albums?.items || []) {
