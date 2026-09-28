@@ -128,7 +128,16 @@ async function handleCatalogInteraction(interaction, deps) {
       await interaction.editReply(renderSession(id, session));
       return true;
     }
-    const songs = await resolveQuery(item.url);
+    const songs = item.provider === 'soundcloud'
+      ? [{
+        title: item.title || 'Musique SoundCloud',
+        url: item.url,
+        duration: item.duration || 0,
+        thumbnail: item.thumbnail || null,
+        source: 'soundcloud',
+        fallbackQuery: [item.subtitle, item.title].filter(Boolean).join(' - '),
+      }]
+      : await resolveQuery(item.url);
     if (item.provider !== 'soundcloud') {
       for (const song of songs) {
         const fallbackTitle = item.kind === 'track' ? item.title : song.title || item.title;

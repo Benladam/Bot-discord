@@ -21,19 +21,26 @@ function youtubeVideoId(value) {
   }
 }
 
+function normalizeSoundCloudTrack(track) {
+  const title = track.name || 'Musique inconnue';
+  const artist = track.user?.username || track.publisher?.name || '';
+  return {
+    title,
+    url: track.permalink || track.url,
+    duration: track.durationInSec || 0,
+    thumbnail: track.thumbnail || null,
+    source: 'soundcloud',
+    fallbackQuery: [artist, title].filter(Boolean).join(' - '),
+  };
+}
+
 async function resolveSoundCloudLink(url) {
   if (!configureSoundCloud()) throw new Error('Les liens SoundCloud nécessitent SOUNDCLOUD_CLIENT_ID dans le fichier .env.');
   const entry = await play.soundcloud(url);
   const tracks = entry.type === 'track' ? [entry]
     : entry.type === 'playlist' ? await entry.all_tracks()
       : [];
-  const songs = tracks.slice(0, 100).map((track) => ({
-    title: track.name || 'Musique inconnue',
-    url: track.permalink || track.url,
-    duration: track.durationInSec || 0,
-    thumbnail: track.thumbnail || null,
-    source: 'soundcloud',
-  })).filter((track) => track.url);
+  const songs = tracks.slice(0, 100).map(normalizeSoundCloudTrack).filter((track) => track.url);
   if (!songs.length) throw new Error('Aucun morceau SoundCloud public et lisible trouvé dans ce lien.');
   return songs;
 }
@@ -138,4 +145,4 @@ async function resolveDeezerLink(url) {
   return ready;
 }
 
-module.exports = { resolveQuery, youtubeVideoId };
+module.exports = { resolveQuery, youtubeVideoId, normalizeSoundCloudTrack };

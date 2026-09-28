@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { resolveQuery, youtubeVideoId } = require('../utils/resolve');
+const { resolveQuery, youtubeVideoId, normalizeSoundCloudTrack } = require('../utils/resolve');
 
 test('un lien YouTube direct ne déclenche pas la requête play-dl de métadonnées', async () => {
   const url = 'https://www.youtube.com/watch?v=abc123';
@@ -12,4 +12,15 @@ test('un lien YouTube direct ne déclenche pas la requête play-dl de métadonn�
     thumbnail: null,
     source: 'youtube',
   }]);
+});
+
+test('les pistes SoundCloud conservent artiste et titre pour un repli YouTube', () => {
+  const song = normalizeSoundCloudTrack({
+    name: 'Track',
+    permalink: 'https://soundcloud.com/artist/track',
+    durationInSec: 180,
+    user: { username: 'Artist' },
+  });
+  assert.equal(song.source, 'soundcloud');
+  assert.equal(song.fallbackQuery, 'Artist - Track');
 });

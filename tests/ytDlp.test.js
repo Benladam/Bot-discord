@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { PassThrough } = require('node:stream');
 const { ensureManagedYtDlp, parseChecksum, releaseAsset } = require('../utils/ytDlp');
-const { buildYtDlpArgs, streamUrl } = require('../utils/audioSender');
+const { buildYtDlpArgs, getYouTubeCookiesPath, streamUrl } = require('../utils/audioSender');
 const { getSoundCloudClientId } = require('../utils/soundcloud');
 
 test('sélectionne le binaire yt-dlp officiel pour les plateformes courantes', () => {
@@ -28,12 +28,31 @@ test('active explicitement le runtime JavaScript Node de yt-dlp', () => {
 });
 
 test('n’ajoute les cookies YouTube que si un chemin local est configuré', () => {
+  const projectRoot = path.resolve(os.tmpdir(), 'bot-discord-cookie-test');
   const args = buildYtDlpArgs([], 'https://youtube.com/watch?v=test', {
     cookiesPath: 'private/youtube-cookies.txt',
+    projectRoot,
   });
-  assert.deepEqual(args.slice(2, 4), ['--cookies', 'private/youtube-cookies.txt']);
+  assert.deepEqual(args.slice(2, 4), ['--cookies', path.join(projectRoot, 'private', 'youtube-cookies.txt')]);
   assert.ok(!buildYtDlpArgs([], 'https://youtube.com/watch?v=test', { cookiesPath: '' }).includes('--cookies'));
   assert.ok(!buildYtDlpArgs([], 'https://example.com/audio', { cookiesPath: 'private/youtube-cookies.txt' }).includes('--cookies'));
+});
+
+test('détecte le fichier de cookies privé par défaut dans data/', async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-cookies-'));
+  const cookiePath = path.join(projectRoot, 'data', 'youtube-cookies.txt');
+  await fs.mkdir(path.dirname(cookiePath), { recursive: true });
+  await fs.writeFile(cookiePath, '# test uniquement\n');
+
+  try {
+    assert.equal(getYouTubeCookiesPath({ env: {}, projectRoot }), cookiePath);
+    const args = buildYtDlpArgs([], 'https://youtube.com/watch?v=test', { projectRoot, env: {} });
+    assert.deepEqual(args.slice(2, 4), ['--cookies', cookiePath]);
+    assert.equal(getYouTubeCookiesPath({ env: { YOUTUBE_COOKIES_PATH: 'private/session.txt' }, projectRoot }),
+      path.join(projectRoot, 'private', 'session.txt'));
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
 });
 
 test('SoundCloud reste désactivé proprement si aucun identifiant client n’est fourni', () => {
