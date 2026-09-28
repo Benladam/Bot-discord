@@ -176,13 +176,13 @@ module.exports = {
       });
       if (items === AUTOCOMPLETE_TIMEOUT) {
         console.warn('[catalogue] Le Top 25 Deezer dépasse le délai d’autocomplétion Discord.');
-        return interaction.respond({ choices: [toSearchFallbackChoice('', { worldChart: true })] });
+        return interaction.respond([toSearchFallbackChoice('', { worldChart: true })]);
       }
-      if (!items.length) return interaction.respond({ choices: [toSearchFallbackChoice('', { worldChart: true })] });
+      if (!items.length) return interaction.respond([toSearchFallbackChoice('', { worldChart: true })]);
       const choices = selectAutocompleteItems(items, 25).map(toAutocompleteChoice);
-      return interaction.respond({ choices });
+      return interaction.respond(choices);
     }
-    if (query.length < 2) return interaction.respond({ choices: [] });
+    if (query.length < 2) return interaction.respond([]);
     const search = deps.searchCatalog || searchCatalog;
     const items = await withinAutocompleteBudget(() => search(query, {
       limit: 10,
@@ -194,10 +194,10 @@ module.exports = {
       });
     if (items === AUTOCOMPLETE_TIMEOUT || !items?.length) {
       if (items === AUTOCOMPLETE_TIMEOUT) console.warn('[catalogue] Recherche musicale au-delà du délai d’autocomplétion Discord.');
-      return interaction.respond({ choices: [toSearchFallbackChoice(query)] });
+      return interaction.respond([toSearchFallbackChoice(query)]);
     }
     const choices = selectAutocompleteItems(items).map(toAutocompleteChoice);
-    return interaction.respond({ choices });
+    return interaction.respond(choices);
   },
 
   async execute(ctx, args, deps) {

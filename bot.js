@@ -303,10 +303,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       try { await cmd.autocomplete(interaction, deps); }
       catch (e) {
         Logger.error(`Erreur autocomplétion /${interaction.commandName}: ${e.message}`);
-        if (!interaction.responded) await interaction.respond({ choices: [] }).catch(() => {});
+        if (!interaction.responded) await interaction.respond([]).catch(() => {});
       }
     } else if (!interaction.responded) {
-      await interaction.respond({ choices: [] }).catch(() => {});
+      await interaction.respond([]).catch(() => {});
     }
     return;
   }

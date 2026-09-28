@@ -87,9 +87,9 @@ test('le champ /play vide propose les 25 morceaux du classement mondial Deezer',
   let response;
   await playCommand.autocomplete({
     options: { getFocused: () => '' },
-    respond: async (payload) => { response = payload; },
+    respond: async (choices) => { assert.ok(Array.isArray(choices)); response = choices; },
   });
-  assert.deepEqual(response.choices, choices);
+  assert.deepEqual(response, choices);
 });
 
 test('l’autocomplétion répond avec un choix de secours si un fournisseur dépasse le délai', async () => {
@@ -97,13 +97,13 @@ test('l’autocomplétion répond avec un choix de secours si un fournisseur dé
   let response;
   await playCommand.autocomplete({
     options: { getFocused: () => 'niska' },
-    respond: async (payload) => { response = payload; },
+    respond: async (choices) => { assert.ok(Array.isArray(choices)); response = choices; },
   }, {
     autocompleteTimeoutMs: 5,
     searchCatalog: () => new Promise(() => {}),
   });
 
-  assert.deepEqual(response.choices, [{ name: '🔎 Rechercher « niska »', value: 'niska' }]);
+  assert.deepEqual(response, [{ name: '🔎 Rechercher « niska »', value: 'niska' }]);
 });
 
 test('le Top mondial en retard renvoie un choix de secours au lieu de laisser expirer Discord', async () => {
@@ -111,11 +111,11 @@ test('le Top mondial en retard renvoie un choix de secours au lieu de laisser ex
   let response;
   await playCommand.autocomplete({
     options: { getFocused: () => '' },
-    respond: async (payload) => { response = payload; },
+    respond: async (choices) => { assert.ok(Array.isArray(choices)); response = choices; },
   }, {
     autocompleteTimeoutMs: 5,
     getWorldTopTracks: () => new Promise(() => {}),
   });
 
-  assert.deepEqual(response.choices, [{ name: '🌍 Rechercher « Top mondial »', value: 'top mondial' }]);
+  assert.deepEqual(response, [{ name: '🌍 Rechercher « Top mondial »', value: 'top mondial' }]);
 });
