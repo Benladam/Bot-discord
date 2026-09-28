@@ -32,6 +32,7 @@ test('sélectionne le binaire yt-dlp officiel pour les plateformes courantes', (
 test('active explicitement le runtime JavaScript Node de yt-dlp', () => {
   const args = buildYtDlpArgs([], 'https://youtube.com/watch?v=test');
   assert.deepEqual(args.slice(0, 2), ['--js-runtimes', `node:${process.execPath}`]);
+  assert.deepEqual(args.slice(2, 4), ['--remote-components', 'ejs:github']);
   assert.ok(args.includes('--no-playlist'));
 });
 
@@ -44,6 +45,7 @@ test('construit une recherche yt-dlp avec limite et cookies locaux', () => {
   });
   assert.ok(args.includes('--dump-single-json'));
   assert.ok(args.includes('--flat-playlist'));
+  assert.deepEqual(args.slice(2, 4), ['--remote-components', 'ejs:github']);
   assert.ok(args.includes('--playlist-end'));
   assert.ok(args.includes('3'));
   assert.ok(args.includes('ytsearch3:Artiste - Titre'));
@@ -108,7 +110,8 @@ test('n’ajoute les cookies YouTube que si un chemin local est configuré', () 
     cookiesPath: 'private/youtube-cookies.txt',
     projectRoot,
   });
-  assert.deepEqual(args.slice(2, 4), ['--cookies', path.join(projectRoot, 'private', 'youtube-cookies.txt')]);
+  const cookieIndex = args.indexOf('--cookies');
+  assert.deepEqual(args.slice(cookieIndex, cookieIndex + 2), ['--cookies', path.join(projectRoot, 'private', 'youtube-cookies.txt')]);
   assert.ok(!buildYtDlpArgs([], 'https://youtube.com/watch?v=test', { cookiesPath: '' }).includes('--cookies'));
   assert.ok(!buildYtDlpArgs([], 'https://example.com/audio', { cookiesPath: 'private/youtube-cookies.txt' }).includes('--cookies'));
 });
@@ -122,7 +125,8 @@ test('détecte le fichier de cookies privé par défaut dans data/', async () =>
   try {
     assert.equal(getYouTubeCookiesPath({ env: {}, projectRoot }), cookiePath);
     const args = buildYtDlpArgs([], 'https://youtube.com/watch?v=test', { projectRoot, env: {} });
-    assert.deepEqual(args.slice(2, 4), ['--cookies', cookiePath]);
+    const cookieIndex = args.indexOf('--cookies');
+    assert.deepEqual(args.slice(cookieIndex, cookieIndex + 2), ['--cookies', cookiePath]);
     assert.equal(getYouTubeCookiesPath({ env: { YOUTUBE_COOKIES_PATH: 'private/session.txt' }, projectRoot }),
       path.join(projectRoot, 'private', 'session.txt'));
     assert.deepEqual(getYouTubeCookiesPaths({

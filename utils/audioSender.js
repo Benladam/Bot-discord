@@ -150,6 +150,7 @@ function ytDlpCandidates() {
 
 function buildYtDlpArgs(preArgs, url, { playerClient, cookiesPath, projectRoot = PROJECT_ROOT, env = process.env } = {}) {
   const args = [...preArgs, '--js-runtimes', `node:${process.execPath}`];
+  args.push('--remote-components', 'ejs:github');
   const resolvedCookiesPath = cookiesPath === undefined
     ? getYouTubeCookiesPath({ env, projectRoot })
     : normalizeCookiesPath(cookiesPath, projectRoot);
@@ -171,6 +172,7 @@ function buildYtDlpSearchArgs(preArgs, query, {
   const args = [
     ...preArgs,
     '--js-runtimes', `node:${process.execPath}`,
+    '--remote-components', 'ejs:github',
     '--no-warnings', '--flat-playlist', '--dump-single-json', '--skip-download',
     '--playlist-end', String(safeLimit),
   ];

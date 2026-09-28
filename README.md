@@ -55,7 +55,9 @@ les dépendances npm. Si l'hôte n'a pas `yt-dlp`, le bot télécharge au premie
 besoin le binaire officiel correspondant au système, vérifie son SHA-256, puis
 le conserve dans le dossier de données (`BOT_DATA_DIR`, `%APPDATA%\\bot-discord`
 sous Windows ou `data/` sous Linux/macOS). L'hôte doit autoriser HTTPS sortant
-vers GitHub. Une installation personnelle peut être forcée avec `YTDLP_PATH` :
+vers GitHub : le bot active le runtime Node et les composants EJS officiels de
+`yt-dlp` pour résoudre les challenges YouTube. Une installation personnelle
+peut être forcée avec `YTDLP_PATH` :
 
 ```env
 YTDLP_PATH=C:\\outils\\yt-dlp.exe
