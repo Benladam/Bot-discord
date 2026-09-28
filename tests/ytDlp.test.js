@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
+const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
@@ -68,10 +69,18 @@ test('parse les résultats JSON yt-dlp en URLs YouTube jouables', () => {
 
 test('recherche YouTube installe le binaire géré après ENOENT et conserve le cookie', async () => {
   const calls = [];
+  const cookieCopies = [];
   let installs = 0;
-  const cookiePath = path.resolve(os.tmpdir(), 'youtube-account.txt');
+  const cookieDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-search-cookie-'));
+  const cookiePath = path.join(cookieDir, 'cookies.txt');
+  const cookieContents = '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsource-cookie\n';
+  await fs.writeFile(cookiePath, cookieContents);
   const fakeSpawn = (command, args) => {
     calls.push({ command, args });
+    const cookieIndex = args.indexOf('--cookies');
+    const workingPath = args[cookieIndex + 1];
+    cookieCopies.push({ path: workingPath, contents: fsSync.readFileSync(workingPath, 'utf8') });
+    fsSync.writeFileSync(workingPath, '# yt-dlp rewrote its working cookie jar\n');
     const child = new EventEmitter();
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
@@ -90,18 +99,25 @@ test('recherche YouTube installe le binaire géré après ENOENT et conserve le 
     return child;
   };
 
-  const results = await searchYouTubeCandidates('Artiste - Titre', {
-    candidates: [['yt-dlp', []]],
-    cookiesPaths: [cookiePath],
-    install: async () => { installs++; return 'managed-yt-dlp'; },
-    spawnImpl: fakeSpawn,
-    limit: 1,
-  });
-  assert.equal(results[0].url, 'https://www.youtube.com/watch?v=abc1234');
-  assert.equal(installs, 1);
-  assert.equal(calls.length, 2);
-  assert.ok(calls[1].args.includes(cookiePath));
-  assert.ok(calls[1].args.includes('ytsearch1:Artiste - Titre'));
+  try {
+    const results = await searchYouTubeCandidates('Artiste - Titre', {
+      candidates: [['yt-dlp', []]],
+      cookiesPaths: [cookiePath],
+      install: async () => { installs++; return 'managed-yt-dlp'; },
+      spawnImpl: fakeSpawn,
+      limit: 1,
+    });
+    assert.equal(results[0].url, 'https://www.youtube.com/watch?v=abc1234');
+    assert.equal(installs, 1);
+    assert.equal(calls.length, 2);
+    assert.ok(calls[1].args.includes('ytsearch1:Artiste - Titre'));
+    assert.equal(cookieCopies.length, 2);
+    assert.ok(cookieCopies.every(copy => copy.path !== cookiePath && copy.contents === cookieContents));
+    assert.notEqual(cookieCopies[0].path, cookieCopies[1].path);
+    assert.equal(await fs.readFile(cookiePath, 'utf8'), cookieContents);
+  } finally {
+    await fs.rm(cookieDir, { recursive: true, force: true });
+  }
 });
 
 test('n’ajoute les cookies YouTube que si un chemin local est configuré', () => {
@@ -280,8 +296,13 @@ test('réessaie une vidéo YouTube bloquée avec le client intégré sans compte
 });
 
 test('essaie le deuxième fichier cookies quand le premier compte est refusé', async () => {
-  const first = path.resolve(os.tmpdir(), 'youtube-account-1.txt');
-  const second = path.resolve(os.tmpdir(), 'youtube-account-2.txt');
+  const cookieDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-cookie-fallback-'));
+  const first = path.join(cookieDir, 'account-1.txt');
+  const second = path.join(cookieDir, 'account-2.txt');
+  const firstContents = '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tfirst-account\n';
+  const secondContents = '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecond-account\n';
+  await fs.writeFile(first, firstContents);
+  await fs.writeFile(second, secondContents);
   const calls = [];
   const fakeSpawn = (command, args) => {
     calls.push({ command, args });
@@ -290,7 +311,11 @@ test('essaie le deuxième fichier cookies quand le premier compte est refusé', 
     child.stderr = new PassThrough();
     child.kill = () => true;
     setImmediate(() => {
-      const accepted = args.includes(second);
+      const cookieIndex = args.indexOf('--cookies');
+      const workingPath = args[cookieIndex + 1];
+      const workingContents = fsSync.readFileSync(workingPath, 'utf8');
+      const accepted = workingContents === secondContents;
+      fsSync.writeFileSync(workingPath, '# yt-dlp rewrote its working cookie jar\n');
       child.stdout.end(accepted ? 'https://audio.example/stream\n' : '');
       child.stderr.end(accepted ? '' : 'Sign in to confirm you are not a bot');
       setImmediate(() => child.emit('close', accepted ? 0 : 1));
@@ -298,16 +323,22 @@ test('essaie le deuxième fichier cookies quand le premier compte est refusé', 
     return child;
   };
 
-  const audioUrl = await streamUrl('https://youtube.com/watch?v=test', {
-    candidates: [['yt-dlp', []]],
-    cookiesPaths: [first, second],
-    install: async () => { throw new Error('should not install'); },
-    spawnImpl: fakeSpawn,
-  });
-  assert.equal(audioUrl, 'https://audio.example/stream');
-  assert.equal(calls.length, 2);
-  assert.ok(calls[0].args.includes(first));
-  assert.ok(calls[1].args.includes(second));
+  try {
+    const audioUrl = await streamUrl('https://youtube.com/watch?v=test', {
+      candidates: [['yt-dlp', []]],
+      cookiesPaths: [first, second],
+      install: async () => { throw new Error('should not install'); },
+      spawnImpl: fakeSpawn,
+    });
+    assert.equal(audioUrl, 'https://audio.example/stream');
+    assert.equal(calls.length, 2);
+    assert.notEqual(calls[0].args[calls[0].args.indexOf('--cookies') + 1], first);
+    assert.notEqual(calls[1].args[calls[1].args.indexOf('--cookies') + 1], second);
+    assert.equal(await fs.readFile(first, 'utf8'), firstContents);
+    assert.equal(await fs.readFile(second, 'utf8'), secondContents);
+  } finally {
+    await fs.rm(cookieDir, { recursive: true, force: true });
+  }
 });
 
 test('lit uniquement le checksum de l’asset demandé', () => {

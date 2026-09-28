@@ -1,5 +1,6 @@
 /** Envoi audio maison : yt-dlp -> FFmpeg Ogg/Opus -> RTP/UDP. */
 const fs = require('fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('child_process');
 const ffmpegStatic = require('ffmpeg-static');
@@ -84,6 +85,29 @@ function describeCookiesFile(cookiesPath) {
   }
 }
 
+function createTemporaryCookiesCopy(sourcePath) {
+  if (!sourcePath) return null;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-discord-ytdlp-cookies-'));
+  try {
+    if (process.platform !== 'win32') fs.chmodSync(directory, 0o700);
+    const workingPath = path.join(directory, 'cookies.txt');
+    fs.copyFileSync(sourcePath, workingPath, fs.constants.COPYFILE_EXCL);
+    if (process.platform !== 'win32') fs.chmodSync(workingPath, 0o600);
+    let cleaned = false;
+    return {
+      path: workingPath,
+      cleanup() {
+        if (cleaned) return;
+        cleaned = true;
+        try { fs.rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch (_) { /* nettoyage au prochain démarrage du système */ }
+      },
+    };
+  } catch (error) {
+    try { fs.rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch (_) { /* ignorer le nettoyage secondaire */ }
+    throw error;
+  }
+}
+
 function normalizeCookiesPath(value, projectRoot = PROJECT_ROOT) {
   const configured = String(value || '').trim();
   if (!configured) return '';
@@ -107,6 +131,13 @@ function getYouTubeCookiesPaths({ env = process.env, projectRoot = PROJECT_ROOT 
 
 function getYouTubeCookiesPath({ env = process.env, projectRoot = PROJECT_ROOT } = {}) {
   return getYouTubeCookiesPaths({ env, projectRoot })[0] || '';
+}
+
+function configuredCookiesPath(options = {}) {
+  const projectRoot = options.projectRoot || PROJECT_ROOT;
+  return options.cookiesPath === undefined
+    ? getYouTubeCookiesPath({ env: options.env || process.env, projectRoot })
+    : normalizeCookiesPath(options.cookiesPath, projectRoot);
 }
 
 async function soundCloudStream(url) {
@@ -263,18 +294,35 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let childClosed = false;
     let timer;
+    let cleanupTimer;
     let child;
+    let cookiesCopy = null;
+    const cleanupCookiesCopy = () => {
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+      cookiesCopy?.cleanup();
+      cookiesCopy = null;
+    };
     const finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (!child || childClosed) cleanupCookiesCopy();
+      else {
+        cleanupTimer = setTimeout(cleanupCookiesCopy, 10_000);
+        cleanupTimer.unref?.();
+      }
       resolve(result);
     };
     try {
+      cookiesCopy = createTemporaryCookiesCopy(configuredCookiesPath(options));
+      options = { ...options, cookiesPath: cookiesCopy?.path || '' };
       child = spawnImpl(command, buildYtDlpSearchArgs(preArgs, query, options), { windowsHide: true });
     } catch (error) {
-      finish({ items: [], error: error.message, missing: error.code === 'ENOENT' });
+      childClosed = true;
+      cleanupCookiesCopy();
+      finish({ items: [], error: error.code === 'ENOENT' ? error.message : `Impossible de préparer la recherche yt-dlp (${error.code || 'erreur'}).`, missing: error.code === 'ENOENT' });
       return;
     }
     timer = setTimeout(() => {
@@ -289,8 +337,14 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
       }
     });
     child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-4_000); });
-    child.on('error', (error) => finish({ items: [], error: error.message, missing: error.code === 'ENOENT' }));
+    child.on('error', (error) => {
+      childClosed = true;
+      cleanupCookiesCopy();
+      finish({ items: [], error: error.message, missing: error.code === 'ENOENT' });
+    });
     child.on('close', (code) => {
+      childClosed = true;
+      cleanupCookiesCopy();
       if (settled) return;
       const items = code === 0 ? parseYtDlpSearch(stdout) : [];
       if (items.length) {
@@ -372,18 +426,36 @@ function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
     let stderr = '';
     let settled = false;
     let timedOut = false;
+    let childClosed = false;
     let timer;
+    let cleanupTimer;
     let child;
+    let cookiesCopy = null;
+    const cleanupCookiesCopy = () => {
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+      cookiesCopy?.cleanup();
+      cookiesCopy = null;
+    };
     const finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (!child || childClosed) cleanupCookiesCopy();
+      else {
+        cleanupTimer = setTimeout(cleanupCookiesCopy, 10_000);
+        cleanupTimer.unref?.();
+      }
       resolve(result);
     };
     try {
+      const sourceCookiesPath = isYouTubeUrl(url) ? configuredCookiesPath(options) : '';
+      cookiesCopy = createTemporaryCookiesCopy(sourceCookiesPath);
+      options = { ...options, cookiesPath: cookiesCopy?.path || '' };
       child = spawnImpl(command, buildYtDlpArgs(preArgs, url, options), { windowsHide: true });
     } catch (error) {
-      finish({ error: error.message, missing: error.code === 'ENOENT' });
+      childClosed = true;
+      cleanupCookiesCopy();
+      finish({ error: error.code === 'ENOENT' ? error.message : `Impossible de préparer le flux yt-dlp (${error.code || 'erreur'}).`, missing: error.code === 'ENOENT' });
       return;
     }
 
@@ -400,8 +472,14 @@ function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
       const text = chunk.toString();
       stderr = (stderr + text).slice(-4_000);
     });
-    child.on('error', (error) => finish({ error: error.message, missing: error.code === 'ENOENT' }));
+    child.on('error', (error) => {
+      childClosed = true;
+      cleanupCookiesCopy();
+      finish({ error: error.message, missing: error.code === 'ENOENT' });
+    });
     child.on('close', (code) => {
+      childClosed = true;
+      cleanupCookiesCopy();
       if (settled) return;
       if (timedOut) { finish({ error: `yt-dlp a dépassé le délai de ${YTDLP_TIMEOUT_MS / 1000} secondes.` }); return; }
       const audioUrl = stdout.trim().split(/\r?\n/).pop();
