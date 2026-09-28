@@ -17,6 +17,7 @@ const {
 } = require('discord.js');
 require('dotenv').config();
 const { MusicPlayer } = require('./utils/musicPlayer');
+const guildDatabase = require('./utils/database');
 
 const { setupConsole } = require('./console-commands');
 const langStore = require('./langStore');
@@ -63,6 +64,10 @@ client.cooldowns = new Collection();
 function getPlayer(guildId) {
   if (!client.musicPlayers.has(guildId)) {
     const p = new MusicPlayer(guildId, client);
+    if (guildId) {
+      const savedVolume = Number(guildDatabase.getGuildSetting(guildId, 'defaultVolume', 1));
+      p.volume = Number.isFinite(savedVolume) ? Math.max(0, Math.min(1, savedVolume)) : 1;
+    }
     // Quand la lecture change, on met à jour la présence (bio) du bot.
     p.onActivityChange = (info) => {
       if (info) c_user_setActivity(info);
@@ -93,7 +98,7 @@ const deps = { getPlayer, prefix: PREFIX, isOwner, langFor, langStore, botT };
 // --- Mode de lancement rapide (Phase 5) ---
 // BOT_MODE = 'all' (défaut) | 'music' (musique seule) | 'admin' (admin seule)
 const BOT_MODE = (process.env.BOT_MODE || 'all').toLowerCase();
-const MUSIC_CMDS = new Set(['play', 'pause', 'resume', 'skip', 'stop', 'queue', 'now', 'volume', 'loop', 'shuffle', 'leave', 'help']);
+const MUSIC_CMDS = new Set(['play', 'playlist', 'pause', 'resume', 'skip', 'stop', 'queue', 'now', 'volume', 'loop', 'shuffle', 'leave', 'help']);
 const CORE_CMDS = new Set(['link', 'language']);
 function commandMode(name) {
   if (CORE_CMDS.has(name)) return 'core';
@@ -147,7 +152,12 @@ function buildSlashCommands() {
     if (Array.isArray(options)) {
       for (const opt of options) {
         if (opt.type === 4) builder = builder.addIntegerOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
-        else if (opt.type === 3) builder = builder.addStringOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required).setAutocomplete(!!opt.autocomplete));
+        else if (opt.type === 3) builder = builder.addStringOption((o) => {
+          o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required);
+          if (Array.isArray(opt.choices)) o.addChoices(...opt.choices);
+          else if (opt.autocomplete) o.setAutocomplete(true);
+          return o;
+        });
         else if (opt.type === 5) builder = builder.addBooleanOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
       }
     }
@@ -246,6 +256,17 @@ client.once(Events.ClientReady, async (c) => {
 
 // Slash commands
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isButton?.() || interaction.isStringSelectMenu?.()) {
+    if (interaction.customId?.startsWith('playcat:')) {
+      try { await client.commands.get('play')?.handleCatalogInteraction?.(interaction, deps); }
+      catch (e) {
+        Logger.error(`Erreur catalogue musical: ${e.message}`);
+        if (interaction.deferred || interaction.replied) await interaction.editReply({ content: `Erreur catalogue : ${e.message}`, embeds: [], components: [] }).catch(() => {});
+        else await interaction.reply({ content: `Erreur catalogue : ${e.message}`, ephemeral: true }).catch(() => {});
+      }
+      return;
+    }
+  }
   // Autocomplétion live de /play (recherche multi-résultats pendant la frappe)
   if (interaction.isAutocomplete()) {
     const cmd = client.commands.get(interaction.commandName);

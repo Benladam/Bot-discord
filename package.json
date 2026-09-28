@@ -3,8 +3,12 @@
   "version": "2.0.0",
   "description": "Bot Discord musique complet (YouTube + Spotify) avec commandes / et !",
   "main": "bot.js",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
-    "start": "node bot.js"
+    "start": "node bot.js",
+    "test": "node --test"
   },
   "dependencies": {
     "discord.js": "^14.27.0",

@@ -12,6 +12,8 @@ RUN apt-get update -y && apt-get install -y \
 RUN pip3 install --break-system-packages -U yt-dlp || pip3 install -U yt-dlp
 
 WORKDIR /app
+ENV BOT_DATA_DIR=/data
+RUN mkdir -p /data
 
 # Installer les deps Node depuis package.json
 COPY package.json ./

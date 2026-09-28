@@ -9,6 +9,11 @@ npm-debug.log
 *.log
 .DS_Store
 queue_state.json
+data/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
 .bot-gui-prefs.json
 bot.log
 gui_build/

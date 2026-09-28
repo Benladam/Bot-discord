@@ -11,6 +11,7 @@
  */
 
 const play = require('play-dl');
+const MAX_SPOTIFY_TRACKS = 100;
 
 let spotifySearchApi = null;
 let spotifySearchClientId = null;
@@ -57,6 +58,70 @@ async function searchSpotify(query, limit = 10) {
   }).filter((track) => track.url);
 }
 
+/** Recherche publique Spotify: morceaux, albums, artistes et playlists. */
+async function searchSpotifyCatalog(query, limit = 5) {
+  const api = await getSpotifyApi();
+  if (!api) return [];
+  const { body } = await api.search(query, ['track', 'album', 'artist', 'playlist'], {
+    limit: Math.min(10, Math.max(1, limit)), market: process.env.MUSIC_MARKET || 'FR',
+  });
+  const results = [];
+  for (const track of body.tracks?.items || []) {
+    const artist = (track.artists || []).map((item) => item.name).join(', ');
+    results.push({
+      provider: 'spotify', kind: 'track', title: track.name,
+      subtitle: artist, url: track.external_urls?.spotify || `https://open.spotify.com/track/${track.id}`,
+    });
+  }
+  for (const album of body.albums?.items || []) {
+    results.push({
+      provider: 'spotify', kind: 'album', title: album.name,
+      subtitle: `${(album.artists || []).map((item) => item.name).join(', ')} · ${album.total_tracks || '?'} titres`,
+      url: album.external_urls?.spotify || `https://open.spotify.com/album/${album.id}`,
+    });
+  }
+  for (const artist of body.artists?.items || []) {
+    results.push({
+      provider: 'spotify', kind: 'artist', title: artist.name,
+      subtitle: 'Voir les albums et singles',
+      url: artist.external_urls?.spotify || `https://open.spotify.com/artist/${artist.id}`,
+      artistId: artist.id,
+    });
+  }
+  for (const playlist of body.playlists?.items || []) {
+    if (!playlist) continue;
+    results.push({
+      provider: 'spotify', kind: 'playlist', title: playlist.name,
+      subtitle: `${playlist.owner?.display_name || 'Playlist publique'} · ${playlist.items?.total ?? playlist.tracks?.total ?? '?'} titres`,
+      url: playlist.external_urls?.spotify || `https://open.spotify.com/playlist/${playlist.id}`,
+    });
+  }
+  return results;
+}
+
+async function getSpotifyArtistAlbums(artistId, maxAlbums = 500) {
+  const api = await getSpotifyApi();
+  if (!api) throw new Error('Configure SPOTIFY_CLIENT_ID et SPOTIFY_CLIENT_SECRET pour ouvrir la discographie Spotify.');
+  const albums = [];
+  let offset = 0;
+  while (offset < maxAlbums) {
+    const limit = Math.min(10, maxAlbums - offset);
+    const { body } = await api.getArtistAlbums(String(artistId), {
+      include_groups: 'album,single,compilation,appears_on', limit, offset,
+      market: process.env.MUSIC_MARKET || 'FR',
+    });
+    albums.push(...(body.items || []).map((album) => ({
+      provider: 'spotify', kind: 'album', title: album.name,
+      subtitle: `${(album.artists || []).map((item) => item.name).join(', ')} · ${album.total_tracks || '?'} titres · ${album.release_date || ''}`.trim(),
+      url: album.external_urls?.spotify || `https://open.spotify.com/album/${album.id}`,
+    })));
+    if (!body.next || !body.items?.length) break;
+    offset += body.items.length;
+  }
+  const seen = new Set();
+  return albums.filter((item) => !seen.has(item.url) && seen.add(item.url));
+}
+
 function isSpotifyUrl(query) {
   return /(?:open\.spotify\.com|spotify\.com)\//i.test(query) || /^spotify:(?:track|album|playlist):/i.test(query);
 }
@@ -94,13 +159,42 @@ async function resolveTrack(api, track) {
   return yt;
 }
 
+async function resolveTracks(api, tracks) {
+  const resolved = [];
+  for (let offset = 0; offset < tracks.length && resolved.length < MAX_SPOTIFY_TRACKS; offset += 4) {
+    const batch = tracks.slice(offset, offset + 4);
+    const songs = await Promise.all(batch.map((track) =>
+      resolveTrack(api, track).catch((error) => {
+        console.warn(`[spotify] piste ignorée (${track?.name || 'sans titre'}): ${error.message}`);
+        return null;
+      })
+    ));
+    resolved.push(...songs.filter(Boolean).slice(0, MAX_SPOTIFY_TRACKS - resolved.length));
+  }
+  return resolved;
+}
+
+async function getSpotifyPlaylistItems(api, playlistId, limit, offset) {
+  const params = new URLSearchParams({
+    limit: String(limit), offset: String(offset),
+    market: process.env.MUSIC_MARKET || 'FR', additional_types: 'track',
+  });
+  const response = await fetch(`https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/items?${params}`, {
+    headers: { Authorization: `Bearer ${api.getAccessToken()}` },
+  });
+  if (response.status === 403) {
+    throw new Error('Spotify ne permet de lire cette playlist qu’avec le compte propriétaire ou un collaborateur autorisé.');
+  }
+  if (!response.ok) throw new Error(`Spotify refuse la lecture de la playlist (HTTP ${response.status}).`);
+  return response.json();
+}
+
 /**
- * Résout un lien Spotify (track / album / playlist) en une liste de chansons
- * prêtes à jouer sur YouTube.
+ * Résout un lien Spotify (track / album / playlist accessible) en chansons
+ * correspondantes sur YouTube. Les titres de playlist dépendent des droits OAuth.
  * @returns {Promise<Array<{title,url,duration,thumbnail,source}>>}
  */
 async function resolveSpotifyLink(url) {
-  const SpotifyWebApi = require('spotify-web-api-node');
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 
@@ -112,9 +206,7 @@ async function resolveSpotifyLink(url) {
     throw new Error('Ajoutez SPOTIFY_CLIENT_ID et SPOTIFY_CLIENT_SECRET dans .env pour les albums/playlists Spotify.');
   }
 
-  const api = new SpotifyWebApi({ clientId, clientSecret });
-  const grant = await api.clientCredentialsGrant();
-  api.setAccessToken(grant.body.access_token);
+  const api = await getSpotifyApi();
 
   const { type, id } = parseSpotifyUrl(url);
   const songs = [];
@@ -124,24 +216,27 @@ async function resolveSpotifyLink(url) {
     const s = await resolveTrack(api, body);
     if (s) songs.push(s);
   } else if (type === 'album') {
-    const { body } = await api.getAlbum(id);
-    for (const t of body.tracks.items) {
-      const s = await resolveTrack(api, t);
-      if (s) songs.push(s);
-    }
-  } else if (type === 'playlist') {
+    const tracks = [];
     let offset = 0;
-    while (true) {
-      const { body } = await api.getPlaylistTracks(id, { offset, limit: 100 });
-      for (const item of body.items) {
-        if (item.track) {
-          const s = await resolveTrack(api, item.track);
-          if (s) songs.push(s);
-        }
-      }
-      if (!body.next) break;
+    while (tracks.length < MAX_SPOTIFY_TRACKS) {
+      const limit = Math.min(50, MAX_SPOTIFY_TRACKS - tracks.length);
+      const { body } = await api.getAlbumTracks(id, { limit, offset, market: process.env.MUSIC_MARKET || 'FR' });
+      tracks.push(...(body.items || []));
+      if (!body.next || !body.items?.length) break;
       offset += body.items.length;
     }
+    songs.push(...await resolveTracks(api, tracks));
+  } else if (type === 'playlist') {
+    let offset = 0;
+    const tracks = [];
+    while (tracks.length < MAX_SPOTIFY_TRACKS) {
+      const limit = Math.min(100, MAX_SPOTIFY_TRACKS - tracks.length);
+      const page = await getSpotifyPlaylistItems(api, id, limit, offset);
+      tracks.push(...(page.items || []).map((entry) => entry.item || entry.track).filter(Boolean));
+      if (!page.next || !page.items?.length) break;
+      offset += page.items.length;
+    }
+    songs.push(...await resolveTracks(api, tracks));
   } else {
     throw new Error(
       'Lien Spotify non supporté. Utilisez un lien piste (track), album ou playlist.'
@@ -173,4 +268,6 @@ async function resolveTrackWithoutApi(url) {
   } catch (_) { return null; }
 }
 
-module.exports = { isSpotifyUrl, resolveSpotifyLink, searchSpotify };
+module.exports = {
+  isSpotifyUrl, resolveSpotifyLink, searchSpotify, searchSpotifyCatalog, getSpotifyArtistAlbums,
+};

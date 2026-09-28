@@ -4,6 +4,7 @@
 
 const { EmbedBuilder } = require('discord.js');
 const { tr } = require('../utils/embedI18n');
+const guildDatabase = require('../utils/database');
 
 module.exports = {
   data: { name: 'volume', description: 'Règle le volume (0-100)' },
@@ -24,6 +25,7 @@ module.exports = {
       });
     }
     const vol = player.setVolume(raw);
+    if (ctx.guildId) guildDatabase.setGuildSetting(ctx.guildId, 'defaultVolume', raw / 100);
     return ctx.reply({
       embeds: [new EmbedBuilder().setTitle(T.volTitle).setDescription(T.volumeSet(vol)).setColor('#0099FF')],
     });
