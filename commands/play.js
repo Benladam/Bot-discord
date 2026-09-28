@@ -12,7 +12,7 @@ const PAGE_SIZE = 25;
 const sessions = new Map();
 const SESSION_TTL = 10 * 60 * 1000;
 
-function providerLabel(provider) { return provider === 'spotify' ? '🟢 Spotify' : provider === 'deezer' ? '🟣 Deezer' : '▶ YouTube'; }
+function providerLabel(provider) { return provider === 'spotify' ? '🟢 Spotify' : provider === 'deezer' ? '🟣 Deezer' : provider === 'soundcloud' ? '🟠 SoundCloud' : '▶ YouTube'; }
 function userIdOf(ctx) { return ctx.user?.id || ctx.author?.id; }
 function isSlash(ctx) { return typeof ctx.isChatInputCommand === 'function' && ctx.isChatInputCommand(); }
 function spotifyArtistId(value) {
@@ -117,6 +117,12 @@ async function handleCatalogInteraction(interaction, deps) {
       return true;
     }
     const songs = await resolveQuery(item.url);
+    if (item.provider !== 'soundcloud') {
+      for (const song of songs) {
+        const fallbackTitle = item.kind === 'track' ? item.title : song.title || item.title;
+        song.fallbackQuery ||= [item.subtitle, fallbackTitle].filter(Boolean).join(' - ');
+      }
+    }
     if (item.provider === 'youtube' && songs[0]) {
       songs[0] = { ...songs[0], title: item.title || songs[0].title, duration: item.duration || songs[0].duration };
     }

@@ -144,6 +144,7 @@ async function searchYouTube(query) {
     duration: r.durationInSec || 0,
     thumbnail: r.thumbnail && r.thumbnail.url ? r.thumbnail.url : null,
     source: 'spotify',
+    fallbackQuery: searchQuery,
   };
 }
 

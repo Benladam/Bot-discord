@@ -67,7 +67,7 @@ class MusicPlayer {
         try {
           await this.lastChannel?.send(`❌ Lecture impossible : ${error.message}`);
         } catch (_) { /* salon supprimé ou permissions manquantes */ }
-      });
+      }, song.fallbackQuery);
     } catch (error) {
       // L'extraction du flux peut échouer avant que le processus audio existe.
       // Réinitialiser l'état évite qu'une tentative ratée bloque toute la file.

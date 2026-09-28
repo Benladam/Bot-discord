@@ -2,6 +2,7 @@
 const fs = require('fs');
 const { spawn } = require('child_process');
 const ffmpegStatic = require('ffmpeg-static');
+const play = require('play-dl');
 
 function bin(name, env) { if (process.env[env]) return process.env[env]; if (name === 'ffmpeg' && ffmpegStatic && fs.existsSync(ffmpegStatic)) return ffmpegStatic; return process.platform === 'win32' ? `${name}.exe` : name; }
 function isAudioUrl(value) {
@@ -10,6 +11,38 @@ function isAudioUrl(value) {
     return (parsed.protocol === 'https:' || parsed.protocol === 'http:')
       && !/(^|\.)ytimg\.com$/i.test(parsed.hostname);
   } catch (_) { return false; }
+}
+
+function isSoundCloudUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === 'snd.sc' || host === 'soundcloud.com' || host.endsWith('.soundcloud.com');
+  } catch (_) { return false; }
+}
+
+async function soundCloudStream(url) {
+  const result = await play.stream(url);
+  if (!result?.stream || typeof result.stream.pipe !== 'function') {
+    throw new Error('SoundCloud n’a pas fourni de flux audio lisible.');
+  }
+  return result.stream;
+}
+
+async function soundCloudSearchStream(query) {
+  const normalized = String(query || '').trim().slice(0, 200);
+  if (normalized.length < 2) throw new Error('Recherche SoundCloud trop courte.');
+  const tracks = await play.search(normalized, { limit: 5, source: { soundcloud: 'tracks' } });
+  let lastError = null;
+  for (const track of tracks) {
+    const url = track.permalink || track.url;
+    if (!url || !isSoundCloudUrl(url)) continue;
+    try {
+      return await soundCloudStream(url);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('Aucune piste SoundCloud publique et lisible trouvée.');
 }
 
 function streamUrl(url) {
@@ -23,13 +56,23 @@ function streamUrl(url) {
     } else {
       list.push(['python3', ['-m', 'yt_dlp']], ['yt-dlp', []]);
     }
-    let i = 0; let error = '';
+    let i = 0; let error = ''; let youtubeBlocked = false;
     const next = () => {
-      if (i >= list.length) return reject(new Error(error || 'Aucun flux audio valide renvoyé par yt-dlp. Mets à jour yt-dlp puis réessaie.'));
+      if (i >= list.length) {
+        return reject(new Error(youtubeBlocked
+          ? 'YouTube bloque cette requête de lecture depuis l’hébergeur.'
+          : error || 'Aucun flux audio valide renvoyé par yt-dlp. Mets à jour yt-dlp puis réessaie.'));
+      }
       const [cmd, pre] = list[i++];
       const p = spawn(cmd, [...pre, '--no-playlist', '-f', 'bestaudio/best', '-g', url], { windowsHide: true });
       let out = ''; let err = ''; let done = false;
-      const retry = (message) => { if (done) return; done = true; error = message; next(); };
+      const retry = (message) => {
+        if (done) return;
+        if (/sign in to confirm|confirm you(?:'|’)re not a bot|not a bot/i.test(message)) youtubeBlocked = true;
+        done = true;
+        error = message;
+        next();
+      };
       p.stdout.on('data', d => { out += d; });
       p.stderr.on('data', d => { err += d; });
       p.on('error', e => retry(e.message));
@@ -39,9 +82,6 @@ function streamUrl(url) {
         let reason = c === 0 && u && !isAudioUrl(u)
           ? 'yt-dlp a renvoyé une vignette au lieu du flux audio (version probablement obsolète).'
           : err.trim().slice(-300);
-        if (/sign in to confirm|confirm you(?:'|’)re not a bot|not a bot/i.test(reason)) {
-          reason = 'YouTube bloque cette requête de lecture depuis l’hébergeur. Essaie un autre résultat ou une autre source.';
-        }
         retry(reason || `yt-dlp s'est arrêté avec le code ${c}.`);
       });
     };
@@ -49,10 +89,25 @@ function streamUrl(url) {
   });
 }
 
-async function start(connection, url, onStart, onEnd, onError) {
-  const source = await streamUrl(url);
+async function prepareInput(url, fallbackQuery) {
+  if (isSoundCloudUrl(url)) return { stream: await soundCloudStream(url), fallback: false };
+  try {
+    return { url: await streamUrl(url), fallback: false };
+  } catch (error) {
+    if (!fallbackQuery || !/YouTube bloque cette requête de lecture/i.test(error.message)) throw error;
+    try {
+      return { stream: await soundCloudSearchStream(fallbackQuery), fallback: true };
+    } catch (fallbackError) {
+      throw new Error(`YouTube bloque la lecture depuis l’hébergeur et aucune piste correspondante n’est lisible sur SoundCloud. Sélectionne un résultat SoundCloud dans /play. (${fallbackError.message})`);
+    }
+  }
+}
+
+async function start(connection, url, onStart, onEnd, onError, fallbackQuery) {
+  const media = await prepareInput(url, fallbackQuery);
+  if (media.fallback) console.info('[audio] Bascule vers SoundCloud après un blocage YouTube.');
   const ffmpeg = spawn(bin('ffmpeg', 'FFMPEG_PATH'), [
-    '-hide_banner', '-loglevel', 'error', '-re', '-i', source, '-vn',
+    '-hide_banner', '-loglevel', 'error', '-re', '-i', media.stream ? 'pipe:0' : media.url, '-vn',
     '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
     '-c:a', 'libopus', '-application', 'audio', '-vbr', 'on', '-compression_level', '10',
     '-frame_duration', '20', '-ar', '48000', '-ac', '2', '-b:a', '160k',
@@ -90,6 +145,11 @@ async function start(connection, url, onStart, onEnd, onError) {
     frames.push(frame);
     if (frames.length > 250) frames.shift();
   }));
+  if (media.stream) {
+    media.stream.on('error', reportFfmpegError);
+    ffmpeg.stdin.on('error', reportFfmpegError);
+    media.stream.pipe(ffmpeg.stdin);
+  }
   ffmpeg.stderr.on('data', d => { ffmpegError = (ffmpegError + d.toString()).slice(-1000); });
   ffmpeg.on('error', e => {
     console.error('[ffmpeg] démarrage impossible:', e.message);
@@ -104,7 +164,7 @@ async function start(connection, url, onStart, onEnd, onError) {
     }
     const wait = setInterval(() => { if (!frames.length) { clearInterval(wait); if (!stopped) { if (readinessTimer) clearTimeout(readinessTimer); onEnd?.(); } } }, 100);
   });
-  return { pause() { paused = true; }, resume() { paused = false; }, setVolume() {}, stop() { stopped = true; clearInterval(tick); if (readinessTimer) clearTimeout(readinessTimer); try { ffmpeg.kill(); } catch (_) {} } };
+  return { pause() { paused = true; }, resume() { paused = false; }, setVolume() {}, stop() { stopped = true; clearInterval(tick); if (readinessTimer) clearTimeout(readinessTimer); try { media.stream?.destroy(); } catch (_) {} try { ffmpeg.kill(); } catch (_) {} } };
 }
 
 class OggParser {

@@ -20,11 +20,31 @@ function youtubeVideoId(value) {
   }
 }
 
+async function resolveSoundCloudLink(url) {
+  const entry = await play.soundcloud(url);
+  const tracks = entry.type === 'track' ? [entry]
+    : entry.type === 'playlist' ? await entry.all_tracks()
+      : [];
+  const songs = tracks.slice(0, 100).map((track) => ({
+    title: track.name || 'Musique inconnue',
+    url: track.permalink || track.url,
+    duration: track.durationInSec || 0,
+    thumbnail: track.thumbnail || null,
+    source: 'soundcloud',
+  })).filter((track) => track.url);
+  if (!songs.length) throw new Error('Aucun morceau SoundCloud public et lisible trouvé dans ce lien.');
+  return songs;
+}
+
 /**
  * Résout une requête utilisateur en une ou plusieurs chansons jouables.
  * @returns {Promise<Array<{title,url,duration,thumbnail,source}>>}
  */
 async function resolveQuery(query) {
+  if (/(?:soundcloud\.com|snd\.sc)\//i.test(query)) {
+    return resolveSoundCloudLink(query);
+  }
+
   // 1) Lien Spotify
   if (isSpotifyUrl(query)) {
     return resolveSpotifyLink(query);
@@ -82,6 +102,7 @@ async function resolveQuery(query) {
     duration: r.durationInSec || 0,
     thumbnail: r.thumbnail && r.thumbnail.url ? r.thumbnail.url : null,
     source: 'youtube',
+    fallbackQuery: query,
   }];
 }
 
@@ -104,6 +125,7 @@ async function resolveDeezerLink(url) {
         duration: track.durationInSec || video.durationInSec || 0,
         thumbnail: track.album?.cover?.medium || track.album?.cover_medium || null,
         source: 'deezer',
+        fallbackQuery: `${artist} - ${title}`.trim(),
       };
     }));
     resolved.forEach((song, index) => { songs[offset + index] = song; });

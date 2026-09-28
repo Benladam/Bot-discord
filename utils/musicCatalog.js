@@ -72,6 +72,16 @@ function normalizeYoutube(item, kind) {
   };
 }
 
+function normalizeSoundCloud(item) {
+  return {
+    provider: 'soundcloud', kind: 'track',
+    title: item.name || item.title || 'Sans titre',
+    subtitle: item.user?.username || item.publisher?.name || '',
+    url: item.permalink || item.url,
+    duration: item.durationInSec || 0,
+  };
+}
+
 function normalizeDeezer(item, kind) {
   const artist = item.artist?.name || item.creator?.name || '';
   return {
@@ -103,6 +113,9 @@ async function searchCatalog(query, { limit = 10, fresh = false } = {}) {
     safeSearch('YouTube vidéos', async () => (await play.search(normalized, {
       limit: perType, source: { youtube: 'video' },
     })).map((item) => normalizeYoutube(item, 'track'))),
+    safeSearch('SoundCloud morceaux', async () => (await play.search(normalized, {
+      limit: perType, source: { soundcloud: 'tracks' },
+    })).map(normalizeSoundCloud)),
     safeSearch('YouTube playlists', async () => (await play.search(normalized, {
       limit: Math.min(5, perType), source: { youtube: 'playlist' },
     })).map((item) => normalizeYoutube(item, 'playlist'))),
