@@ -5,6 +5,7 @@ RUN apt-get update -y && apt-get install -y \
     ffmpeg \
     python3 \
     python3-pip \
+    git \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -23,4 +24,4 @@ RUN npm install
 COPY . .
 
 # Le conteneur est un worker Discord : il n'a pas besoin d'ouvrir un port HTTP.
-CMD ["node", "bot.js"]
+CMD ["node", "supervisor.js"]

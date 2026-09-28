@@ -13,6 +13,15 @@ module.exports = {
     const lang = deps.langFor ? deps.langFor(ctx.user?.id || ctx.author?.id, ctx.guild?.id) : 'fr';
     const T = tr(lang);
     const p = deps.prefix;
+    const loaded = (name) => !deps.commands || deps.commands.has(name);
+    const extraFields = [];
+    const moderation = ['warn', 'warnings', 'unwarn', 'timeout', 'clear', 'kick', 'ban'].filter(loaded);
+    const utilities = ['ping', 'userinfo', 'serverinfo', 'avatar', 'poll'].filter(loaded);
+    const settings = ['controller', 'link', 'language', 'updatelog', 'update', 'about', 'presence'].filter(loaded);
+    const describeCommand = (name) => `/${name} — ${deps.commands?.get(name)?.data?.description || name}`;
+    if (moderation.length) extraFields.push({ name: '🛡️ Modération', value: moderation.map(describeCommand).join('\n') });
+    if (utilities.length) extraFields.push({ name: '🧰 Outils serveur', value: utilities.map(describeCommand).join('\n') });
+    if (settings.length) extraFields.push({ name: '⚙️ Réglages et crédits', value: `${settings.map(describeCommand).join('\n')}\n/presence est réservé au propriétaire du bot.` });
     const embed = new EmbedBuilder()
       .setTitle(T.helpTitle)
       .setDescription(T.helpIntro(p))
@@ -28,8 +37,10 @@ module.exports = {
         { name: `${p}volume  /  /volume [0-100]`, value: T.helpVolume },
         { name: `${p}loop  /  /loop [off|song|queue]`, value: T.helpLoop },
         { name: `${p}shuffle  /  /shuffle`, value: T.helpShuffle },
+        { name: `${p}playlist  /  /playlist`, value: 'Crée et gère les playlists partagées du serveur.' },
         { name: `${p}leave  /  /leave`, value: T.helpLeave },
-        { name: `${p}help  /  /help`, value: T.helpHelp }
+        { name: `${p}help  /  /help`, value: T.helpHelp },
+        ...extraFields,
       )
       .setFooter({ text: T.helpFooter });
 

@@ -48,7 +48,7 @@ class MusicPlayer {
   async playNext(onEmbed) {
     if (this.loopMode === 1 && this.current) this.queue.unshift(this.current);
     const song = this.getNextSong();
-    if (!song) { this.isPlaying = false; this.current = null; return null; }
+    if (!song) { this.isPlaying = false; this.current = null; this._activity(); return null; }
     if (!this.connection?.connected) throw new Error("Le bot n'est connecté à aucun canal vocal.");
     if (this.sender) this.sender.stop();
     this.current = song; this.isPlaying = true; this.isPaused = false;
@@ -86,7 +86,13 @@ class MusicPlayer {
   stop() { ++this._generation; this.clearQueue(); this.sender?.stop(); this.sender = null; this.current = null; this.isPlaying = false; this.isPaused = false; this._activity(); }
   destroy() { this.stop(); this.connection?.destroy(); this.connection = null; }
   setVolume(value) { this.volume = Math.max(0, Math.min(1, Number(value) || 0)); this.sender?.setVolume?.(this.volume); return Math.round(this.volume * 100); }
-  _activity() { try { this.client.user.setActivity(this.isPlaying && this.current ? this.current.title : '🎵 En attente', { type: 2 }); } catch (_) {} }
+  _activity() {
+    const info = this.isPlaying && this.current ? { title: this.current.title } : null;
+    try {
+      if (typeof this.onActivityChange === 'function') this.onActivityChange(info);
+      else this.client.user.setActivity(info?.title || '🎵 En attente', { type: 2 });
+    } catch (_) { /* ignore */ }
+  }
   getState() { const f = (s) => s && ({ title: s.title, url: s.url, thumbnail: s.thumbnail || null, source: s.source || 'youtube', duration: s.duration || 0 }); return { current: f(this.current), queue: this.queue.map(f), isPlaying: this.isPlaying, isPaused: this.isPaused, loopMode: this.loopMode, volume: this.volume }; }
 }
 module.exports = { MusicPlayer };

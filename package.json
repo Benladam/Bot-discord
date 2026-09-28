@@ -1,13 +1,15 @@
 {
-  "name": "discord-music-bot",
+  "name": "bot-discord-multifonction",
   "version": "2.0.0",
-  "description": "Bot Discord musique complet (YouTube + Spotify) avec commandes / et !",
+  "description": "Bot Discord multifonction : musique, modération et outils serveur",
+  "author": "lefauxmaghrebin (Discord) / Benladam (GitHub)",
+  "license": "MIT",
   "main": "bot.js",
   "engines": {
     "node": ">=22.5.0"
   },
   "scripts": {
-    "start": "node bot.js",
+    "start": "node supervisor.js",
     "test": "node --test"
   },
   "dependencies": {

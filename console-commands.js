@@ -218,7 +218,7 @@ const HELP = [
  * @param {(level:string, text:string)=>void} opts.log  affichage (cmd + GUI)
  * @param {boolean} opts.readStdin  lire le clavier de la fenêtre noire
  */
-function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT, getPlayer, langFor }) {
+function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT, getPlayer, langFor, setStatusText }) {
   const say = (t) => log('out', t);
   const ok = (t) => log('ok', t);
   const err = (t) => log('err', t);
@@ -470,8 +470,9 @@ function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT,
       // ---------- Divers ----------
       case 'status': {
         if (!rest) return err('Utilisation : /status <texte affiché>');
-        client.user.setActivity(rest, { type: 2 }); // 2 = Écoute
-        ok(`🎧 Activité du bot : « Écoute ${rest} »`);
+        if (typeof setStatusText === 'function') setStatusText(rest);
+        else client.user.setActivity(rest, { type: 2 }); // 2 = Écoute
+        ok(`🎧 Texte d’activité enregistré : « ${rest} »`);
         return;
       }
 

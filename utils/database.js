@@ -46,6 +46,11 @@ function getDatabase() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY(guild_id, setting_key)
     );
+    CREATE TABLE IF NOT EXISTS global_settings (
+      setting_key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS playlist_tracks (
       track_id INTEGER PRIMARY KEY AUTOINCREMENT,
       playlist_id INTEGER NOT NULL REFERENCES playlists(playlist_id) ON DELETE CASCADE,
@@ -98,6 +103,23 @@ function setGuildSetting(guildId, key, value) {
   db.prepare(`INSERT INTO guild_settings(guild_id, setting_key, value_json) VALUES (?, ?, ?)
     ON CONFLICT(guild_id, setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP`)
     .run(String(guildId), settingKey, encoded);
+}
+
+function getGlobalSetting(key, fallback = null) {
+  const row = getDatabase().prepare('SELECT value_json FROM global_settings WHERE setting_key = ?')
+    .get(String(key));
+  if (!row) return fallback;
+  try { return JSON.parse(row.value_json); } catch (_) { return fallback; }
+}
+
+function setGlobalSetting(key, value) {
+  const settingKey = String(key).trim();
+  if (!settingKey || settingKey.length > 80) throw new Error('Clé de configuration invalide.');
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined || encoded.length > 16_384) throw new Error('Valeur de configuration invalide ou trop volumineuse.');
+  getDatabase().prepare(`INSERT INTO global_settings(setting_key, value_json) VALUES (?, ?)
+    ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP`)
+    .run(settingKey, encoded);
 }
 
 function createPlaylist(guildId, ownerId, name) {
@@ -188,6 +210,6 @@ function deletePlaylist(guildId, ownerId, name) {
 }
 
 module.exports = {
-  getDatabase, closeDatabase, getGuildSetting, setGuildSetting,
+  getDatabase, closeDatabase, getGuildSetting, setGuildSetting, getGlobalSetting, setGlobalSetting,
   createPlaylist, listPlaylists, addTrack, getPlaylist, removeTrack, deletePlaylist,
 };

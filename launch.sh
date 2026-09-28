@@ -37,4 +37,4 @@ if ! command -v yt-dlp >/dev/null 2>&1 && [ -z "${YTDLP_PATH:-}" ] && ! python3 
   printf 'Attention: yt-dlp absent; la lecture YouTube ne fonctionnera pas avant installation.\n' >&2
 fi
 printf 'Démarrage du bot…\n'
-exec node bot.js
+exec node supervisor.js

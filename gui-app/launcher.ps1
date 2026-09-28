@@ -175,7 +175,7 @@ function Start-BotProcess {
     $errLog = Join-Path $script:LogDir 'bot.stderr.log'
     Close-LogReaders
     Remove-Item -LiteralPath $outLog, $errLog -Force -ErrorAction SilentlyContinue
-    $script:BotProcess = Start-Process -FilePath $nodePath -ArgumentList 'bot.js' -WorkingDirectory $script:Root -WindowStyle Hidden -PassThru -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+    $script:BotProcess = Start-Process -FilePath $nodePath -ArgumentList 'supervisor.js' -WorkingDirectory $script:Root -WindowStyle Hidden -PassThru -RedirectStandardOutput $outLog -RedirectStandardError $errLog
     $script:Readers.Remove($outLog); $script:Readers.Remove($errLog)
     $status.Text = "En cours (PID $($script:BotProcess.Id))"
     $startButton.Enabled = $false

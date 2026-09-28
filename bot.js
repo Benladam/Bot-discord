@@ -1,5 +1,5 @@
 /**
- * bot.js — Point d'entrée du bot musique Discord (YouTube + Spotify).
+ * bot.js — Point d'entrée du bot Discord multifonction.
  * Supporte à la fois les commandes slash (/) et le préfixe (!).
  */
 
@@ -18,6 +18,9 @@ const {
 require('dotenv').config();
 const { MusicPlayer } = require('./utils/musicPlayer');
 const guildDatabase = require('./utils/database');
+const { createUpdater } = require('./utils/updater');
+const { createMinecraftBridge } = require('./utils/minecraftBridge');
+const { PresenceManager } = require('./utils/presenceManager');
 
 const { setupConsole } = require('./console-commands');
 const langStore = require('./langStore');
@@ -53,12 +56,30 @@ const client = new Client({
   ],
 });
 
+const updater = createUpdater({
+  client,
+  database: guildDatabase,
+  log: (level, message) => {
+    if (level === 'error') Logger.error(message);
+    else if (level === 'warn') Logger.warn(message);
+    else Logger.info(message);
+  },
+});
+const presence = new PresenceManager({
+  client,
+  database: guildDatabase,
+  log: (level, message) => {
+    if (level === 'warn') Logger.warn(message);
+    else Logger.info(message);
+  },
+});
+
 client.commands = new Collection(); // nom -> module de commande
 client.musicPlayers = new Collection(); // guildId -> MusicPlayer
 let botConsole = null;                  // console terminal (voir ClientReady)
 // Callbacks de présence (déclarés ici car getPlayer peut être appelé avant ClientReady)
-let c_user_setActivity = () => {};
-let c_defaultActivity = () => {};
+let c_user_setActivity = (info) => presence.setMusicActivity('console', info);
+let c_defaultActivity = () => presence.setMusicActivity('console', null);
 client.cooldowns = new Collection();
 
 function getPlayer(guildId) {
@@ -68,11 +89,8 @@ function getPlayer(guildId) {
       const savedVolume = Number(guildDatabase.getGuildSetting(guildId, 'defaultVolume', 1));
       p.volume = Number.isFinite(savedVolume) ? Math.max(0, Math.min(1, savedVolume)) : 1;
     }
-    // Quand la lecture change, on met à jour la présence (bio) du bot.
-    p.onActivityChange = (info) => {
-      if (info) c_user_setActivity(info);
-      else c_defaultActivity();
-    };
+    // Une lecture active peut remplacer temporairement le texte cyclique.
+    p.onActivityChange = (info) => presence.setMusicActivity(`guild:${guildId}`, info);
     client.musicPlayers.set(guildId, p);
   }
   return client.musicPlayers.get(guildId);
@@ -93,17 +111,23 @@ function isOwner(userId) { return !!ownerId && userId === ownerId; }
 // Langue effective pour un utilisateur/serveur donné.
 function langFor(userId, guildId) { return langStore.resolve(userId, guildId); }
 
-const deps = { getPlayer, prefix: PREFIX, isOwner, langFor, langStore, botT };
+const deps = { getPlayer, prefix: PREFIX, isOwner, langFor, langStore, botT, updater, database: guildDatabase, presence, commands: client.commands };
+const minecraftBridge = createMinecraftBridge({
+  client,
+  getPlayer,
+  database: guildDatabase,
+  logger: Logger,
+});
 
 // --- Mode de lancement rapide (Phase 5) ---
 // BOT_MODE = 'all' (défaut) | 'music' (musique seule) | 'admin' (admin seule)
 const BOT_MODE = (process.env.BOT_MODE || 'all').toLowerCase();
 const MUSIC_CMDS = new Set(['play', 'playlist', 'pause', 'resume', 'skip', 'stop', 'queue', 'now', 'volume', 'loop', 'shuffle', 'leave', 'help']);
-const CORE_CMDS = new Set(['link', 'language']);
+const CORE_CMDS = new Set(['link', 'language', 'update', 'updatelog', 'presence', 'about']);
 function commandMode(name) {
   if (CORE_CMDS.has(name)) return 'core';
   if (MUSIC_CMDS.has(name)) return 'music';
-  return 'admin'; // ban, kick, timeout, nick, dm, etc.
+  return 'admin'; // modération et outils serveur
 }
 function commandAllowed(name) {
   const m = commandMode(name);
@@ -146,19 +170,30 @@ function buildSlashCommands() {
     let builder = new SlashCommandBuilder()
       .setName(cmd.data.name)
       .setDescription(cmd.data.description || 'Commande');
+    if (cmd.data.defaultMemberPermissions !== undefined) {
+      builder = builder.setDefaultMemberPermissions(cmd.data.defaultMemberPermissions);
+    }
     // Les options sont définies dans `data.options` par les modules de commande.
     // Accepte aussi `cmd.options` pour rester compatible avec d'anciens modules.
     const options = Array.isArray(cmd.data.options) ? cmd.data.options : cmd.options;
     if (Array.isArray(options)) {
       for (const opt of options) {
-        if (opt.type === 4) builder = builder.addIntegerOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
+        if (opt.type === 4) builder = builder.addIntegerOption((o) => {
+          o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required);
+          if (Number.isInteger(opt.minValue)) o.setMinValue(opt.minValue);
+          if (Number.isInteger(opt.maxValue)) o.setMaxValue(opt.maxValue);
+          return o;
+        });
         else if (opt.type === 3) builder = builder.addStringOption((o) => {
           o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required);
           if (Array.isArray(opt.choices)) o.addChoices(...opt.choices);
           else if (opt.autocomplete) o.setAutocomplete(true);
+          if (Number.isInteger(opt.minLength)) o.setMinLength(opt.minLength);
+          if (Number.isInteger(opt.maxLength)) o.setMaxLength(opt.maxLength);
           return o;
         });
         else if (opt.type === 5) builder = builder.addBooleanOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
+        else if (opt.type === 6) builder = builder.addUserOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
       }
     }
     arr.push(builder.toJSON());
@@ -185,22 +220,8 @@ function isInCooldown(userId, name, ms = 2000) {
 
 // --- Events ---
 client.once(Events.ClientReady, async (c) => {
-  // Référence au client, utilisée par les callbacks de présence du player.
-  let botUser = c.user;
-  // Repli de présence (quand aucune musique ne joue).
-  c_defaultActivity = () => {
-    try { botUser.setActivity(`${PREFIX}play | 🎵`, { type: 2 }); } catch (_) { /* ignore */ }
-  };
-  // Présence personnalisée (musique en cours) — type 2 = « Écoute … ».
-  c_user_setActivity = (info = {}) => {
-    try {
-      botUser.setActivity({
-        type: 2,
-        details: (info.details || '🎵 Musique').slice(0, 128),
-        state: (info.state || 'Bot Discord musique').slice(0, 128),
-      });
-    } catch (_) { /* ignore */ }
-  };
+  c_defaultActivity = () => presence.setMusicActivity('console', null);
+  c_user_setActivity = (info = {}) => presence.setMusicActivity('console', info);
   // Callback partagé (player de bot.js et de la console).
   client._onActivityChange = c_user_setActivity;
 
@@ -213,7 +234,9 @@ client.once(Events.ClientReady, async (c) => {
   }
   await resolveOwnerId();
   if (ownerId) Logger.info(`Propriétaire du bot : ${ownerId}`);
+  presence.start();
   c_defaultActivity();
+  updater.start();
 
 
 
@@ -229,6 +252,7 @@ client.once(Events.ClientReady, async (c) => {
     // Présence : on la met aussi à jour quand on lance une commande via le terminal.
     onActivityChange: c_user_setActivity,
     defaultActivity: c_defaultActivity,
+    setStatusText: (text) => presence.update({ messages: [text] }),
     langStore,
     isOwner,
     botT,
@@ -256,6 +280,7 @@ client.once(Events.ClientReady, async (c) => {
 
 // Slash commands
 client.on(Events.InteractionCreate, async (interaction) => {
+    if (await minecraftBridge.handleLinkButton(interaction)) return;
   if (interaction.isButton?.() || interaction.isStringSelectMenu?.()) {
     if (interaction.customId?.startsWith('playcat:')) {
       try { await client.commands.get('play')?.handleCatalogInteraction?.(interaction, deps); }
@@ -279,9 +304,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const cmd = client.commands.get(interaction.commandName);
   if (!cmd) return;
 
-  // Commande réservée au propriétaire : /link
-  if (interaction.commandName === 'link' && !isOwner(interaction.user.id)) {
-    return interaction.reply({ content: botT(langFor(interaction.user.id, interaction.guildId)).linkOnlyOwner, ephemeral: true });
+  if (cmd.ownerOnly && !isOwner(interaction.user.id)) {
+    const message = interaction.commandName === 'link'
+      ? botT(langFor(interaction.user.id, interaction.guildId)).linkOnlyOwner
+      : 'Cette commande est réservée au propriétaire du bot.';
+    return interaction.reply({ content: message, ephemeral: true });
   }
 
   if (isInCooldown(interaction.user.id, interaction.commandName)) {
@@ -331,6 +358,10 @@ client.on(Events.MessageCreate, async (message) => {
   const name = args.shift().toLowerCase();
   const cmd = client.commands.get(name);
   if (!cmd) return;
+
+  if (cmd.ownerOnly && !isOwner(message.author.id)) {
+    return message.reply(name === 'link' ? botT(langFor(message.author.id, message.guild?.id)).linkOnlyOwner : 'Cette commande est réservée au propriétaire du bot.');
+  }
 
   if (isInCooldown(message.author.id, name)) {
     return message.reply('⏱️ Trop rapide !');
@@ -388,13 +419,14 @@ client.on(Events.GuildCreate, async (guild) => {
       color: 0x5865f2,
       title: `👋 Merci de m'avoir ajouté sur ${guild.name} !`,
       description:
-        '**Heuss l\'Enfoiré** est un bot musique + modération pour ton serveur Discord.\n' +
+        '**Heuss l\'Enfoiré** réunit musique, modération et outils pour ton serveur Discord.\n' +
         'Voici comment démarrer :',
       fields: [
         { name: '🎵 Jouer de la musique', value: 'Rejoins un salon vocal puis tape `/play <musique ou lien>`', inline: false },
         { name: '🖥️ Ouvrir le panneau (contrôleur)', value: 'Le panneau web s\'ouvre automatiquement au lancement du bot. Sinon tape `/controller`', inline: false },
-        { name: '🛡️ Modération', value: '`/kick` · `/ban` · `/timeout` · `/nick` · `/dm`', inline: false },
-        { name: '❓ Aide', value: 'Tape `/help` pour la liste des commandes', inline: false },
+        { name: '🛡️ Modération', value: '`/warn` · `/warnings` · `/timeout` · `/clear` · `/kick` · `/ban`', inline: false },
+        { name: '🧰 Outils serveur', value: '`/ping` · `/userinfo` · `/serverinfo` · `/avatar` · `/poll`', inline: false },
+        { name: '❓ Aide', value: 'Tape `/help` pour la liste des commandes, `/about` pour les crédits.', inline: false },
       ],
       footer: { text: 'Support : discord.gg/YpAyfZ9Bs7' },
     };
