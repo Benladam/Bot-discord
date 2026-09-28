@@ -58,13 +58,35 @@ async function hasGitCheckout(root = ROOT) {
 }
 
 function githubRepoFromRemote(remoteUrl) {
+  const value = String(remoteUrl || '').trim();
+  let host = '';
   let repoPath = '';
-  const https = String(remoteUrl).match(/^https?:\/\/github\.com\/([^?#]+)$/i);
-  const ssh = String(remoteUrl).match(/^(?:ssh:\/\/git@github\.com\/|git@github\.com:)([^?#]+)$/i);
-  if (https) repoPath = https[1];
-  else if (ssh) repoPath = ssh[1];
 
-  repoPath = repoPath.replace(/\.git$/i, '').replace(/\/$/, '');
+  // Kinetic may add the configured Git username (and token, when present) to
+  // the HTTPS remote. Parse the URL so credentials never become part of the
+  // repository name or an error message.
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      host = parsed.hostname.toLowerCase();
+      repoPath = parsed.pathname;
+    } else if (parsed.protocol === 'ssh:') {
+      host = parsed.hostname.toLowerCase();
+      repoPath = parsed.pathname;
+    }
+  } catch (_) {
+    // Git also accepts SCP-style SSH remotes such as git@github.com:owner/repo.
+  }
+  if (host !== 'github.com') {
+    const scp = value.match(/^(?:[^@/]+@)?github\.com:([^?#]+)$/i);
+    if (scp) {
+      host = 'github.com';
+      repoPath = scp[1];
+    }
+  }
+
+  repoPath = repoPath.replace(/^\/+/, '').replace(/\.git$/i, '').replace(/\/+$/, '');
+  if (host !== 'github.com') repoPath = '';
   if (!/^[\w.-]+\/[\w.-]+$/.test(repoPath)) {
     throw new Error('Le dépôt origin doit être un dépôt GitHub au format owner/repo.');
   }
