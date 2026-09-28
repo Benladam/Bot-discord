@@ -190,7 +190,9 @@ async function streamUrl(url, { candidates = ytDlpCandidates(), install = ensure
     const embedded = await runYtDlp(command, args, url, spawnImpl, { playerClient: 'web_embedded' });
     if (embedded.audioUrl) return embedded.audioUrl;
     errors.push(embedded.error);
-    throw new Error('YouTube demande une vérification depuis cet hébergeur; le mode lecteur intégré sans compte n’a pas réussi pour ce titre. Configure YOUTUBE_COOKIES_PATH avec un fichier de cookies local seulement si ce contenu exige un compte, ou choisis un autre titre.');
+    const error = new Error('YouTube demande une vérification depuis cet hébergeur; le mode lecteur intégré sans compte n’a pas réussi pour ce titre. Configure YOUTUBE_COOKIES_PATH avec un fichier de cookies local seulement si ce contenu exige un compte, ou choisis un autre titre.');
+    error.code = 'YOUTUBE_AUTH_BLOCKED';
+    throw error;
   }
   const detail = errors.filter(Boolean).at(-1);
   throw new Error(detail || 'Aucun flux audio valide renvoyé par yt-dlp. Vérifie yt-dlp et YTDLP_PATH.');
@@ -201,7 +203,8 @@ async function prepareInput(url, fallbackQuery) {
   try {
     return { url: await streamUrl(url), fallback: false };
   } catch (error) {
-    if (!fallbackQuery || !/YouTube bloque cette requête de lecture/i.test(error.message)) throw error;
+    if (!fallbackQuery || (error.code !== 'YOUTUBE_AUTH_BLOCKED'
+        && !/YouTube bloque cette requête de lecture/i.test(error.message))) throw error;
     try {
       return { stream: await soundCloudSearchStream(fallbackQuery), fallback: true };
     } catch (fallbackError) {

@@ -99,7 +99,7 @@ test('ne tente pas de réinstaller yt-dlp si YouTube bloque une version déjà p
     candidates: [['yt-dlp', []]],
     install: async () => { installs++; return 'managed-yt-dlp'; },
     spawnImpl: fakeSpawn,
-  }), /YouTube demande une vérification/);
+  }), error => error.code === 'YOUTUBE_AUTH_BLOCKED' && /YouTube demande une vérification/.test(error.message));
   assert.equal(installs, 0);
 });
 
