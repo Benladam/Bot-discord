@@ -59,8 +59,8 @@ vers GitHub. Une installation personnelle peut être forcée avec `YTDLP_PATH` :
 
 ```env
 YTDLP_PATH=C:\\outils\\yt-dlp.exe
-# Facultatif : vide = auto-détection de data/youtube-cookies.txt si le fichier existe
-YOUTUBE_COOKIES_PATH=
+# Facultatif : chemins Netscape séparés par ;, premier prioritaire; vide = auto-détection de data/youtube-cookies.txt
+YOUTUBE_COOKIES_PATH=C:\chemin\compte-youtube.txt;C:\chemin\cookies-secours.txt
 FFMPEG_PATH=C:\\outils\\ffmpeg\\bin\\ffmpeg.exe
 ```
 
@@ -92,7 +92,7 @@ cp .env.example .env
 | `MINECRAFT_CHANNEL_ID` | pont Minecraft | Salon réservé aux changelogs Minecraft publiés après un redémarrage réussi |
 | `PORT` | pont Minecraft | Port attribué au WebSocket du bot sur Kinetic (`SERVER_PORT` est aussi reconnu) |
 | `YTDLP_PATH` | non | Chemin vers `yt-dlp` si absent du PATH |
-| `YOUTUBE_COOKIES_PATH` | non | Chemin relatif à la racine du bot ou absolu vers un fichier cookies YouTube Netscape. Si vide, `data/youtube-cookies.txt` est détecté automatiquement. Le dossier `data/` est ignoré par Git; ne publie jamais ce fichier : l’usage de cookies de compte peut entraîner des restrictions du compte. |
+| `YOUTUBE_COOKIES_PATH` | non | Un ou plusieurs chemins relatifs à la racine du bot ou absolus vers des fichiers cookies YouTube Netscape, séparés par `;`. Le premier est prioritaire, les suivants servent de secours. Si vide, `data/youtube-cookies.txt` est détecté automatiquement. Le dossier `data/` est ignoré par Git; ne publie jamais ces fichiers : l’usage de cookies de compte peut entraîner des restrictions du compte. |
 | `FFMPEG_PATH` | non | Chemin vers FFmpeg si absent du PATH |
 | `BOT_PRESENCE_STATUS` | non | Présence initiale : `online`, `dnd`, `idle` ou `invisible` |
 | `BOT_PRESENCE_TYPE` | non | Activité initiale : `playing`, `listening`, `watching` ou `competing` |
@@ -102,7 +102,8 @@ cp .env.example .env
 Pour le repli audio dans les deux sens, renseigne `SOUNDCLOUD_CLIENT_ID` dans
 l’environnement du bot (local ou Kinetic). Dépose un vrai fichier de cookies
 YouTube au format Netscape sous `data/youtube-cookies.txt`, ou définis
-`YOUTUBE_COOKIES_PATH` vers son emplacement. Quand une piste SoundCloud échoue,
+`YOUTUBE_COOKIES_PATH` vers un ou plusieurs emplacements séparés par `;`. Le bot
+essaie les fichiers dans l’ordre. Quand une piste SoundCloud échoue,
 le bot cherche son titre sur YouTube; quand YouTube échoue, il essaie SoundCloud.
 Sans identifiant SoundCloud, ce deuxième fournisseur ne peut pas être utilisé.
 

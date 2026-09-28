@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { PassThrough } = require('node:stream');
 const { ensureManagedYtDlp, parseChecksum, releaseAsset } = require('../utils/ytDlp');
-const { buildYtDlpArgs, getYouTubeCookiesPath, streamUrl } = require('../utils/audioSender');
+const { buildYtDlpArgs, getYouTubeCookiesPath, getYouTubeCookiesPaths, streamUrl } = require('../utils/audioSender');
 const { getSoundCloudClientId } = require('../utils/soundcloud');
 
 test('sélectionne le binaire yt-dlp officiel pour les plateformes courantes', () => {
@@ -50,6 +50,12 @@ test('détecte le fichier de cookies privé par défaut dans data/', async () =>
     assert.deepEqual(args.slice(2, 4), ['--cookies', cookiePath]);
     assert.equal(getYouTubeCookiesPath({ env: { YOUTUBE_COOKIES_PATH: 'private/session.txt' }, projectRoot }),
       path.join(projectRoot, 'private', 'session.txt'));
+    assert.deepEqual(getYouTubeCookiesPaths({
+      env: { YOUTUBE_COOKIES_PATH: 'private/account.txt;private/backup.txt' }, projectRoot,
+    }), [
+      path.join(projectRoot, 'private', 'account.txt'),
+      path.join(projectRoot, 'private', 'backup.txt'),
+    ]);
   } finally {
     await fs.rm(projectRoot, { recursive: true, force: true });
   }
@@ -150,6 +156,37 @@ test('réessaie une vidéo YouTube bloquée avec le client intégré sans compte
   assert.equal(audioUrl, 'https://audio.example/stream');
   assert.equal(calls.length, 2);
   assert.ok(calls[1].args.includes('youtube:player_client=web_embedded'));
+});
+
+test('essaie le deuxième fichier cookies quand le premier compte est refusé', async () => {
+  const first = path.resolve(os.tmpdir(), 'youtube-account-1.txt');
+  const second = path.resolve(os.tmpdir(), 'youtube-account-2.txt');
+  const calls = [];
+  const fakeSpawn = (command, args) => {
+    calls.push({ command, args });
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    setImmediate(() => {
+      const accepted = args.includes(second);
+      child.stdout.end(accepted ? 'https://audio.example/stream\n' : '');
+      child.stderr.end(accepted ? '' : 'Sign in to confirm you are not a bot');
+      setImmediate(() => child.emit('close', accepted ? 0 : 1));
+    });
+    return child;
+  };
+
+  const audioUrl = await streamUrl('https://youtube.com/watch?v=test', {
+    candidates: [['yt-dlp', []]],
+    cookiesPaths: [first, second],
+    install: async () => { throw new Error('should not install'); },
+    spawnImpl: fakeSpawn,
+  });
+  assert.equal(audioUrl, 'https://audio.example/stream');
+  assert.equal(calls.length, 2);
+  assert.ok(calls[0].args.includes(first));
+  assert.ok(calls[1].args.includes(second));
 });
 
 test('lit uniquement le checksum de l’asset demandé', () => {

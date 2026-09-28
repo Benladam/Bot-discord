@@ -56,13 +56,23 @@ function normalizeCookiesPath(value, projectRoot = PROJECT_ROOT) {
   return path.isAbsolute(configured) ? path.normalize(configured) : path.resolve(projectRoot, configured);
 }
 
-function getYouTubeCookiesPath({ env = process.env, projectRoot = PROJECT_ROOT } = {}) {
+function splitCookiesPaths(value) {
+  return String(value || '').split(/[;\r\n]+/).map((entry) => entry.trim()).filter(Boolean);
+}
+
+function getYouTubeCookiesPaths({ env = process.env, projectRoot = PROJECT_ROOT } = {}) {
   const configured = String(env.YOUTUBE_COOKIES_PATH || '').trim();
-  if (configured) return normalizeCookiesPath(configured, projectRoot);
+  if (configured) {
+    return [...new Set(splitCookiesPaths(configured).map((entry) => normalizeCookiesPath(entry, projectRoot)))];
+  }
 
   // Détection sans configuration : déposer le fichier privé dans data/ suffit.
   const defaultPath = path.join(projectRoot, 'data', 'youtube-cookies.txt');
-  return fs.existsSync(defaultPath) ? defaultPath : '';
+  return fs.existsSync(defaultPath) ? [defaultPath] : [];
+}
+
+function getYouTubeCookiesPath({ env = process.env, projectRoot = PROJECT_ROOT } = {}) {
+  return getYouTubeCookiesPaths({ env, projectRoot })[0] || '';
 }
 
 async function soundCloudStream(url) {
@@ -198,34 +208,57 @@ function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
   });
 }
 
-async function streamUrl(url, { candidates = ytDlpCandidates(), install = ensureManagedYtDlpOnce, spawnImpl = spawn } = {}) {
+async function streamUrl(url, {
+  candidates = ytDlpCandidates(),
+  install = ensureManagedYtDlpOnce,
+  spawnImpl = spawn,
+  cookiesPaths,
+  projectRoot = PROJECT_ROOT,
+  env = process.env,
+} = {}) {
   const errors = [];
   let missingOnly = true;
   let authCandidate = null;
   const youtubeUrl = isYouTubeUrl(url);
+  const configuredCookiesPaths = cookiesPaths === undefined
+    ? getYouTubeCookiesPaths({ env, projectRoot })
+    : (Array.isArray(cookiesPaths) ? cookiesPaths : [cookiesPaths])
+      .flatMap((entry) => splitCookiesPaths(entry))
+      .map((entry) => normalizeCookiesPath(entry, projectRoot));
+  const cookieAttempts = youtubeUrl && configuredCookiesPaths.length ? configuredCookiesPaths : [''];
   for (const [command, args] of candidates) {
-    const result = await runYtDlp(command, args, url, spawnImpl);
-    if (result.audioUrl) return result.audioUrl;
-    errors.push(result.error);
-    if (!result.missing) missingOnly = false;
-    if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) authCandidate = [command, args];
+    for (const cookiesPath of cookieAttempts) {
+      const result = await runYtDlp(command, args, url, spawnImpl, { cookiesPath, projectRoot, env });
+      if (result.audioUrl) return result.audioUrl;
+      errors.push(result.error);
+      if (!result.missing) missingOnly = false;
+      if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) {
+        authCandidate = [command, args, cookiesPath];
+      }
+    }
   }
 
   if (missingOnly) {
     try {
       const managed = await install();
-      const result = await runYtDlp(managed, [], url, spawnImpl);
-      if (result.audioUrl) return result.audioUrl;
-      errors.push(result.error);
-      if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) authCandidate = [managed, []];
+      for (const cookiesPath of cookieAttempts) {
+        const result = await runYtDlp(managed, [], url, spawnImpl, { cookiesPath, projectRoot, env });
+        if (result.audioUrl) return result.audioUrl;
+        errors.push(result.error);
+        if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) {
+          authCandidate = [managed, [], cookiesPath];
+        }
+      }
     } catch (error) {
       errors.push(`installation automatique impossible : ${error.message}`);
     }
   }
 
   if (authCandidate) {
-    const [command, args] = authCandidate;
-    const embedded = await runYtDlp(command, args, url, spawnImpl, { playerClient: 'web_embedded' });
+    const [command, args, cookiesPath] = authCandidate;
+    const embedded = await runYtDlp(command, args, url, spawnImpl, {
+      playerClient: 'web_embedded', cookiesPath, projectRoot, env,
+    });
     if (embedded.audioUrl) return embedded.audioUrl;
     errors.push(embedded.error);
     const error = new Error('YouTube demande une vérification depuis cet hébergeur; le mode lecteur intégré sans compte n’a pas réussi pour ce titre. Configure YOUTUBE_COOKIES_PATH avec un fichier de cookies local seulement si ce contenu exige un compte, ou choisis un autre titre.');
@@ -357,4 +390,12 @@ class OggParser {
     }
   }
 }
-module.exports = { OpusSender: { start }, streamUrl, buildYtDlpArgs, getYouTubeCookiesPath, prepareInput, youtubeSearchStream };
+module.exports = {
+  OpusSender: { start },
+  streamUrl,
+  buildYtDlpArgs,
+  getYouTubeCookiesPath,
+  getYouTubeCookiesPaths,
+  prepareInput,
+  youtubeSearchStream,
+};
