@@ -19,7 +19,17 @@ function ensureManagedYtDlpOnce() {
   return managedInstallPromise;
 }
 
-function bin(name, env) { if (process.env[env]) return process.env[env]; if (name === 'ffmpeg' && ffmpegStatic && fs.existsSync(ffmpegStatic)) return ffmpegStatic; return process.platform === 'win32' ? `${name}.exe` : name; }
+function bin(name, env) {
+  const configured = String(process.env[env] || '').trim();
+  if (configured) return configured;
+
+  // Le conteneur Linux installe FFmpeg via le gestionnaire de paquets. Il est
+  // généralement plus compatible avec l'image hôte que le binaire optionnel
+  // de ffmpeg-static (qui peut être absent ou compilé pour une autre libc).
+  if (name === 'ffmpeg' && process.platform !== 'win32') return 'ffmpeg';
+  if (name === 'ffmpeg' && ffmpegStatic && fs.existsSync(ffmpegStatic)) return ffmpegStatic;
+  return process.platform === 'win32' ? `${name}.exe` : name;
+}
 function isAudioUrl(value) {
   try {
     const parsed = new URL(value);
@@ -489,7 +499,7 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery) {
   const media = await prepareInput(url, fallbackQuery);
   if (media.fallback) console.info(`[audio] Bascule vers ${media.fallbackProvider || 'un fournisseur alternatif'} après l’échec du flux principal.`);
   const ffmpeg = spawn(bin('ffmpeg', 'FFMPEG_PATH'), [
-    '-hide_banner', '-loglevel', 'error', '-re', '-i', media.stream ? 'pipe:0' : media.url, '-vn',
+    '-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-i', media.stream ? 'pipe:0' : media.url, '-vn',
     '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
     '-c:a', 'libopus', '-application', 'audio', '-vbr', 'on', '-compression_level', '10',
     '-frame_duration', '20', '-ar', '48000', '-ac', '2', '-b:a', '160k',
@@ -537,11 +547,12 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery) {
     console.error('[ffmpeg] démarrage impossible:', e.message);
     reportFfmpegError(e);
   });
-  ffmpeg.on('close', code => {
+  ffmpeg.on('close', (code, signal) => {
     if (stopped) return;
     if (code !== 0) {
+      const reason = signal ? `le signal ${signal}` : `le code ${code ?? 'inconnu'}`;
       const message = ffmpegError.trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' ').replace(/https?:\/\/\S+/g, '[URL audio]').slice(-300);
-      reportFfmpegError(new Error(message || `FFmpeg s'est arrêté avec le code ${code}.`));
+      reportFfmpegError(new Error(message || `FFmpeg s'est arrêté avec ${reason}.`));
       return;
     }
     const wait = setInterval(() => { if (!frames.length) { clearInterval(wait); if (!stopped) { if (readinessTimer) clearTimeout(readinessTimer); onEnd?.(); } } }, 100);
