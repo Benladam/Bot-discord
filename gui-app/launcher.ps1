@@ -140,32 +140,14 @@ function Close-LogReaders {
 function Get-NodeExecutable {
     $node = Get-Command node.exe -ErrorAction SilentlyContinue
     if (-not $node) { $node = Get-Command node -ErrorAction SilentlyContinue }
-    if (-not $node) { throw 'Node.js est introuvable. Installe Node.js 20 ou plus recent.' }
+    if (-not $node) { throw 'Node.js est introuvable. Installe Node.js 22.5 ou plus recent.' }
     $versionText = (& $node.Source --version | Select-Object -First 1).Trim()
-    $versionMatch = [regex]::Match($versionText, '^v?(\d+)')
+    $versionMatch = [regex]::Match($versionText, '^v?(\d+)\.(\d+)')
     if (-not $versionMatch.Success) { throw "Version Node.js illisible: $versionText" }
     $major = [int]$versionMatch.Groups[1].Value
-    if ($major -lt 20) { throw "Node.js 20+ requis. Version detectee: $versionText" }
+    $minor = [int]$versionMatch.Groups[2].Value
+    if ($major -lt 22 -or ($major -eq 22 -and $minor -lt 5)) { throw "Node.js 22.5+ requis. Version detectee: $versionText" }
     return $node.Source
-}
-
-function Test-YtDlpAvailable {
-    if ((Get-Command yt-dlp.exe -ErrorAction SilentlyContinue) -or (Get-Command yt-dlp -ErrorAction SilentlyContinue)) { return $true }
-    $envFile = Join-Path $script:Root '.env'
-    if (Test-Path -LiteralPath $envFile) {
-        $envText = [System.IO.File]::ReadAllText($envFile)
-        $ytMatch = [regex]::Match($envText, '(?m)^\s*YTDLP_PATH\s*=\s*(.+?)\s*$')
-        if ($ytMatch.Success -and (Test-Path -LiteralPath $ytMatch.Groups[1].Value.Trim().Trim('"').Trim("'"))) { return $true }
-    }
-    $py = Get-Command py.exe -ErrorAction SilentlyContinue
-    if (-not $py) { $py = Get-Command py -ErrorAction SilentlyContinue }
-    if ($py) {
-        foreach ($pythonArgs in @(@('-m', 'yt_dlp', '--version'), @('-3.12', '-m', 'yt_dlp', '--version'))) {
-            $null = & $py.Source @pythonArgs 2>$null
-            if ($LASTEXITCODE -eq 0) { return $true }
-        }
-    }
-    return $false
 }
 
 function Start-BotProcess {
@@ -181,7 +163,6 @@ function Start-BotProcess {
     $startButton.Enabled = $false
     $stopButton.Enabled = $true
     Add-Log 'Bot lance.'
-    if (-not (Test-YtDlpAvailable)) { Add-Log 'INFO: yt-dlp absent. Installe-le avec « py -m pip install --user --upgrade yt-dlp » pour lire YouTube.' }
 }
 
 function Test-NodeDependencies {

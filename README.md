@@ -50,25 +50,17 @@ est vide. Le token reste dans `.env`, ignoré par Git.
 La voix utilise une implémentation maison : WebSocket vocal Discord, découverte
 UDP, RTP/Opus, chiffrement du transport et gestion DAVE sont gérés dans le
 projet. Aucune IP publique ne doit être renseignée : la découverte UDP se fait
-automatiquement derrière une box/NAT ou sur un serveur. Pour lire YouTube,
-`yt-dlp` et FFmpeg restent nécessaires comme outils de décodage/extraction.
-
-Sous Windows, installe ou mets à jour yt-dlp avec Python (une version ancienne
-peut renvoyer une vignette au lieu de l'audio) :
-
-```powershell
-py -m pip install --user --upgrade yt-dlp
-```
-
-Si tu utilises le binaire autonome `yt-dlp.exe`, indique son chemin si besoin :
+automatiquement derrière une box/NAT ou sur un serveur. FFmpeg est inclus avec
+les dépendances npm. Si l'hôte n'a pas `yt-dlp`, le bot télécharge au premier
+besoin le binaire officiel correspondant au système, vérifie son SHA-256, puis
+le conserve dans le dossier de données (`BOT_DATA_DIR`, `%APPDATA%\\bot-discord`
+sous Windows ou `data/` sous Linux/macOS). L'hôte doit autoriser HTTPS sortant
+vers GitHub. Une installation personnelle peut être forcée avec `YTDLP_PATH` :
 
 ```env
 YTDLP_PATH=C:\\outils\\yt-dlp.exe
 FFMPEG_PATH=C:\\outils\\ffmpeg\\bin\\ffmpeg.exe
 ```
-
-Sur le serveur Linux, installez simplement `yt-dlp` et `ffmpeg` avec le
-gestionnaire de paquets. L'image Docker du projet les installe déjà.
 
 Copiez `.env.example` en `.env` et remplissez les valeurs :
 
@@ -84,6 +76,7 @@ cp .env.example .env
 | `COMMAND_PREFIX` | non | Préfixe des commandes texte (défaut `!`) |
 | `SPOTIFY_CLIENT_ID` | recherche Spotify, discographies et playlists publiques | ID d'application Spotify |
 | `SPOTIFY_CLIENT_SECRET` | recherche Spotify, discographies et playlists publiques | Secret d'application Spotify |
+| `SOUNDCLOUD_CLIENT_ID` | non | Active les recherches/liens SoundCloud ; sans identifiant, SoundCloud est ignoré sans faire échouer les autres catalogues |
 | `MUSIC_MARKET` | non | Marché Spotify, ex. `FR` |
 | `BOT_DATA_DIR` | non | Dossier de la base SQLite persistante |
 | `UPDATE_CHECK_ENABLED` | non | Active la vérification GitHub (défaut `true`) |
@@ -159,10 +152,9 @@ conteneur Docker jetable, monte un volume persistant ou définis `BOT_DATA_DIR`.
 
 Utilise un split Kinetic distinct en logiciel **Discord Bot**, pas Fly.io, pour
 laisser le serveur Minecraft indépendant. Le bot requiert Node.js 22.5 ou plus
-récent, car sa base utilise `node:sqlite`. La page publique Kinetic consultée ne
-documente que Node.js jusqu'à 21 : vérifie que le runtime 22.5+ est bien proposé
-sur le split avant de l'activer. Si ce n'est pas le cas, il faudra adapter le
-driver SQLite ou fournir un runtime Node plus récent.
+récent, car sa base utilise `node:sqlite`; vérifie que le split exécute bien une
+version compatible. Les lanceurs locaux refusent maintenant les versions plus
+anciennes au lieu de laisser le bot planter au chargement de SQLite.
 
 Pour l'auto-update, le processus doit voir un clone Git complet (`.git`, remote
 `origin`) et pouvoir exécuter `git fetch`. Le bot redémarre uniquement son

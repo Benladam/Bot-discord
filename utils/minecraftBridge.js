@@ -8,6 +8,7 @@ const {
   ButtonStyle,
   EmbedBuilder,
   PermissionFlagsBits,
+  WebhookClient,
 } = require('discord.js');
 const { WebSocket, WebSocketServer } = require('ws');
 const { resolveQuery } = require('./resolve');
@@ -22,6 +23,15 @@ function createMinecraftBridge({ client, getPlayer, database, logger = console }
   const token = String(process.env.MINECRAFT_BRIDGE_TOKEN || '').trim();
   const guildId = String(process.env.MINECRAFT_GUILD_ID || '').trim();
   const minecraftChannelId = String(process.env.MINECRAFT_CHANNEL_ID || '').trim();
+  const minecraftNewsWebhookUrl = String(process.env.MINECRAFT_NEWS_WEBHOOK_URL || '').trim();
+  let minecraftNewsWebhook = null;
+  if (minecraftNewsWebhookUrl) {
+    try {
+      minecraftNewsWebhook = new WebhookClient({ url: minecraftNewsWebhookUrl });
+    } catch {
+      logger.error('[Minecraft bridge] MINECRAFT_NEWS_WEBHOOK_URL invalide; valeur masquée.');
+    }
+  }
   const port = Number(process.env.SERVER_PORT || process.env.PORT || 8080);
   const pending = new Map();
   let activeSocket = null;
@@ -163,8 +173,11 @@ function createMinecraftBridge({ client, getPlayer, database, logger = console }
 
     const botMember = guild.members.me;
     const permissions = botMember && channel.permissionsFor?.(botMember);
-    if (permissions && !permissions.has(PermissionFlagsBits.SendMessages)) {
+    if (!minecraftNewsWebhookUrl && permissions && !permissions.has(PermissionFlagsBits.SendMessages)) {
       throw new Error('Le bot ne peut pas écrire dans le salon Discord Minecraft.');
+    }
+    if (minecraftNewsWebhookUrl && !minecraftNewsWebhook) {
+      throw new Error('Le webhook des nouvelles Minecraft est mal configuré. Vérifie MINECRAFT_NEWS_WEBHOOK_URL.');
     }
 
     const embed = new EmbedBuilder()
@@ -176,7 +189,12 @@ function createMinecraftBridge({ client, getPlayer, database, logger = console }
     if (modVersion && modVersion !== 'inconnue') {
       embed.addFields({ name: 'Version du mod Minecraft', value: modVersion, inline: true });
     }
-    await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
+    const messageOptions = { embeds: [embed], allowedMentions: { parse: [] } };
+    if (minecraftNewsWebhook) {
+      await minecraftNewsWebhook.send(messageOptions);
+    } else {
+      await channel.send(messageOptions);
+    }
     try {
       database?.setGuildSetting(guildId, 'lastMinecraftChangelogId', eventId);
     } catch (error) {
@@ -350,6 +368,7 @@ function createMinecraftBridge({ client, getPlayer, database, logger = console }
         entry.reject(new Error('Le pont Minecraft ferme.'));
         pending.delete(id);
       }
+      minecraftNewsWebhook?.destroy();
       webSocketServer.close();
       httpServer.close();
     },

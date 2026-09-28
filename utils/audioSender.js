@@ -1,8 +1,22 @@
 /** Envoi audio maison : yt-dlp -> FFmpeg Ogg/Opus -> RTP/UDP. */
 const fs = require('fs');
+const path = require('node:path');
 const { spawn } = require('child_process');
 const ffmpegStatic = require('ffmpeg-static');
 const play = require('play-dl');
+const { ensureManagedYtDlp, getDataDirectory } = require('./ytDlp');
+const { configureSoundCloud } = require('./soundcloud');
+
+const YTDLP_TIMEOUT_MS = 30_000;
+const YTDLP_OUTPUT_LIMIT = 128 * 1024;
+let managedInstallPromise = null;
+
+function ensureManagedYtDlpOnce() {
+  if (!managedInstallPromise) {
+    managedInstallPromise = ensureManagedYtDlp().finally(() => { managedInstallPromise = null; });
+  }
+  return managedInstallPromise;
+}
 
 function bin(name, env) { if (process.env[env]) return process.env[env]; if (name === 'ffmpeg' && ffmpegStatic && fs.existsSync(ffmpegStatic)) return ffmpegStatic; return process.platform === 'win32' ? `${name}.exe` : name; }
 function isAudioUrl(value) {
@@ -21,6 +35,7 @@ function isSoundCloudUrl(value) {
 }
 
 async function soundCloudStream(url) {
+  if (!configureSoundCloud()) throw new Error('Les liens SoundCloud nécessitent SOUNDCLOUD_CLIENT_ID dans le fichier .env.');
   const result = await play.stream(url);
   if (!result?.stream || typeof result.stream.pipe !== 'function') {
     throw new Error('SoundCloud n’a pas fourni de flux audio lisible.');
@@ -29,6 +44,7 @@ async function soundCloudStream(url) {
 }
 
 async function soundCloudSearchStream(query) {
+  if (!configureSoundCloud()) throw new Error('La recherche SoundCloud nécessite SOUNDCLOUD_CLIENT_ID dans le fichier .env.');
   const normalized = String(query || '').trim().slice(0, 200);
   if (normalized.length < 2) throw new Error('Recherche SoundCloud trop courte.');
   const tracks = await play.search(normalized, { limit: 5, source: { soundcloud: 'tracks' } });
@@ -45,48 +61,113 @@ async function soundCloudSearchStream(query) {
   throw lastError || new Error('Aucune piste SoundCloud publique et lisible trouvée.');
 }
 
-function streamUrl(url) {
-  return new Promise((resolve, reject) => {
-    const list = [];
-    if (process.env.YTDLP_PATH) list.push([process.env.YTDLP_PATH, []]);
-    if (process.platform === 'win32') {
-      // py -m yt_dlp permet de privilégier la version mise à jour par pip même
-      // si un ancien yt-dlp.exe est encore prioritaire dans le PATH Windows.
-      list.push(['py', ['-m', 'yt_dlp']], ['py', ['-3.12', '-m', 'yt_dlp']], ['yt-dlp.exe', []], [process.env.PYTHON || 'python', ['-m', 'yt_dlp']]);
-    } else {
-      list.push(['python3', ['-m', 'yt_dlp']], ['yt-dlp', []]);
-    }
-    let i = 0; let error = ''; let youtubeBlocked = false;
-    const next = () => {
-      if (i >= list.length) {
-        return reject(new Error(youtubeBlocked
-          ? 'YouTube bloque cette requête de lecture depuis l’hébergeur.'
-          : error || 'Aucun flux audio valide renvoyé par yt-dlp. Mets à jour yt-dlp puis réessaie.'));
-      }
-      const [cmd, pre] = list[i++];
-      const p = spawn(cmd, [...pre, '--no-playlist', '-f', 'bestaudio/best', '-g', url], { windowsHide: true });
-      let out = ''; let err = ''; let done = false;
-      const retry = (message) => {
-        if (done) return;
-        if (/sign in to confirm|confirm you(?:'|’)re not a bot|not a bot/i.test(message)) youtubeBlocked = true;
-        done = true;
-        error = message;
-        next();
-      };
-      p.stdout.on('data', d => { out += d; });
-      p.stderr.on('data', d => { err += d; });
-      p.on('error', e => retry(e.message));
-      p.on('close', c => {
-        const u = out.trim().split(/\r?\n/).pop();
-        if (c === 0 && isAudioUrl(u)) { done = true; resolve(u); return; }
-        let reason = c === 0 && u && !isAudioUrl(u)
-          ? 'yt-dlp a renvoyé une vignette au lieu du flux audio (version probablement obsolète).'
-          : err.trim().slice(-300);
-        retry(reason || `yt-dlp s'est arrêté avec le code ${c}.`);
-      });
+function ytDlpCandidates() {
+  const candidates = [];
+  const add = (command, args = []) => {
+    if (command && !candidates.some(([existing, existingArgs]) => (
+      existing === command && JSON.stringify(existingArgs) === JSON.stringify(args)
+    ))) candidates.push([command, args]);
+  };
+  if (process.env.YTDLP_PATH) add(process.env.YTDLP_PATH);
+
+  const managed = path.join(getDataDirectory(), '.cache', 'yt-dlp', process.platform === 'win32'
+    ? (process.arch === 'arm64' ? 'yt-dlp_arm64.exe' : 'yt-dlp.exe')
+    : 'yt-dlp');
+  if (fs.existsSync(managed)) add(managed);
+
+  if (process.platform === 'win32') {
+    // py -m yt_dlp privilégie une version Python mise à jour au binaire du PATH.
+    add('py', ['-m', 'yt_dlp']);
+    add('py', ['-3.12', '-m', 'yt_dlp']);
+    add('yt-dlp.exe');
+    add(process.env.PYTHON || 'python', ['-m', 'yt_dlp']);
+  } else {
+    add('python3', ['-m', 'yt_dlp']);
+    add('yt-dlp');
+  }
+  return candidates;
+}
+
+function buildYtDlpArgs(preArgs, url) {
+  return [...preArgs, '--js-runtimes', `node:${process.execPath}`, '--no-playlist', '-f', 'bestaudio/best', '-g', url];
+}
+
+function runYtDlp(command, preArgs, url, spawnImpl = spawn) {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timedOut = false;
+    let timer;
+    let child;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
     };
-    next();
+    try {
+      child = spawnImpl(command, buildYtDlpArgs(preArgs, url), { windowsHide: true });
+    } catch (error) {
+      finish({ error: error.message, missing: error.code === 'ENOENT' });
+      return;
+    }
+
+    timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+      finish({ error: `yt-dlp a dépassé le délai de ${YTDLP_TIMEOUT_MS / 1000} secondes.` });
+    }, YTDLP_TIMEOUT_MS);
+    child.stdout.on('data', (chunk) => {
+      if (stdout.length < YTDLP_OUTPUT_LIMIT) stdout += chunk.toString().slice(0, YTDLP_OUTPUT_LIMIT - stdout.length);
+      else { child.kill(); finish({ error: 'yt-dlp a produit une réponse trop volumineuse.' }); }
+    });
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderr = (stderr + text).slice(-4_000);
+    });
+    child.on('error', (error) => finish({ error: error.message, missing: error.code === 'ENOENT' }));
+    child.on('close', (code) => {
+      if (settled) return;
+      if (timedOut) { finish({ error: `yt-dlp a dépassé le délai de ${YTDLP_TIMEOUT_MS / 1000} secondes.` }); return; }
+      const audioUrl = stdout.trim().split(/\r?\n/).pop();
+      if (code === 0 && isAudioUrl(audioUrl)) { finish({ audioUrl }); return; }
+      const missingModule = /No module named ['\"]?yt_dlp['\"]?/i.test(stderr);
+      const error = code === 0 && audioUrl && !isAudioUrl(audioUrl)
+        ? 'yt-dlp a renvoyé une vignette au lieu du flux audio.'
+        : stderr.trim().slice(-300) || `yt-dlp s'est arrêté avec le code ${code}.`;
+      finish({ error, missing: missingModule });
+    });
   });
+}
+
+async function streamUrl(url, { candidates = ytDlpCandidates(), install = ensureManagedYtDlpOnce, spawnImpl = spawn } = {}) {
+  const errors = [];
+  let missingOnly = true;
+  let youtubeBlocked = false;
+  for (const [command, args] of candidates) {
+    const result = await runYtDlp(command, args, url, spawnImpl);
+    if (result.audioUrl) return result.audioUrl;
+    errors.push(result.error);
+    if (!result.missing) missingOnly = false;
+    if (/sign in to confirm|confirm you(?:'|’)re not a bot|not a bot/i.test(result.error || '')) youtubeBlocked = true;
+  }
+
+  if (missingOnly) {
+    try {
+      const managed = await install();
+      const result = await runYtDlp(managed, [], url, spawnImpl);
+      if (result.audioUrl) return result.audioUrl;
+      errors.push(result.error);
+      if (/sign in to confirm|confirm you(?:'|’)re not a bot|not a bot/i.test(result.error || '')) youtubeBlocked = true;
+    } catch (error) {
+      errors.push(`installation automatique impossible : ${error.message}`);
+    }
+  }
+
+  if (youtubeBlocked) throw new Error('YouTube bloque cette requête de lecture depuis l’hébergeur.');
+  const detail = errors.filter(Boolean).at(-1);
+  throw new Error(detail || 'Aucun flux audio valide renvoyé par yt-dlp. Vérifie yt-dlp et YTDLP_PATH.');
 }
 
 async function prepareInput(url, fallbackQuery) {
@@ -181,4 +262,4 @@ class OggParser {
     }
   }
 }
-module.exports = { OpusSender: { start } };
+module.exports = { OpusSender: { start }, streamUrl, buildYtDlpArgs };

@@ -10,7 +10,7 @@ RUN apt-get update -y && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # yt-dlp (recuperation des flux YouTube)
-RUN pip3 install --break-system-packages -U yt-dlp || pip3 install -U yt-dlp
+RUN pip3 install --break-system-packages -U 'yt-dlp[default]' || pip3 install -U 'yt-dlp[default]'
 
 WORKDIR /app
 ENV BOT_DATA_DIR=/data

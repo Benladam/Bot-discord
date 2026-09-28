@@ -1,6 +1,7 @@
 /** Agrégateur de métadonnées publics. L'audio est résolu séparément par fournisseur. */
 const play = require('play-dl');
 const { searchSpotifyCatalog, getSpotifyArtistAlbums } = require('./spotify');
+const { configureSoundCloud } = require('./soundcloud');
 
 const cache = new Map();
 const pendingSearches = new Map();
@@ -130,9 +131,6 @@ async function searchCatalog(query, { limit = 10, fresh = false, sourceTimeoutMs
       safeSearch('YouTube vidéos', async () => (await play.search(normalized, {
         limit: perType, source: { youtube: 'video' },
       })).map((item) => normalizeYoutube(item, 'track')), sourceWaitMs),
-      safeSearch('SoundCloud morceaux', async () => (await play.search(normalized, {
-        limit: perType, source: { soundcloud: 'tracks' },
-      })).map(normalizeSoundCloud), sourceWaitMs),
       safeSearch('YouTube playlists', async () => (await play.search(normalized, {
         limit: Math.min(5, perType), source: { youtube: 'playlist' },
       })).map((item) => normalizeYoutube(item, 'playlist')), sourceWaitMs),
@@ -147,6 +145,11 @@ async function searchCatalog(query, { limit = 10, fresh = false, sourceTimeoutMs
         limit: Math.min(5, perType), source: { deezer: 'playlist' },
       })).map((item) => normalizeDeezer(item, 'playlist')), sourceWaitMs),
     ];
+    if (configureSoundCloud()) {
+      tasks.splice(1, 0, safeSearch('SoundCloud morceaux', async () => (await play.search(normalized, {
+        limit: perType, source: { soundcloud: 'tracks' },
+      })).map(normalizeSoundCloud), sourceWaitMs));
+    }
     const groups = await Promise.all(tasks);
     const items = [];
     const seen = new Set();

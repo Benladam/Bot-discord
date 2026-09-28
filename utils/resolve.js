@@ -5,6 +5,7 @@
 
 const play = require('play-dl');
 const { isSpotifyUrl, resolveSpotifyLink } = require('./spotify');
+const { configureSoundCloud } = require('./soundcloud');
 
 function youtubeVideoId(value) {
   try {
@@ -21,6 +22,7 @@ function youtubeVideoId(value) {
 }
 
 async function resolveSoundCloudLink(url) {
+  if (!configureSoundCloud()) throw new Error('Les liens SoundCloud nécessitent SOUNDCLOUD_CLIENT_ID dans le fichier .env.');
   const entry = await play.soundcloud(url);
   const tracks = entry.type === 'track' ? [entry]
     : entry.type === 'playlist' ? await entry.all_tracks()

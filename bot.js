@@ -16,6 +16,7 @@ const {
   SlashCommandBuilder,
 } = require('discord.js');
 require('dotenv').config();
+require('dotenv').config({ path: path.join(__dirname, '.env.minecraft'), quiet: true });
 const { MusicPlayer } = require('./utils/musicPlayer');
 const guildDatabase = require('./utils/database');
 const { createUpdater } = require('./utils/updater');

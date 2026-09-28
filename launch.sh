@@ -6,9 +6,9 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 fail() { printf 'Erreur: %s\n' "$1" >&2; exit 1; }
 
-command -v node >/dev/null 2>&1 || fail 'Node.js est absent. Installe Node.js 20 ou plus récent.'
+command -v node >/dev/null 2>&1 || fail 'Node.js est absent. Installe Node.js 22.5 ou plus récent.'
 command -v npm >/dev/null 2>&1 || fail 'npm est absent. Réinstalle Node.js avec npm inclus.'
-node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' || fail "Node.js 20+ requis. Version trouvée: $(node --version)"
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 5) ? 0 : 1)' || fail "Node.js 22.5+ requis. Version trouvée: $(node --version)"
 [ -f package.json ] || fail "package.json introuvable dans $ROOT"
 
 if [ ! -f .env ]; then
@@ -28,13 +28,10 @@ if ! grep -Eq '^[[:space:]]*DISCORD_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]#]+
   chmod 600 .env 2>/dev/null || true
 fi
 
-if [ ! -f node_modules/discord.js/package.json ] || [ ! -f node_modules/@snazzah/davey/package.json ]; then
+if ! npm ls --depth=0 >/dev/null 2>&1; then
   printf 'Installation des dépendances npm…\n'
   npm install --no-audit --no-fund
 fi
 
-if ! command -v yt-dlp >/dev/null 2>&1 && [ -z "${YTDLP_PATH:-}" ] && ! python3 -m yt_dlp --version >/dev/null 2>&1; then
-  printf 'Attention: yt-dlp absent; la lecture YouTube ne fonctionnera pas avant installation.\n' >&2
-fi
 printf 'Démarrage du bot…\n'
 exec node supervisor.js
