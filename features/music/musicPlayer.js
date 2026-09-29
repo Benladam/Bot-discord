@@ -348,7 +348,12 @@ class MusicPlayer {
           this.sender = null;
           await this.playNext(undefined, { notifyWhenEmpty: true });
         }
-      }, failTrack, song.fallbackQuery, { expectedDuration: song.duration });
+      }, failTrack, song.fallbackQuery, {
+        expectedDuration: song.duration,
+        expectedTitle: song.title,
+        guildId: this.guildId,
+        shouldStart: () => generation === this._generation && this.isPlaying,
+      });
       if (generation !== this._generation) {
         sender?.stop?.();
         return null;
@@ -356,6 +361,7 @@ class MusicPlayer {
       this.sender = sender;
       if (this.isPaused) this.sender?.pause?.();
     } catch (error) {
+      if (generation !== this._generation) return null;
       // L'extraction du flux peut échouer avant que le processus audio existe.
       // Réinitialiser l'état évite qu'une tentative ratée bloque toute la file.
       if (generation === this._generation) {

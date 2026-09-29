@@ -1,7 +1,70 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
-const { prepareInput, soundCloudStream, buildYtDlpArgs } = require('./audioSender');
+const { prepareInput, soundCloudStream, buildYtDlpArgs, soundCloudSearchStream, youtubeSearchStream } = require('./audioSender');
+
+test('le repli SoundCloud ouvre le Niska demandé, pas le premier résultat ni son remix', async () => {
+  const opened = [];
+  const stream = await soundCloudSearchStream("Niska Officiel - Niska - Chasse à l'homme #KeDuSal 2", {
+    expectedTitle: "Niska - Chasse à l'homme #KeDuSal 2", expectedDuration: 164,
+    searchCandidates: async () => [
+      { title: 'Niska - Réseaux', durationInSec: 164, url: 'https://soundcloud.com/niska/wrong' },
+      { title: 'Niska - Chasse à l’homme Remix', durationInSec: 164, url: 'https://soundcloud.com/niska/remix' },
+      { title: 'Chasse à l’homme', user: { username: 'Niska' }, durationInSec: 164, url: 'https://soundcloud.com/niska/correct' },
+    ],
+    openTrack: async url => { opened.push(url); return new PassThrough(); },
+  });
+  assert.deepEqual(opened, ['https://soundcloud.com/niska/correct']);
+  stream.destroy();
+});
+
+test('le repli YouTube refuse aussi une autre piste ou un remix', async () => {
+  const opened = [];
+  const stream = await youtubeSearchStream('Niska - Chasse à l’homme', {
+    expectedDuration: 164,
+    searchCandidates: async () => [
+      { title: 'Niska - Réseaux', url: 'https://youtu.be/wrong' },
+      { title: 'Niska - Chasse à l’homme Remix', url: 'https://youtu.be/remix' },
+      { title: 'Niska - Chasse à l’homme (Clip Officiel)', url: 'https://youtu.be/correct' },
+    ],
+    openTrack: async url => { opened.push(url); return new PassThrough(); },
+  });
+  assert.deepEqual(opened, ['https://youtu.be/correct']);
+  stream.destroy();
+});
+
+test('aucun repli ne joue un autre son si tous les résultats sont incorrects', async () => {
+  for (const [search, url] of [
+    [soundCloudSearchStream, 'https://soundcloud.com/niska/wrong'],
+    [youtubeSearchStream, 'https://youtu.be/wrong'],
+  ]) {
+    let opened = false;
+    await assert.rejects(search('Niska', {
+      expectedTitle: 'Niska - Chasse à l’homme',
+      searchCandidates: async () => [{ title: 'Niska - Réseaux', url }],
+      openTrack: async () => { opened = true; return new PassThrough(); },
+    }), { code: 'MUSIC_TRACK_MISMATCH' });
+    assert.equal(opened, false);
+  }
+});
+
+test('la préparation transmet titre, durée et serveur aux replis dans les deux sens', async () => {
+  for (const [url, primaryKey, fallbackKey] of [
+    ['https://youtu.be/track', 'getYouTubeStream', 'searchSoundCloudStream'],
+    ['https://soundcloud.com/artist/track', 'getSoundCloudStream', 'searchYouTubeStream'],
+  ]) {
+    let received;
+    const media = await prepareInput(url, 'niska', {
+      expectedTitle: 'Niska - Chasse à l’homme', expectedDuration: 164, guildId: 'guild-niska',
+      [primaryKey]: async () => { throw new Error('source indisponible'); },
+      [fallbackKey]: async (_query, options) => { received = options; return new PassThrough(); },
+    });
+    assert.deepEqual(received, {
+      expectedTitle: 'Niska - Chasse à l’homme', expectedDuration: 164, guildId: 'guild-niska',
+    });
+    media.stream.destroy();
+  }
+});
 
 test('yt-dlp refuse les formats preview SoundCloud pour les deux modes de lecture', () => {
   for (const outputToStdout of [false, true]) {

@@ -27,6 +27,44 @@ test('une erreur d’extraction audio remet le lecteur à l’arrêt', async () 
   }
 });
 
+test('une extraction annulée par Stop ne relance rien et ne remet pas à zéro le nouveau morceau', async () => {
+  const { MusicPlayer } = require('./musicPlayer');
+  const originalStart = OpusSender.start;
+  let rejectOld;
+  let oldOptions;
+  const oldExtraction = new Promise((_resolve, reject) => { rejectOld = reject; });
+  const newSender = { stop() {}, setVolume() {} };
+  OpusSender.start = async (_connection, url, _start, _end, _error, _query, options) => {
+    if (url === 'old-track') { oldOptions = options; return oldExtraction; }
+    return newSender;
+  };
+  const player = new MusicPlayer('guild-stop-race', { user: { id: 'bot-user' } });
+  player.connection = { connected: true };
+  try {
+    player.addToQueue({ title: 'Niska - Chasse à l’homme', duration: 164, url: 'old-track' });
+    const pending = player.playNext();
+    await new Promise(setImmediate);
+    assert.equal(oldOptions.expectedTitle, 'Niska - Chasse à l’homme');
+    assert.equal(oldOptions.expectedDuration, 164);
+    assert.equal(oldOptions.guildId, 'guild-stop-race');
+    assert.equal(oldOptions.shouldStart(), true);
+    player.stop();
+    assert.equal(oldOptions.shouldStart(), false);
+    player.addToQueue({ title: 'Nouveau morceau', url: 'new-track' });
+    await player.playNext();
+    rejectOld(Object.assign(new Error('Annulée'), { code: 'AUDIO_CANCELLED' }));
+    assert.equal(await pending, null);
+    assert.equal(player.isPlaying, true);
+    assert.equal(player.current.title, 'Nouveau morceau');
+    assert.equal(player.sender, newSender);
+  } finally {
+    rejectOld(new Error('nettoyage'));
+    player.stop();
+    player._clearIdleTimer();
+    OpusSender.start = originalStart;
+  }
+});
+
 test('les handshakes vocaux restent isolés par serveur et utilisent le bon shard', async () => {
   const { MusicPlayer } = require('./musicPlayer');
   const writes = new Map([[0, []], [1, []]]);

@@ -23,6 +23,28 @@ function opusPage(audioFrameCount) {
   return page;
 }
 
+test('Stop pendant l’extraction ferme la source sans lancer FFmpeg ni envoyer du son', async () => {
+  const stream = new PassThrough();
+  let release;
+  let allowed = true;
+  let cleaned = 0;
+  let spawned = 0;
+  stream.cleanup = () => cleaned++;
+  const prepared = new Promise(resolve => { release = resolve; });
+  const pending = OpusSender.start({ connected: true, sendOpus: assert.fail }, 'unused', assert.fail, assert.fail, assert.fail, '', {
+    prepareInput: () => prepared,
+    shouldStart: () => allowed,
+    spawn: () => { spawned++; return child(); },
+  });
+  const rejected = assert.rejects(pending, { code: 'AUDIO_CANCELLED' });
+  allowed = false;
+  release({ stream });
+  await rejected;
+  assert.equal(spawned, 0);
+  assert.equal(cleaned, 1);
+  assert.equal(stream.destroyed, true);
+});
+
 test('FFmpeg 403 never exposes a signed URL split across chunks and closes its source', async () => {
   const process = child();
   const stream = new PassThrough();

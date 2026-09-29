@@ -152,8 +152,8 @@ test('le repli SoundCloud refuse les extraits courts et essaie un résultat comp
   const selected = await soundCloudSearchStream('Artiste - Titre', {
     expectedDuration: 181,
     searchCandidates: async () => [
-      { permalink: 'https://soundcloud.com/example/preview', durationInSec: 29 },
-      { permalink: 'https://soundcloud.com/example/full-track', durationInSec: 180 },
+      { title: 'Artiste - Titre', permalink: 'https://soundcloud.com/example/preview', durationInSec: 29 },
+      { title: 'Artiste - Titre', permalink: 'https://soundcloud.com/example/full-track', durationInSec: 180 },
     ],
     openTrack: async (url) => { opened.push(url); return new PassThrough(); },
   });
@@ -167,7 +167,7 @@ test('le repli SoundCloud échoue clairement si seuls des extraits courts corres
   await assert.rejects(soundCloudSearchStream('Artiste - Titre', {
     expectedDuration: 181,
     searchCandidates: async () => [
-      { permalink: 'https://soundcloud.com/example/preview', durationInSec: 29 },
+      { title: 'Artiste - Titre', permalink: 'https://soundcloud.com/example/preview', durationInSec: 29 },
     ],
   }), /extraits trop courts/);
 });

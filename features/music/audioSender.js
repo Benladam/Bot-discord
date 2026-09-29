@@ -7,6 +7,7 @@ const ffmpegStatic = require('ffmpeg-static');
 const play = require('play-dl');
 const { ensureManagedYtDlp, getDataDirectory } = require('./ytDlp');
 const { configureSoundCloud } = require('./providers/soundcloud');
+const { matchesRequestedTrack, candidateTitle, candidateArtist } = require('./trackMatching');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
@@ -252,6 +253,8 @@ async function soundCloudStream(url, {
 
 async function soundCloudSearchStream(query, {
   expectedDuration,
+  expectedTitle,
+  guildId,
   searchCandidates = searchSoundCloudCandidates,
   searchFallback = (...args) => play.search(...args),
   openTrack = soundCloudStream,
@@ -278,6 +281,7 @@ async function soundCloudSearchStream(query, {
     ? expected * MIN_FALLBACK_DURATION_RATIO
     : 0;
   let rejectedShortTracks = 0;
+  let rejectedDifferentTracks = 0;
   let attemptedFullTracks = 0;
   for (const track of tracks) {
     const url = track.permalink || track.webpage_url || track.url;
@@ -287,36 +291,62 @@ async function soundCloudSearchStream(query, {
       rejectedShortTracks++;
       continue;
     }
+    if (!matchesRequestedTrack(track, { query: normalized, expectedTitle, expectedDuration })) {
+      rejectedDifferentTracks++;
+      console.info(`[audio] résultat SoundCloud refusé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))}`);
+      continue;
+    }
     attemptedFullTracks++;
     try {
-      return await openTrack(url);
+      const stream = await openTrack(url);
+      console.info(`[audio] repli SoundCloud validé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))} durée=${duration || 0}s`);
+      return stream;
     } catch (error) {
       lastError = error;
     }
   }
-  if (rejectedShortTracks && attemptedFullTracks === 0) {
+  if (rejectedShortTracks && !rejectedDifferentTracks && attemptedFullTracks === 0) {
     throw new Error('SoundCloud ne propose que des extraits trop courts pour cette piste; ces résultats ont été refusés.');
+  }
+  if (rejectedDifferentTracks && attemptedFullTracks === 0) {
+    const error = new Error('Aucun résultat SoundCloud ne correspond au titre, à l’artiste et à la version demandés. Aucun autre morceau n’a été lancé.');
+    error.code = 'MUSIC_TRACK_MISMATCH';
+    throw error;
   }
   throw lastError || new Error('Aucune piste SoundCloud publique et lisible trouvée.');
 }
 
-async function youtubeSearchStream(query) {
+async function youtubeSearchStream(query, {
+  expectedDuration,
+  expectedTitle,
+  guildId,
+  searchCandidates = searchYouTubeCandidates,
+  openTrack = streamYtDlp,
+} = {}) {
   const normalized = String(query || '').trim().slice(0, 200);
   if (normalized.length < 2) throw new Error('Recherche YouTube trop courte.');
-  const videos = await searchYouTubeCandidates(normalized, { limit: 5 });
+  const videos = await searchCandidates(normalized, { limit: 5 });
   let lastError = null;
   let attempted = 0;
-  for (const video of videos.slice(0, 3)) {
+  for (const video of videos.slice(0, 5)) {
     if (!video.url || !isYouTubeUrl(video.url)) continue;
+    if (!matchesRequestedTrack(video, { query: normalized, expectedTitle, expectedDuration })) {
+      console.info(`[audio] résultat YouTube refusé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(video)))}`);
+      continue;
+    }
     attempted++;
     try {
-      return await streamYtDlp(video.url);
+      const stream = await openTrack(video.url);
+      console.info(`[audio] repli YouTube validé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(video)))}`);
+      return stream;
     } catch (error) {
       lastError = error;
     }
   }
   if (lastError) throw lastError;
-  throw new Error(attempted ? 'Aucun flux YouTube lisible pour les résultats trouvés.' : 'Aucun morceau YouTube trouvé.');
+  const error = new Error(attempted ? 'Aucun flux YouTube lisible pour les résultats trouvés.' : 'Aucun résultat YouTube ne correspond au morceau demandé. Aucun autre morceau n’a été lancé.');
+  if (!attempted) error.code = 'MUSIC_TRACK_MISMATCH';
+  throw error;
 }
 
 function ytDlpCandidates() {
@@ -986,7 +1016,11 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
     } catch (soundCloudError) {
       if (!normalizedQuery) throw soundCloudError;
       try {
-        return asMedia(await searchYouTubeStream(normalizedQuery), { fallback: true, fallbackProvider: 'YouTube' });
+        return asMedia(await searchYouTubeStream(normalizedQuery, {
+          expectedDuration: providerOverrides.expectedDuration,
+          expectedTitle: providerOverrides.expectedTitle,
+          guildId: providerOverrides.guildId,
+        }), { fallback: true, fallbackProvider: 'YouTube' });
       } catch (youtubeError) {
         throw providerFailure('SoundCloud', soundCloudError, 'YouTube', youtubeError);
       }
@@ -997,9 +1031,12 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
     return asMedia(await getYouTubeStream(url), { fallback: false });
   } catch (youtubeError) {
     if (!normalizedQuery || !isYouTubeUrl(url)) throw youtubeError;
+    console.warn(`[audio] source YouTube indisponible serveur=${providerOverrides.guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(providerOverrides.expectedTitle || normalizedQuery))} cause=${JSON.stringify(sanitizeYtDlpDiagnostic(youtubeError.message))}`);
     try {
       return asMedia(await searchSoundCloudStream(normalizedQuery, {
         expectedDuration: providerOverrides.expectedDuration,
+        expectedTitle: providerOverrides.expectedTitle,
+        guildId: providerOverrides.guildId,
       }), { fallback: true, fallbackProvider: 'SoundCloud' });
     } catch (soundCloudError) {
       throw providerFailure('YouTube', youtubeError, 'SoundCloud', soundCloudError);
@@ -1010,7 +1047,16 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
 async function start(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies = {}) {
   const media = await (dependencies.prepareInput || prepareInput)(url, fallbackQuery, {
     expectedDuration: dependencies.expectedDuration,
+    expectedTitle: dependencies.expectedTitle,
+    guildId: dependencies.guildId,
   });
+  if (dependencies.shouldStart && !dependencies.shouldStart()) {
+    try { media.stream?.cleanup?.(); } catch (_) {}
+    try { media.stream?.destroy(); } catch (_) {}
+    const error = new Error('Lecture annulée pendant la préparation du flux.');
+    error.code = 'AUDIO_CANCELLED';
+    throw error;
+  }
   if (media.fallback) console.info(`[audio] Bascule vers ${media.fallbackProvider || 'un fournisseur alternatif'} après l’échec du flux principal.`);
   const requestedBitrate = Number(connection?.audioBitrate);
   const bitrate = Number.isFinite(requestedBitrate) && requestedBitrate > 0
