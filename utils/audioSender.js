@@ -299,6 +299,7 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
     let cleanupTimer;
     let child;
     let cookiesCopy = null;
+    let spawnAttempted = false;
     const cleanupCookiesCopy = () => {
       if (cleanupTimer) clearTimeout(cleanupTimer);
       cookiesCopy?.cleanup();
@@ -318,11 +319,12 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
     try {
       cookiesCopy = createTemporaryCookiesCopy(configuredCookiesPath(options));
       options = { ...options, cookiesPath: cookiesCopy?.path || '' };
+      spawnAttempted = true;
       child = spawnImpl(command, buildYtDlpSearchArgs(preArgs, query, options), { windowsHide: true });
     } catch (error) {
       childClosed = true;
       cleanupCookiesCopy();
-      finish({ items: [], error: error.code === 'ENOENT' ? error.message : `Impossible de préparer la recherche yt-dlp (${error.code || 'erreur'}).`, missing: error.code === 'ENOENT' });
+      finish({ items: [], error: error.code === 'ENOENT' ? error.message : `Impossible de préparer la recherche yt-dlp (${error.code || 'erreur'}).`, missing: spawnAttempted && error.code === 'ENOENT', skipped: !spawnAttempted });
       return;
     }
     timer = setTimeout(() => {
@@ -377,7 +379,7 @@ async function searchYouTubeCandidates(query, {
     : (Array.isArray(cookiesPaths) ? cookiesPaths : [cookiesPaths])
       .flatMap((entry) => splitCookiesPaths(entry))
       .map((entry) => normalizeCookiesPath(entry, projectRoot));
-  const cookieAttempts = configuredCookiesPaths.length ? configuredCookiesPaths : [''];
+  const cookieAttempts = [...new Set(configuredCookiesPaths.filter(Boolean)), ''];
   const errors = [];
   let missingOnly = true;
   let authCandidate = null;
@@ -386,27 +388,29 @@ async function searchYouTubeCandidates(query, {
     const result = await runYtDlpSearch(command, args, normalized, spawnImpl, {
       limit: safeLimit, cookiesPath, playerClient, projectRoot, env,
     });
-    if (result.items.length) return result.items.slice(0, safeLimit);
+    if (result.items.length) return { items: result.items.slice(0, safeLimit), missing: false };
     errors.push(result.error);
-    if (!result.missing) missingOnly = false;
+    if (!result.missing && !result.skipped) missingOnly = false;
     if (!authCandidate && needsYouTubeAuthentication(result.error)) {
       authCandidate = [command, args, cookiesPath];
     }
-    return null;
+    return { items: null, missing: result.missing };
   };
 
   for (const [command, args] of candidates) {
     for (const cookiesPath of cookieAttempts) {
-      const found = await attempt(command, args, cookiesPath);
-      if (found) return found;
+      const result = await attempt(command, args, cookiesPath);
+      if (result.items) return result.items;
+      if (result.missing) break;
     }
   }
   if (missingOnly) {
     try {
       const managed = await install();
       for (const cookiesPath of cookieAttempts) {
-        const found = await attempt(managed, [], cookiesPath);
-        if (found) return found;
+        const result = await attempt(managed, [], cookiesPath);
+        if (result.items) return result.items;
+        if (result.missing) break;
       }
     } catch (error) {
       errors.push(`installation automatique impossible : ${error.message}`);
@@ -431,6 +435,7 @@ function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
     let cleanupTimer;
     let child;
     let cookiesCopy = null;
+    let spawnAttempted = false;
     const cleanupCookiesCopy = () => {
       if (cleanupTimer) clearTimeout(cleanupTimer);
       cookiesCopy?.cleanup();
@@ -451,11 +456,12 @@ function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
       const sourceCookiesPath = isYouTubeUrl(url) ? configuredCookiesPath(options) : '';
       cookiesCopy = createTemporaryCookiesCopy(sourceCookiesPath);
       options = { ...options, cookiesPath: cookiesCopy?.path || '' };
+      spawnAttempted = true;
       child = spawnImpl(command, buildYtDlpArgs(preArgs, url, options), { windowsHide: true });
     } catch (error) {
       childClosed = true;
       cleanupCookiesCopy();
-      finish({ error: error.code === 'ENOENT' ? error.message : `Impossible de préparer le flux yt-dlp (${error.code || 'erreur'}).`, missing: error.code === 'ENOENT' });
+      finish({ error: error.code === 'ENOENT' ? error.message : `Impossible de préparer le flux yt-dlp (${error.code || 'erreur'}).`, missing: spawnAttempted && error.code === 'ENOENT', skipped: !spawnAttempted });
       return;
     }
 
@@ -510,16 +516,19 @@ async function streamUrl(url, {
     : (Array.isArray(cookiesPaths) ? cookiesPaths : [cookiesPaths])
       .flatMap((entry) => splitCookiesPaths(entry))
       .map((entry) => normalizeCookiesPath(entry, projectRoot));
-  const cookieAttempts = youtubeUrl && configuredCookiesPaths.length ? configuredCookiesPaths : [''];
+  const cookieAttempts = youtubeUrl
+    ? [...new Set(configuredCookiesPaths.filter(Boolean)), '']
+    : [''];
   for (const [command, args] of candidates) {
     for (const cookiesPath of cookieAttempts) {
       const result = await runYtDlp(command, args, url, spawnImpl, { cookiesPath, projectRoot, env });
       if (result.audioUrl) return result.audioUrl;
       errors.push(result.error);
-      if (!result.missing) missingOnly = false;
+      if (!result.missing && !result.skipped) missingOnly = false;
       if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) {
         authCandidate = [command, args, cookiesPath];
       }
+      if (result.missing) break;
     }
   }
 
@@ -533,6 +542,7 @@ async function streamUrl(url, {
         if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) {
           authCandidate = [managed, [], cookiesPath];
         }
+        if (result.missing) break;
       }
     } catch (error) {
       errors.push(`installation automatique impossible : ${error.message}`);
