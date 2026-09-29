@@ -145,3 +145,157 @@ test('un envoi Gateway vocal échoué nettoie le listener au lieu de le laisser 
   await assert.rejects(player._requestVoice('channel'), /gateway write failed/);
   assert.equal(client.listenerCount('raw'), 0);
 });
+
+test('deux ajouts simultanés restent en file sans remplacer la première piste', async () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  const originalStart = OpusSender.start;
+  let releaseFirst;
+  const firstStart = new Promise((resolve) => { releaseFirst = resolve; });
+  const starts = [];
+  OpusSender.start = async (_connection, url) => {
+    starts.push(url);
+    if (url === 'track-a') await firstStart;
+    return { setVolume() {}, stop() {} };
+  };
+
+  try {
+    const player = new MusicPlayer('guild-queue-race', { user: { id: 'bot-user' } });
+    player.connection = { connected: true, channelId: 'voice-a' };
+    const context = { voiceChannel: { id: 'voice-a', name: 'Général' } };
+    const addFirst = player.enqueueSongs([{ title: 'A', url: 'track-a' }], context);
+    await new Promise(setImmediate);
+    assert.deepEqual(starts, ['track-a']);
+
+    const addSecond = player.enqueueSongs([{ title: 'B', url: 'track-b' }], context);
+    await new Promise(setImmediate);
+    assert.equal(player.current.title, 'A');
+    assert.equal(player.queue.length, 0, 'la deuxième mutation attend la fin de la préparation du lecteur');
+
+    releaseFirst();
+    const [first, second] = await Promise.all([addFirst, addSecond]);
+    assert.equal(first.queued, false);
+    assert.equal(second.queued, true);
+    assert.equal(player.current.title, 'A');
+    assert.deepEqual(player.queue.map((song) => song.title), ['B']);
+    assert.deepEqual(starts, ['track-a'], 'aucun second démarrage ne doit couper la piste courante');
+    player.stop();
+    player._clearIdleTimer();
+  } finally {
+    releaseFirst();
+    OpusSender.start = originalStart;
+  }
+});
+
+test('un lecteur inactif rejoint le salon demandé, mais ne déplace pas une lecture active', async () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  const originalStart = OpusSender.start;
+  OpusSender.start = async () => ({ setVolume() {}, stop() {} });
+  try {
+    const player = new MusicPlayer('guild-channel-guard', { user: { id: 'bot-user' } });
+    player.connection = { connected: true, channelId: 'voice-old' };
+    player.ensureConnection = async (channel) => {
+      player.connection = { connected: true, channelId: channel.id };
+      return player.connection;
+    };
+    await player.enqueueSongs([{ title: 'Nouvelle', url: 'track-new' }], {
+      voiceChannel: { id: 'voice-new', name: 'Salon nouveau' },
+    });
+    assert.equal(player.connection.channelId, 'voice-new');
+
+    player.current = { title: 'En cours', url: 'track-current' };
+    player.isPlaying = true;
+    await assert.rejects(player.enqueueSongs([{ title: 'Autre', url: 'track-other' }], {
+      voiceChannel: { id: 'voice-other', name: 'Autre salon' },
+    }), /déjà dans un autre salon vocal/);
+    assert.equal(player.connection.channelId, 'voice-new');
+    player.stop();
+    player._clearIdleTimer();
+  } finally {
+    OpusSender.start = originalStart;
+  }
+});
+
+test('un skip pendant la préparation audio annule le démarrage obsolète', async () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  const originalStart = OpusSender.start;
+  const gates = new Map();
+  const starts = [];
+  const stopped = [];
+  for (const url of ['track-a', 'track-b']) {
+    let release;
+    const promise = new Promise((resolve) => { release = resolve; });
+    gates.set(url, { promise, release });
+  }
+  OpusSender.start = async (_connection, url) => {
+    starts.push(url);
+    await gates.get(url).promise;
+    return { setVolume() {}, stop() { stopped.push(url); } };
+  };
+
+  try {
+    const player = new MusicPlayer('guild-skip-race', { user: { id: 'bot-user' } });
+    player.connection = { connected: true, channelId: 'voice-a' };
+    const add = player.enqueueSongs([
+      { title: 'A', url: 'track-a' },
+      { title: 'B', url: 'track-b' },
+    ], { voiceChannel: { id: 'voice-a', name: 'Général' } });
+    await new Promise(setImmediate);
+    const skip = player.skip();
+    await new Promise(setImmediate);
+    assert.deepEqual(starts, ['track-a', 'track-b']);
+    assert.equal(player.current.title, 'B');
+
+    gates.get('track-a').release();
+    await new Promise(setImmediate);
+    assert.deepEqual(stopped, ['track-a']);
+    gates.get('track-b').release();
+    await Promise.all([add, skip]);
+    assert.equal(player.sender != null, true);
+    assert.equal(player.current.title, 'B');
+    player.stop();
+    player._clearIdleTimer();
+  } finally {
+    gates.get('track-a').release();
+    gates.get('track-b').release();
+    OpusSender.start = originalStart;
+  }
+});
+
+test('la fin naturelle de la file notifie le demandeur et libère le lecteur', async () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  const originalStart = OpusSender.start;
+  let finishTrack;
+  let notifiedRequester;
+  let queueEndCount = 0;
+  OpusSender.start = async (_connection, _url, _onStarted, onFinished) => {
+    finishTrack = onFinished;
+    return { setVolume() {}, stop() {} };
+  };
+
+  try {
+    const player = new MusicPlayer('guild-finished', { user: { id: 'bot-user' } });
+    player.connection = { connected: true, channelId: 'voice-a' };
+    player.onQueueEnd = async (_instance, requesterId) => {
+      notifiedRequester = requesterId;
+      queueEndCount += 1;
+    };
+    await player.enqueueSongs([{ title: 'Fin', url: 'track-end' }], {
+      voiceChannel: { id: 'voice-a', name: 'Général' },
+      requesterId: '123456789012345678',
+    });
+    await finishTrack();
+    assert.equal(notifiedRequester, '123456789012345678');
+    assert.equal(player.current, null);
+    assert.equal(player.isPlaying, false);
+    assert.equal(player.sender, null);
+
+    player.current = { title: 'Passée par skip' };
+    player.isPlaying = true;
+    await player.skip();
+    assert.equal(queueEndCount, 2, 'skipper le dernier titre de la file déclenche aussi l’avis de fin');
+    assert.equal(notifiedRequester, null);
+    player._clearIdleTimer();
+  } finally {
+    OpusSender.start = originalStart;
+  }
+});

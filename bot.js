@@ -103,6 +103,7 @@ function getPlayer(guildId) {
     }
     // Le statut de lecture est publié dans un message propre à cette guilde.
     p.onActivityChange = (state) => guildNowPlaying.update(p, state);
+    p.onQueueEnd = (_player, requesterId) => guildNowPlaying.finishQueue(p, requesterId);
     client.musicPlayers.set(guildId, p);
   }
   return client.musicPlayers.get(guildId);
@@ -240,6 +241,12 @@ client.once(Events.ClientReady, async (c) => {
   Logger.success(`Bot connecté en tant que ${c.user.username}`);
   Logger.info(`Présent sur ${c.guilds.cache.size} serveur(s)`);
   try {
+    const cleared = await guildNowPlaying.resetAfterRestart(c.guilds.cache.map((guild) => guild.id));
+    if (cleared) Logger.info(`${cleared} ancien(s) statut(s) musical(aux) retiré(s) après le redémarrage.`);
+  } catch (error) {
+    Logger.warn(`Nettoyage des anciens statuts musicaux impossible : ${error.message}`);
+  }
+  try {
     await registerSlashCommands(c.user.id);
   } catch (e) {
     Logger.error(`Échec enregistrement slash commands: ${e.message}`);
@@ -294,6 +301,15 @@ client.once(Events.ClientReady, async (c) => {
 client.on(Events.InteractionCreate, async (interaction) => {
     if (await minecraftBridge.handleLinkButton(interaction)) return;
   if (interaction.isButton?.() || interaction.isStringSelectMenu?.()) {
+    if (interaction.customId?.startsWith('musicctl:')) {
+      try { await guildNowPlaying.handleControl(interaction, getPlayer); }
+      catch (e) {
+        Logger.error(`Erreur contrôle musical: ${e.message}`);
+        if (interaction.deferred || interaction.replied) await interaction.followUp({ content: `Erreur contrôle musical : ${e.message}`, ephemeral: true }).catch(() => {});
+        else await interaction.reply({ content: `Erreur contrôle musical : ${e.message}`, ephemeral: true }).catch(() => {});
+      }
+      return;
+    }
     if (interaction.customId?.startsWith('playcat:')) {
       try { await client.commands.get('play')?.handleCatalogInteraction?.(interaction, deps); }
       catch (e) {

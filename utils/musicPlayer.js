@@ -26,10 +26,64 @@ class MusicPlayer {
     this.connecting = null; this.sender = null; this.lastChannel = null;
     this.addedBy = '?'; this.voiceChannelName = '?'; this._generation = 0;
     this._idleTimer = null; this._aloneTimer = null;
+    this._enqueueOperation = Promise.resolve();
+    this.onQueueEnd = null;
   }
   addToQueue(song) { this._clearIdleTimer(); this.queue.push(song); }
   getNextSong() { if (this.loopMode === 2 && this.current) this.queue.push(this.current); return this.queue.shift(); }
   clearQueue() { this.queue = []; }
+
+  enqueueSongs(songs, {
+    voiceChannel,
+    addedBy,
+    requesterId,
+    lastChannel,
+    lang,
+    insertFirst = false,
+  } = {}) {
+    const list = Array.isArray(songs) ? songs.filter(Boolean) : [];
+    if (!list.length) return Promise.reject(new Error('Aucune musique jouable à ajouter à la file.'));
+
+    const enqueue = async () => {
+      const connected = Boolean(this.connection?.connected);
+      const active = connected && Boolean(this.isPlaying || this.current || this.sender);
+      if (active && voiceChannel?.id && String(this.connection.channelId) !== String(voiceChannel.id)) {
+        throw new Error('Le bot écoute déjà dans un autre salon vocal de ce serveur. Rejoins son salon pour ajouter une musique.');
+      }
+      if (!active) {
+        if (!voiceChannel) throw new Error('Rejoins un salon vocal avant d’ajouter une musique.');
+        await this.ensureConnection(voiceChannel);
+      }
+
+      const entries = list.map((song) => ({
+        ...song,
+        addedBy: addedBy || song.addedBy || '?',
+        requesterId: requesterId || song.requesterId || null,
+        voiceChannelName: voiceChannel?.name || song.voiceChannelName || this.voiceChannelName,
+        requestChannel: lastChannel || song.requestChannel || null,
+        nowPlayingLang: lang || song.nowPlayingLang || this.nowPlayingLang || 'fr',
+      }));
+      if (insertFirst) this.queue.unshift(...entries);
+      else this.queue.push(...entries);
+      this._clearIdleTimer();
+
+      if (!active) await this.playNext();
+      else await this._activity();
+
+      return {
+        added: entries.length,
+        queued: active,
+        queuedCount: active ? entries.length : Math.max(0, entries.length - 1),
+        player: this,
+      };
+    };
+
+    // Les demandes d’un même serveur sont sérialisées jusqu’au démarrage de
+    // l’extraction audio : deux /play simultanés ne peuvent plus se remplacer.
+    const operation = this._enqueueOperation.then(enqueue, enqueue);
+    this._enqueueOperation = operation.catch(() => {});
+    return operation;
+  }
 
   _clearIdleTimer() {
     if (this._idleTimer) clearTimeout(this._idleTimer);
@@ -166,19 +220,39 @@ class MusicPlayer {
     });
   }
 
-  async playNext(onEmbed) {
+  async playNext(onEmbed, { notifyWhenEmpty = false, endedRequesterId = null, endedTrack = false } = {}) {
     this._clearIdleTimer();
     if (this.loopMode === 1 && this.current) this.queue.unshift(this.current);
     const song = this.getNextSong();
-    if (!song) { this.isPlaying = false; this.current = null; this._activity(); this._scheduleIdleLeave(); return null; }
+    if (!song) {
+      const requesterId = this.current?.requesterId || endedRequesterId || null;
+      const hadCurrent = Boolean(this.current || endedTrack);
+      this.isPlaying = false;
+      this.current = null;
+      this.sender = null;
+      await this._activity();
+      if (notifyWhenEmpty && hadCurrent) {
+        try { await this.onQueueEnd?.(this, requesterId); }
+        catch (error) { console.warn(`[now-playing] fin de file: ${error.message}`); }
+      }
+      this._scheduleIdleLeave();
+      return null;
+    }
     if (!this.connection?.connected) throw new Error("Le bot n'est connecté à aucun canal vocal.");
     if (this.sender) this.sender.stop();
     this.current = song; this.isPlaying = true; this.isPaused = false;
+    this.addedBy = song.addedBy || this.addedBy;
+    this.voiceChannelName = song.voiceChannelName || this.voiceChannelName;
+    this.nowPlayingLang = song.nowPlayingLang || this.nowPlayingLang || 'fr';
+    if (Object.hasOwn(song, 'requestChannel')) this.lastChannel = song.requestChannel;
     this._activity();
     const generation = ++this._generation;
     try {
-      this.sender = await OpusSender.start(this.connection, song.url, () => console.log('🔊 SON ÉMIS — lecture maison active.'), async () => {
-        if (generation === this._generation && this.isPlaying) await this.playNext();
+      const sender = await OpusSender.start(this.connection, song.url, () => console.log('🔊 SON ÉMIS — lecture maison active.'), async () => {
+        if (generation === this._generation && this.isPlaying) {
+          this.sender = null;
+          await this.playNext(undefined, { notifyWhenEmpty: true });
+        }
       }, async (error) => {
         if (generation !== this._generation || !this.isPlaying) return;
         console.error('[audio] lecture impossible:', error.message);
@@ -196,6 +270,12 @@ class MusicPlayer {
           await this.lastChannel?.send(`❌ Lecture impossible : ${error.message}`);
         } catch (_) { /* salon supprimé ou permissions manquantes */ }
       }, song.fallbackQuery);
+      if (generation !== this._generation) {
+        sender?.stop?.();
+        return null;
+      }
+      this.sender = sender;
+      if (this.isPaused) this.sender?.pause?.();
     } catch (error) {
       // L'extraction du flux peut échouer avant que le processus audio existe.
       // Réinitialiser l'état évite qu'une tentative ratée bloque toute la file.
@@ -213,30 +293,41 @@ class MusicPlayer {
     if (onEmbed) await onEmbed(song);
     this._activity(); return song;
   }
-  pause() { this.sender?.pause?.(); this.isPaused = true; this._activity(); }
-  resume() { this.sender?.resume?.(); this.isPaused = false; this._activity(); }
+  pause() { this.sender?.pause?.(); this.isPaused = true; return this._activity(); }
+  resume() { this.sender?.resume?.(); this.isPaused = false; return this._activity(); }
   skip() {
-    if (!this.isPlaying) return Promise.resolve(null);
+    if (!this.isPlaying && !this.current) return Promise.resolve(null);
+    const requesterId = this.current?.requesterId || null;
     ++this._generation;
     this.sender?.stop();
     this.sender = null;
     this.current = null;
     this.isPlaying = false;
     this.isPaused = false;
-    return this.playNext().catch((e) => { console.error('[audio] skip:', e.message); return null; });
+    return this.playNext(undefined, { notifyWhenEmpty: true, endedRequesterId: requesterId, endedTrack: true }).catch((e) => { console.error('[audio] skip:', e.message); return null; });
   }
   stop() {
     ++this._generation; this._clearIdleTimer(); this.clearQueue(); this.sender?.stop();
     this.sender = null; this.current = null; this.isPlaying = false; this.isPaused = false;
-    this._activity(); this._scheduleIdleLeave();
+    const update = this._activity();
+    this._scheduleIdleLeave();
+    return update;
   }
   destroy() {
     const connection = this.connection;
     this.connection = null;
-    this._clearIdleTimer(); this._clearAloneTimer(); this.stop(); this._clearIdleTimer();
+    this._clearIdleTimer(); this._clearAloneTimer();
+    const update = this.stop();
+    this._clearIdleTimer();
     connection?.destroy();
+    return update;
   }
-  setVolume(value) { this.volume = Math.max(0, Math.min(1, Number(value) || 0)); this.sender?.setVolume?.(this.volume); return Math.round(this.volume * 100); }
+  setVolume(value) {
+    this.volume = Math.max(0, Math.min(1, Number(value) || 0));
+    this.sender?.setVolume?.(this.volume);
+    this._activity();
+    return Math.round(this.volume * 100);
+  }
   _activity() {
     const state = {
       current: this.isPlaying && this.current ? {
@@ -250,15 +341,19 @@ class MusicPlayer {
       queueLength: this.queue.length,
       volume: Math.round(this.volume * 100),
       addedBy: this.addedBy,
+      requesterId: this.current?.requesterId || null,
       voiceChannelName: this.voiceChannelName,
       lang: this.nowPlayingLang || 'fr',
+      loopMode: this.loopMode,
     };
     try {
       // Une présence Discord est commune à tous les serveurs. Le titre est
       // uniquement publié par le callback dans le salon de ce serveur.
       const update = this.onActivityChange?.(state);
       update?.catch?.((error) => console.warn(`[now-playing] ${error.message}`));
+      return update;
     } catch (_) { /* ignore */ }
+    return Promise.resolve(false);
   }
   getState() { const f = (s) => s && ({ title: s.title, url: s.url, thumbnail: s.thumbnail || null, source: s.source || 'youtube', duration: s.duration || 0 }); return { current: f(this.current), queue: this.queue.map(f), isPlaying: this.isPlaying, isPaused: this.isPaused, loopMode: this.loopMode, volume: this.volume }; }
 }

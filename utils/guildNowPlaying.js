@@ -1,7 +1,13 @@
-/** Message de statut « en cours » stocké et modifié séparément par serveur. */
-const { EmbedBuilder } = require('discord.js');
+/** Message de lecture et contrôles persistants, isolés par serveur Discord. */
+const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+} = require('discord.js');
 
 const SETTING_KEY = 'musicNowPlayingMessage';
+const LOOP_LABELS = ['Désactivée', 'Titre', 'File'];
 
 function statusEmbed(state, guildName = '') {
   const song = state?.isPlaying ? state.current : null;
@@ -14,34 +20,84 @@ function statusEmbed(state, guildName = '') {
   }
 
   const title = String(song.title || 'Musique inconnue').replace(/[\r\n]+/g, ' ').slice(0, 300);
+  const loop = LOOP_LABELS[Math.max(0, Math.min(2, Number(state.loopMode) || 0))];
   const embed = new EmbedBuilder()
     .setColor(state.isPaused ? '#FFA500' : '#5865F2')
-    .setTitle(state.isPaused ? '⏸️ En pause sur ce serveur' : '🎵 En cours sur ce serveur')
+    .setTitle(state.isPaused ? '⏸️ Lecture en pause' : '🎵 Lecture en cours')
     .setDescription(`**${title}**`)
-    .setFooter({ text: `Statut musical propre à ${String(guildName || 'ce serveur').slice(0, 100)}` });
+    .setFooter({ text: `Lecteur musical de ${String(guildName || 'ce serveur').slice(0, 100)}` });
   const fields = [];
-  if (state.voiceChannelName) fields.push({ name: 'Salon vocal', value: String(state.voiceChannelName).slice(0, 100), inline: true });
-  fields.push({ name: 'File restante', value: String(Math.max(0, Number(state.queueLength) || 0)), inline: true });
-  if (state.addedBy) fields.push({ name: 'Ajouté par', value: String(state.addedBy).slice(0, 100), inline: true });
-  fields.push({ name: 'Volume', value: `${Math.max(0, Math.min(100, Number(state.volume) || 0))}%`, inline: true });
+  if (state.voiceChannelName) fields.push({ name: '🔊 Salon vocal', value: String(state.voiceChannelName).slice(0, 100), inline: true });
+  fields.push({ name: '📜 File restante', value: String(Math.max(0, Number(state.queueLength) || 0)), inline: true });
+  if (state.addedBy) fields.push({ name: '👤 Ajouté par', value: String(state.addedBy).slice(0, 100), inline: true });
+  fields.push({ name: '🔁 Boucle', value: loop, inline: true });
+  fields.push({ name: '🔉 Volume', value: `${Math.max(0, Math.min(100, Number(state.volume) || 0))}%`, inline: true });
+  if (Number(song.duration) > 0) fields.push({ name: '⏱️ Durée', value: formatDuration(song.duration), inline: true });
   embed.addFields(fields);
   if (song.thumbnail && /^https:\/\//i.test(String(song.thumbnail))) embed.setThumbnail(song.thumbnail);
   return embed;
 }
 
+function formatDuration(seconds) {
+  const duration = Math.max(0, Math.floor(Number(seconds) || 0));
+  return `${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`;
+}
+
+function controlComponents(guildId, state = {}) {
+  const active = Boolean(state.current && (state.isPlaying || state.isPaused));
+  const loopMode = Math.max(0, Math.min(2, Number(state.loopMode) || 0));
+  const button = (action, label, emoji, style, disabled = !active) => new ButtonBuilder()
+    .setCustomId(`musicctl:${guildId}:${action}`)
+    .setLabel(label)
+    .setEmoji({ name: emoji })
+    .setStyle(style)
+    .setDisabled(disabled);
+
+  return [new ActionRowBuilder().addComponents(
+    button('pause', state.isPaused ? 'Reprendre' : 'Pause', state.isPaused ? '▶️' : '⏸️', ButtonStyle.Primary),
+    button('skip', 'Suivant', '⏭️', ButtonStyle.Secondary),
+    button('stop', 'Stop', '⏹️', ButtonStyle.Danger),
+    button('loop', `Boucle · ${LOOP_LABELS[loopMode]}`, loopMode === 1 ? '🔂' : '🔁', ButtonStyle.Secondary),
+    button('queue', `File · ${Math.max(0, Number(state.queueLength) || 0)}`, '📜', ButtonStyle.Secondary),
+  )];
+}
+
+function finishedQueueEmbed(guildName = '') {
+  return new EmbedBuilder()
+    .setColor('#F0B232')
+    .setTitle('📜 File d’attente terminée')
+    .setDescription('Il n’y a plus de chansons dans la file. Vous pouvez en ajouter d’autres avec `/play`.')
+    .setFooter({ text: `Merci d’avoir écouté${guildName ? ` sur ${String(guildName).slice(0, 100)}` : ''} 🎶` })
+    .setTimestamp();
+}
+
+function queueEmbed(player) {
+  const lines = [];
+  if (player.current) lines.push(`🎶 **En cours :** ${String(player.current.title || 'Musique inconnue').slice(0, 180)}`);
+  if (!player.queue.length) lines.push('La file est vide.');
+  else player.queue.slice(0, 10).forEach((song, index) => {
+    lines.push(`**${index + 1}.** ${String(song.title || 'Musique inconnue').slice(0, 160)}`);
+  });
+  if (player.queue.length > 10) lines.push(`… et ${player.queue.length - 10} autre(s) titre(s).`);
+  return new EmbedBuilder()
+    .setColor('#5865F2')
+    .setTitle(`📜 File d’attente · ${player.queue.length} titre(s)`)
+    .setDescription(lines.join('\n').slice(0, 4000));
+}
+
 class GuildNowPlayingManager {
-  constructor({ client, database, log = () => {} }) {
+  constructor({ client, database, log = () => {}, noticeTtlMs = 30_000 }) {
     this.client = client;
     this.database = database;
     this.log = log;
+    this.noticeTtlMs = noticeTtlMs;
     this.pending = new Map();
+    this.finishedNotices = new Map();
   }
 
-  update(player, state) {
-    const guildId = String(player?.guildId || '');
-    if (!guildId) return Promise.resolve(false);
+  _enqueueGuild(guildId, task) {
     const previous = this.pending.get(guildId) || Promise.resolve();
-    const operation = previous.catch(() => {}).then(() => this._update(player, state, guildId)).catch((error) => {
+    const operation = previous.catch(() => {}).then(task).catch((error) => {
       this.log('warn', `[now-playing][guild=${guildId}] ${String(error.message || error).slice(0, 300)}`);
       return false;
     });
@@ -49,6 +105,18 @@ class GuildNowPlayingManager {
     return operation.finally(() => {
       if (this.pending.get(guildId) === operation) this.pending.delete(guildId);
     });
+  }
+
+  update(player, state) {
+    const guildId = String(player?.guildId || '');
+    if (!guildId) return Promise.resolve(false);
+    return this._enqueueGuild(guildId, () => this._update(player, state, guildId));
+  }
+
+  finishQueue(player, requesterId = null) {
+    const guildId = String(player?.guildId || '');
+    if (!guildId) return Promise.resolve(false);
+    return this._enqueueGuild(guildId, () => this._finishQueue(player, guildId, requesterId));
   }
 
   async _channelFromId(channelId) {
@@ -60,7 +128,30 @@ class GuildNowPlayingManager {
     return channel;
   }
 
+  async _clearFinishedNotice(guildId) {
+    const notice = this.finishedNotices.get(guildId);
+    if (!notice) return;
+    this.finishedNotices.delete(guildId);
+    clearTimeout(notice.timer);
+    let deleted = false;
+    if (typeof notice.message?.delete === 'function') {
+      try { await notice.message.delete(); deleted = true; }
+      catch (_) { /* l’update suivant réutilisera le message si possible */ }
+    }
+    const saved = this.database.getGuildSetting(guildId, SETTING_KEY, null);
+    if (saved?.finishedNotice && String(saved.messageId || '') === String(notice.message?.id || '')) {
+      this.database.setGuildSetting(guildId, SETTING_KEY, {
+        channelId: String(saved.channelId),
+        messageId: deleted ? null : String(notice.message?.id || '') || null,
+        ...(!deleted ? { finishedNotice: false } : {}),
+      });
+    }
+    return deleted;
+  }
+
   async _update(player, state, guildId) {
+    const active = Boolean(state?.isPlaying && state.current);
+    if (active) await this._clearFinishedNotice(guildId);
     const saved = this.database.getGuildSetting(guildId, SETTING_KEY, null);
     let channel = saved?.channelId ? await this._channelFromId(saved.channelId) : null;
     if (!channel || (channel.guildId && String(channel.guildId) !== guildId)) channel = player.lastChannel || null;
@@ -72,8 +163,10 @@ class GuildNowPlayingManager {
         message = await channel.messages.fetch(String(saved.messageId)).catch(() => null);
       }
     }
-    const active = Boolean(state?.isPlaying && state.current);
-    const payload = { embeds: [statusEmbed(state, channel.guild?.name)] };
+    const payload = {
+      embeds: [statusEmbed(state, channel.guild?.name)],
+      components: controlComponents(guildId, state),
+    };
     if (message) {
       await message.edit(payload);
       return true;
@@ -89,6 +182,173 @@ class GuildNowPlayingManager {
     }
     return Boolean(message);
   }
+
+  async _finishQueue(player, guildId, requesterId) {
+    if (player.isPlaying || player.current || player.queue?.length) return false;
+    await this._clearFinishedNotice(guildId);
+    const saved = this.database.getGuildSetting(guildId, SETTING_KEY, null);
+    let channel = saved?.channelId ? await this._channelFromId(saved.channelId) : player.lastChannel || null;
+    if (!channel || (channel.guildId && String(channel.guildId) !== guildId)) return false;
+
+    let statusMessage = null;
+    if (saved?.messageId && saved?.channelId && String(channel.id) === String(saved.channelId)) {
+      if (typeof channel.messages?.fetch === 'function') {
+        statusMessage = await channel.messages.fetch(String(saved.messageId)).catch(() => null);
+      }
+    }
+    if (player.isPlaying || player.current || player.queue?.length) return false;
+
+    const safeRequesterId = /^[0-9]{17,20}$/.test(String(requesterId || '')) ? String(requesterId) : null;
+    let noticeMessage = null;
+    if (statusMessage && typeof statusMessage.delete === 'function') {
+      try { await statusMessage.delete(); }
+      catch (_) {
+        // Sans permission de suppression, on réutilise le statut comme avis
+        // temporaire : il sera effacé ou remplacé au prochain /play.
+        if (typeof statusMessage.edit === 'function') {
+          try {
+            await statusMessage.edit({
+              content: safeRequesterId ? `<@${safeRequesterId}>` : undefined,
+              embeds: [finishedQueueEmbed(channel.guild?.name)],
+              components: [],
+              allowedMentions: { parse: [], users: safeRequesterId ? [safeRequesterId] : [] },
+            });
+            noticeMessage = statusMessage;
+          } catch (_) { /* tenter d’envoyer un nouveau message */ }
+        }
+      }
+    }
+    const becameActive = Boolean(player.isPlaying || player.current || player.queue?.length);
+    this.database.setGuildSetting(guildId, SETTING_KEY, {
+      channelId: String(channel.id),
+      messageId: becameActive && noticeMessage ? String(noticeMessage.id) : null,
+    });
+    if (becameActive) return false;
+
+    if (!noticeMessage && typeof channel.send === 'function') {
+      noticeMessage = await channel.send({
+        content: safeRequesterId ? `<@${safeRequesterId}>` : undefined,
+        embeds: [finishedQueueEmbed(channel.guild?.name)],
+        components: [],
+        allowedMentions: { parse: [], users: safeRequesterId ? [safeRequesterId] : [] },
+      }).catch(() => null);
+    }
+    if (!noticeMessage) return false;
+
+    const notice = { message: noticeMessage, timer: null };
+    notice.timer = setTimeout(() => {
+      if (this.finishedNotices.get(guildId) !== notice) return;
+      this.finishedNotices.delete(guildId);
+      Promise.resolve().then(async () => {
+        let deleted = false;
+        try {
+          await notice.message.delete?.();
+          deleted = typeof notice.message.delete === 'function';
+        } catch (_) {
+          try {
+            await notice.message.edit?.({ embeds: [statusEmbed(null)], components: [] });
+          } catch (_) { /* le message n’est plus modifiable */ }
+        }
+        const current = this.database.getGuildSetting(guildId, SETTING_KEY, null);
+        if (current?.finishedNotice && String(current.messageId || '') === String(notice.message?.id || '')) {
+          this.database.setGuildSetting(guildId, SETTING_KEY, {
+            channelId: String(current.channelId),
+            messageId: deleted ? null : String(notice.message?.id || '') || null,
+          });
+        }
+      }).catch(() => {});
+    }, this.noticeTtlMs);
+    notice.timer.unref?.();
+    this.finishedNotices.set(guildId, notice);
+    this.database.setGuildSetting(guildId, SETTING_KEY, {
+      channelId: String(channel.id),
+      messageId: String(noticeMessage.id || ''),
+      finishedNotice: true,
+    });
+    return true;
+  }
+
+  async resetAfterRestart(guildIds = []) {
+    let removed = 0;
+    for (const value of guildIds) {
+      const guildId = String(value?.id || value || '');
+      if (!guildId) continue;
+      await this._clearFinishedNotice(guildId);
+      const saved = this.database.getGuildSetting(guildId, SETTING_KEY, null);
+      if (!saved) continue;
+      const channel = saved?.channelId ? await this._channelFromId(saved.channelId) : null;
+      let remainingMessageId = null;
+      if (channel && (!channel.guildId || String(channel.guildId) === guildId)
+          && saved?.messageId && typeof channel.messages?.fetch === 'function') {
+        const message = await channel.messages.fetch(String(saved.messageId)).catch(() => null);
+        if (message?.delete) {
+          try { await message.delete(); removed += 1; }
+          catch (error) {
+            this.log('warn', `[now-playing][guild=${guildId}] ancien statut non supprimé : ${String(error.message || error).slice(0, 200)}`);
+            try {
+              await message.edit({ embeds: [statusEmbed(null, channel.guild?.name)], components: controlComponents(guildId) });
+              remainingMessageId = String(message.id);
+              removed += 1;
+            } catch (_) { /* l’ancien message reste inaccessible à modifier */ }
+          }
+        }
+      }
+      this.database.setGuildSetting(guildId, SETTING_KEY, saved?.channelId
+        ? { channelId: String(saved.channelId), messageId: remainingMessageId }
+        : null);
+    }
+    return removed;
+  }
+
+  async handleControl(interaction, getPlayer) {
+    if (!interaction.customId?.startsWith('musicctl:')) return false;
+    const [, buttonGuildId, action] = interaction.customId.split(':');
+    if (!buttonGuildId || String(interaction.guildId || '') !== buttonGuildId) {
+      await interaction.reply({ content: 'Ce contrôle musical n’appartient pas à ce serveur.', ephemeral: true });
+      return true;
+    }
+    const player = getPlayer(interaction.guildId);
+    const memberVoiceId = interaction.member?.voice?.channelId || interaction.member?.voice?.channel?.id;
+    const botVoiceId = player.connection?.connected ? player.connection.channelId : null;
+    if (!memberVoiceId || !botVoiceId || String(memberVoiceId) !== String(botVoiceId)) {
+      await interaction.reply({ content: 'Rejoins le même salon vocal que le bot pour utiliser ces contrôles.', ephemeral: true });
+      return true;
+    }
+
+    if (action === 'queue') {
+      await interaction.reply({ embeds: [queueEmbed(player)], ephemeral: true });
+      return true;
+    }
+    if (!player.current || !player.isPlaying) {
+      await interaction.reply({ content: 'Aucune musique n’est en cours sur ce serveur.', ephemeral: true });
+      return true;
+    }
+    if (!['pause', 'skip', 'stop', 'loop'].includes(action)) {
+      await interaction.reply({ content: 'Contrôle musical inconnu.', ephemeral: true });
+      return true;
+    }
+
+    await interaction.deferUpdate();
+
+    if (action === 'pause') {
+      if (player.isPaused) await player.resume();
+      else await player.pause();
+    } else if (action === 'skip') {
+      await player.skip();
+    } else if (action === 'stop') {
+      await player.destroy();
+    } else if (action === 'loop') {
+      player.loopMode = (Number(player.loopMode) + 1) % 3;
+      await player._activity?.();
+    }
+    return true;
+  }
 }
 
-module.exports = { GuildNowPlayingManager, statusEmbed, SETTING_KEY };
+module.exports = {
+  GuildNowPlayingManager,
+  statusEmbed,
+  controlComponents,
+  finishedQueueEmbed,
+  SETTING_KEY,
+};

@@ -168,16 +168,14 @@ async function queueSongs(ctx, deps, songs) {
   if (!ctx.guildId || !member?.voice?.channel) throw new Error('Rejoins un salon vocal avant de choisir une musique.');
   if (!songs.length) throw new Error('Aucune musique jouable trouvée dans ce résultat.');
   const player = deps.getPlayer(ctx.guildId);
-  player.lastChannel = ctx.channel;
-  player.addedBy = member.displayName || member.user?.username || ctx.user?.username || '?';
-  player.voiceChannelName = member.voice.channel.name || '?';
-  player.nowPlayingLang = deps.langFor ? deps.langFor(userIdOf(ctx), ctx.guild?.id) : 'fr';
-  const wasPlaying = player.isPlaying;
-  if (!wasPlaying) await player.ensureConnection(member.voice.channel);
-  for (const song of songs) player.addToQueue(song);
-  if (!wasPlaying) await player.playNext();
-  else player._activity?.();
-  return { added: songs.length, queued: wasPlaying ? songs.length : Math.max(0, songs.length - 1), player };
+  return player.enqueueSongs(songs, {
+    voiceChannel: member.voice.channel,
+    addedBy: member.displayName || member.user?.username || ctx.user?.username || '?',
+    requesterId: userIdOf(ctx),
+    lastChannel: ctx.channel,
+    lang: deps.langFor ? deps.langFor(userIdOf(ctx), ctx.guild?.id) : 'fr',
+    insertFirst: isSlash(ctx) && ctx.options?.getBoolean?.('insert-first') === true,
+  });
 }
 
 async function resolveCatalogItem(item) {
@@ -260,7 +258,7 @@ module.exports = {
     name: 'play',
     description: 'Cherche et joue musique sur YouTube, Spotify et Deezer',
     options: [
-      { name: 'query', description: 'Titre, artiste, lien ; vide = Top 25 mondial', type: 3, required: false, autocomplete: true },
+      { name: 'query', description: 'Titre, artiste, lien ou choix du Top 25 mondial', type: 3, required: true, autocomplete: true },
       { name: 'insert-first', description: 'Mettre la musique en haut de la file', type: 5, required: false },
     ],
   },
@@ -429,9 +427,9 @@ module.exports = {
       }
     }
 
-    // Le choix d'une suggestion d'autocomplétion reste direct; les liens saisis
-    // à la main, eux, sont transformés en titre puis recherchés dans le catalogue.
-    if (isSlash(ctx) && !selectedItem && (inputInfo.kind === 'name' || metadata?.searchQuery)) {
+    // Le texte libre ouvre la liste de résultats. Un lien, lui, doit partir en
+    // résolution directe et ne jamais obliger l’utilisateur à choisir une 2e fois.
+    if (isSlash(ctx) && !selectedItem && inputInfo.kind === 'name') {
       try {
         const search = deps.searchCatalog || searchCatalog;
         const items = await search(searchTerm);
@@ -458,15 +456,17 @@ module.exports = {
       loggerCall(deps, 'error', `[play] échec: lien musical non pris en charge (${inputInfo.safe})`);
       return edit({ embeds: [embeds.errorEmbed(message, lang)], content: isSlash(ctx) ? message : undefined });
     }
-    if (inputInfo.kind === 'link' && !metadata?.searchQuery) {
-      const message = `Impossible de lire les métadonnées publiques de ce lien ${inputInfo.providerLabel}. Essaie le nom du morceau ou un lien public.`;
-      if (isSlash(ctx)) return edit({ embeds: [embeds.errorEmbed(message, lang)], content: null });
-      return reply({ embeds: [embeds.errorEmbed(message, lang)] });
-    }
     if (!ctx.member?.voice?.channel) return edit({ embeds: [embeds.errorEmbed(tr(lang).needVoice, lang)] });
     if (!isSlash(ctx)) await reply({ embeds: [embeds.searchEmbed(searchTerm, lang)] });
     try {
-      const songs = await resolveQuery(searchTerm, { fetchImpl: deps.fetch || globalThis.fetch });
+      // Pour un morceau isolé, on recherche par son titre public. Pour un album,
+      // une playlist ou des métadonnées indisponibles, on laisse le résolveur
+      // traiter le lien d’origine afin de conserver tous les titres.
+      const resolveInput = inputInfo.kind === 'link' && metadata?.kind === 'track'
+        ? metadata.searchQuery
+        : inputInfo.kind === 'link' ? query : searchTerm;
+      const resolver = deps.resolveQuery || resolveQuery;
+      const songs = await resolver(resolveInput, { fetchImpl: deps.fetch || globalThis.fetch });
       const { queued, player } = await queueSongs(ctx, deps, songs);
       loggerCall(deps, 'info', `[play] lecture ${queued ? 'ajoutée à la file' : 'lancée'} titre=${JSON.stringify(cleanLogText(songs[0]?.title, 160))} pistes=${songs.length}`);
       if (isSlash(ctx)) return edit({ content: `${songs.length} titre${songs.length === 1 ? '' : 's'} ${queued ? 'ajouté(s) à la file' : 'ajouté(s) · lecture lancée'}.`, embeds: [], components: [] });

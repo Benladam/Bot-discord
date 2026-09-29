@@ -32,6 +32,7 @@ module.exports = {
       });
     }
     player.loopMode = labels[arg];
+    player._activity?.();
     const current = T.loopModes[player.loopMode];
     return ctx.reply({
       embeds: [new EmbedBuilder().setTitle(T.loopTitle).setDescription(T.loopSet2(current)).setColor('#0099FF')],

@@ -93,10 +93,10 @@ test('le champ /play vide propose les 25 morceaux du classement mondial Deezer',
   assert.deepEqual(response, choices);
 });
 
-test('/play sans query ouvre le Top 25 mondial au lieu de rendre le champ obligatoire', async () => {
+test('/play affiche query immédiatement tout en gardant le Top 25 comme autocomplétion vide', async () => {
   const playCommand = require('../commands/play');
   const option = playCommand.data.options.find((entry) => entry.name === 'query');
-  assert.equal(option.required, false);
+  assert.equal(option.required, true);
 
   const items = Array.from({ length: 25 }, (_, index) => ({
     provider: 'deezer', kind: 'track', title: `Titre ${index + 1}`,
@@ -219,36 +219,71 @@ test('si un fournisseur ne fournit aucun titre, le choix de secours ne révèle 
   assert.match(response[0].value, /^music-ref:/);
 });
 
-test('un /play Spotify localisé affiche une recherche par titre et journalise le lien sans paramètres privés', async () => {
+test('un lien /play est résolu et mis en file sans ouvrir de liste de sélection', async () => {
   const playCommand = require('../commands/play');
-  const logs = [];
-  let searched;
+  let resolvedQuery;
+  let queued;
   let edited;
   const ctx = {
-    user: { id: 'user-1', username: 'Adam', tag: 'Adam#0001' },
-    member: { voice: { channel: { id: 'voice-1' } } },
-    guildId: 'guild-1',
-    guild: { id: 'guild-1', name: 'Test' },
-    channel: { id: 'text-1', guildId: 'guild-1' },
+    user: { id: 'user-link', username: 'Adam', tag: 'Adam#0001' },
+    member: { displayName: 'Adam', voice: { channel: { id: 'voice-link', name: 'Général' } } },
+    guildId: 'guild-link',
+    guild: { id: 'guild-link', name: 'Test' },
+    channel: { id: 'text-link', guildId: 'guild-link' },
     isChatInputCommand: () => true,
     async deferReply() {},
     async editReply(payload) { edited = payload; return payload; },
     async reply(payload) { edited = payload; return payload; },
   };
+  const player = {
+    async enqueueSongs(songs, options) {
+      queued = { songs, options };
+      return { added: songs.length, queued: false, player: this };
+    },
+  };
+  const logs = [];
   await playCommand.execute(ctx, [
     'https://open.spotify.com/intl-fr/track/518c5Dr5EmpzACX268Aeqs?si=PRIVATE',
   ], {
     logger: { info: (line) => logs.push(line), warn: (line) => logs.push(line), error: (line) => logs.push(line) },
     fetch: async () => ({ ok: true, json: async () => ({ title: 'Dracula (with JENNIE) - Tame Impala' }) }),
-    searchCatalog: async (query) => {
-      searched = query;
-      return [{ kind: 'track', provider: 'deezer', title: 'Dracula (with JENNIE)', subtitle: 'Tame Impala', url: 'https://www.deezer.com/track/123' }];
+    resolveQuery: async (query) => {
+      resolvedQuery = query;
+      return [{ title: 'Dracula (with JENNIE) - Tame Impala', url: 'https://youtu.be/abcdefghijk', duration: 200 }];
     },
+    searchCatalog: async () => { throw new Error('Un lien ne doit pas ouvrir le sélecteur catalogue.'); },
+    getPlayer: () => player,
   });
-  assert.equal(searched, 'Dracula (with JENNIE) - Tame Impala');
-  assert.match(edited.embeds[0].data.title, /Dracula \(with JENNIE\)/);
+  assert.equal(resolvedQuery, 'Dracula (with JENNIE) - Tame Impala');
+  assert.equal(queued.songs[0].title, 'Dracula (with JENNIE) - Tame Impala');
+  assert.equal(queued.options.requesterId, 'user-link');
+  assert.match(edited.content, /lecture lancée/);
   assert.match(logs.join('\n'), /entrée=lien plateforme=Spotify/);
   assert.match(logs.join('\n'), /Tame Impala/);
   assert.doesNotMatch(logs.join('\n'), /PRIVATE/);
-  assert.doesNotMatch(edited.embeds[0].data.title, /open\.spotify/);
+});
+
+test('un texte libre /play affiche une liste interactive au lieu de lancer un résultat arbitraire', async () => {
+  const playCommand = require('../commands/play');
+  let searched;
+  let edited;
+  const ctx = {
+    user: { id: 'user-text', username: 'Adam' },
+    member: { voice: { channel: { id: 'voice-text', name: 'Général' } } },
+    guildId: 'guild-text', guild: { id: 'guild-text', name: 'Test' },
+    channel: { id: 'text-text', guildId: 'guild-text' },
+    isChatInputCommand: () => true,
+    async deferReply() {},
+    async editReply(payload) { edited = payload; return payload; },
+  };
+  await playCommand.execute(ctx, ['Niska'], {
+    logger: { info() {}, warn() {}, error() {} },
+    searchCatalog: async (query) => {
+      searched = query;
+      return [{ kind: 'track', provider: 'youtube', title: "Chasse à l'homme", subtitle: 'Niska', url: 'https://music.test/track/niska' }];
+    },
+  });
+  assert.equal(searched, 'Niska');
+  assert.ok(edited.components.some((row) => row.components.some((component) => component.toJSON().type === 3)));
+  assert.match(edited.embeds[0].data.title, /Résultats · Niska/);
 });

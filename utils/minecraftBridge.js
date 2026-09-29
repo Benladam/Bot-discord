@@ -314,12 +314,12 @@ function createMinecraftBridge({ client, getPlayer, database, logger = console }
       const wasTruncated = resolved.length > 25;
       const songs = resolved.slice(0, 25);
       if (!songs.length) throw new Error('Aucun morceau jouable trouvé.');
-      if (!player.connection?.connected) await player.ensureConnection(voiceChannel);
-      const wasPlaying = player.isPlaying;
-      player.addedBy = String(payload.mc_player_name || 'Minecraft').slice(0, 32);
-      player.lastChannel = null;
-      songs.forEach((song) => player.addToQueue(song));
-      if (!wasPlaying) await player.playNext();
+      await player.enqueueSongs(songs, {
+        voiceChannel,
+        addedBy: String(payload.mc_player_name || 'Minecraft').slice(0, 32),
+        lastChannel: null,
+        lang: 'fr',
+      });
       const omitted = wasTruncated ? ' (file limitée à 25 morceaux par demande)' : '';
       return { ok: true, message: songs.length + ' morceau(x) ajouté(s) à la file Discord.' + omitted };
     }

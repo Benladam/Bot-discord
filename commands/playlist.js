@@ -80,17 +80,15 @@ module.exports = {
           title: track.title, url: track.url, source: track.source || 'youtube', duration: 0,
         }));
         const player = deps.getPlayer(ctx.guildId);
-        player.lastChannel = ctx.channel;
-        player.addedBy = ctx.member.displayName || ctx.user?.username || ctx.author?.username || '?';
-        player.voiceChannelName = ctx.member.voice.channel.name || '?';
-        player.nowPlayingLang = deps.langFor ? deps.langFor(userId, ctx.guild?.id) : 'fr';
-        const wasPlaying = player.isPlaying;
-        if (!wasPlaying) await player.ensureConnection(ctx.member.voice.channel);
-        songs.forEach((song) => player.addToQueue(song));
-        if (!wasPlaying) await player.playNext();
-        else player._activity?.();
+        const result = await player.enqueueSongs(songs, {
+          voiceChannel: ctx.member.voice.channel,
+          lastChannel: ctx.channel,
+          addedBy: ctx.member.displayName || ctx.user?.username || ctx.author?.username || '?',
+          requesterId: userId,
+          lang: deps.langFor ? deps.langFor(userId, ctx.guild?.id) : 'fr',
+        });
         return slashCommand
-          ? ctx.editReply(`${songs.length} titre(s) de **${playlist.name}** ajouté(s)${wasPlaying ? ' à la file d’attente' : ' · lecture lancée'}${playlist.tracks.length > songs.length ? ' (limite de 100 titres par lancement).' : '.'}`)
+          ? ctx.editReply(`${songs.length} titre(s) de **${playlist.name}** ajouté(s)${result.queued ? ' à la file d’attente' : ' · lecture lancée'}${playlist.tracks.length > songs.length ? ' (limite de 100 titres par lancement).' : '.'}`)
           : ctx.reply(`${songs.length} titre(s) de **${playlist.name}** ajouté(s)${playlist.tracks.length > songs.length ? ' (limite de 100 titres par lancement).' : '.'}`);
       }
       throw new Error(`Action inconnue. Choisis : ${ACTIONS.map((item) => item.value).join(', ')}.`);
