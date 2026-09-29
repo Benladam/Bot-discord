@@ -3,6 +3,11 @@ const { VoiceConnection } = require('./voice');
 const { OpusSender } = require('./audioSender');
 
 const VOICE_REQUEST_TIMEOUT_MS = 15_000;
+const configuredIdleMinutes = Number(process.env.VOICE_IDLE_TIMEOUT_MINUTES);
+const VOICE_IDLE_TIMEOUT_MINUTES = configuredIdleMinutes === 1 || configuredIdleMinutes === 2
+  ? configuredIdleMinutes
+  : 2;
+const VOICE_IDLE_TIMEOUT_MS = VOICE_IDLE_TIMEOUT_MINUTES * 60_000;
 
 function gatewayShardForGuild(client, guildId) {
   const guild = client.guilds?.cache?.get?.(String(guildId));
@@ -20,14 +25,74 @@ class MusicPlayer {
     this.loopMode = 0; this.volume = 1; this.connection = null;
     this.connecting = null; this.sender = null; this.lastChannel = null;
     this.addedBy = '?'; this.voiceChannelName = '?'; this._generation = 0;
+    this._idleTimer = null; this._aloneTimer = null;
   }
-  addToQueue(song) { this.queue.push(song); }
+  addToQueue(song) { this._clearIdleTimer(); this.queue.push(song); }
   getNextSong() { if (this.loopMode === 2 && this.current) this.queue.push(this.current); return this.queue.shift(); }
   clearQueue() { this.queue = []; }
+
+  _clearIdleTimer() {
+    if (this._idleTimer) clearTimeout(this._idleTimer);
+    this._idleTimer = null;
+  }
+
+  _clearAloneTimer() {
+    if (this._aloneTimer) clearTimeout(this._aloneTimer);
+    this._aloneTimer = null;
+  }
+
+  _hasHumanMembers(channelId) {
+    const guild = this.client.guilds?.cache?.get?.(String(this.guildId));
+    const channel = guild?.channels?.cache?.get?.(String(channelId));
+    // Si le salon n'est pas dans le cache, ne pas le déconnecter sur une supposition.
+    if (!channel?.members) return true;
+    return channel.members.some(member => !member.user?.bot);
+  }
+
+  _scheduleIdleLeave() {
+    this._clearIdleTimer();
+    if (!this.connection?.connected || this.isPlaying || this.current || this.queue.length) return;
+    const connection = this.connection;
+    this._idleTimer = setTimeout(() => {
+      this._idleTimer = null;
+      if (this.connection !== connection || this.isPlaying || this.current || this.queue.length) return;
+      console.info(`[voice] Déconnexion après ${VOICE_IDLE_TIMEOUT_MINUTES} min sans musique (serveur ${this.guildId}).`);
+      this.destroy();
+    }, VOICE_IDLE_TIMEOUT_MS);
+    this._idleTimer.unref?.();
+  }
+
+  _scheduleAloneLeave(channelId) {
+    this._clearAloneTimer();
+    const connection = this.connection;
+    if (!connection?.connected || String(connection.channelId) !== String(channelId)) return;
+    this._aloneTimer = setTimeout(() => {
+      this._aloneTimer = null;
+      if (this.connection !== connection
+          || String(connection.channelId) !== String(channelId)
+          || this._hasHumanMembers(channelId)) return;
+      console.info(`[voice] Déconnexion après ${VOICE_IDLE_TIMEOUT_MINUTES} min sans membre humain (serveur ${this.guildId}).`);
+      this.destroy();
+    }, VOICE_IDLE_TIMEOUT_MS);
+    this._aloneTimer.unref?.();
+  }
+
+  handleVoiceStateUpdate(oldChannelId, newChannelId) {
+    const channelId = this.connection?.channelId;
+    if (!channelId) return;
+    const watched = String(channelId);
+    if (String(newChannelId || '') === watched) {
+      this._clearAloneTimer();
+    } else if (String(oldChannelId || '') === watched) {
+      this._scheduleAloneLeave(watched);
+    }
+  }
 
   async ensureConnection(channel) {
     if (this.connection?.connected && this.connection.channelId === channel.id) return this.connection;
     if (this.connecting) return this.connecting;
+    this._clearIdleTimer();
+    this._clearAloneTimer();
     this.connecting = (async () => {
       if (this.connection) this.connection.destroy();
       const info = await this._requestVoice(channel.id);
@@ -35,7 +100,9 @@ class MusicPlayer {
       conn.channelId = channel.id;
       conn.on('error', (e) => console.error('[voice] Erreur:', e.message));
       await conn.connect(); this.connection = conn;
-      console.log('✅ Connexion vocale maison prête.'); return conn;
+      console.log('✅ Connexion vocale maison prête.');
+      this._scheduleIdleLeave();
+      return conn;
     })();
     try { return await this.connecting; } finally { this.connecting = null; }
   }
@@ -94,9 +161,10 @@ class MusicPlayer {
   }
 
   async playNext(onEmbed) {
+    this._clearIdleTimer();
     if (this.loopMode === 1 && this.current) this.queue.unshift(this.current);
     const song = this.getNextSong();
-    if (!song) { this.isPlaying = false; this.current = null; this._activity(); return null; }
+    if (!song) { this.isPlaying = false; this.current = null; this._activity(); this._scheduleIdleLeave(); return null; }
     if (!this.connection?.connected) throw new Error("Le bot n'est connecté à aucun canal vocal.");
     if (this.sender) this.sender.stop();
     this.current = song; this.isPlaying = true; this.isPaused = false;
@@ -112,6 +180,11 @@ class MusicPlayer {
         this.current = null;
         this.sender = null;
         this._activity();
+        if (this.queue.length) {
+          this.playNext().catch(nextError => console.error('[audio] piste suivante:', nextError.message));
+        } else {
+          this._scheduleIdleLeave();
+        }
         try {
           await this.lastChannel?.send(`❌ Lecture impossible : ${error.message}`);
         } catch (_) { /* salon supprimé ou permissions manquantes */ }
@@ -125,6 +198,7 @@ class MusicPlayer {
         this.current = null;
         this.sender = null;
         this._activity();
+        this._scheduleIdleLeave();
       }
       throw error;
     }
@@ -144,8 +218,17 @@ class MusicPlayer {
     this.isPaused = false;
     return this.playNext().catch((e) => { console.error('[audio] skip:', e.message); return null; });
   }
-  stop() { ++this._generation; this.clearQueue(); this.sender?.stop(); this.sender = null; this.current = null; this.isPlaying = false; this.isPaused = false; this._activity(); }
-  destroy() { this.stop(); this.connection?.destroy(); this.connection = null; }
+  stop() {
+    ++this._generation; this._clearIdleTimer(); this.clearQueue(); this.sender?.stop();
+    this.sender = null; this.current = null; this.isPlaying = false; this.isPaused = false;
+    this._activity(); this._scheduleIdleLeave();
+  }
+  destroy() {
+    const connection = this.connection;
+    this.connection = null;
+    this._clearIdleTimer(); this._clearAloneTimer(); this.stop(); this._clearIdleTimer();
+    connection?.destroy();
+  }
   setVolume(value) { this.volume = Math.max(0, Math.min(1, Number(value) || 0)); this.sender?.setVolume?.(this.volume); return Math.round(this.volume * 100); }
   _activity() {
     const info = this.isPlaying && this.current ? { title: this.current.title } : null;

@@ -388,7 +388,7 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-// Déconnexion propre quand tout le monde quitte
+// Nettoie les connexions orphelines et confie l'inactivité au lecteur par serveur.
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   const guild = newState.guild;
   const player = client.musicPlayers.get(guild.id);
@@ -400,18 +400,7 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
     Logger.info(`Bot déconnecté de ${guild.name}`);
     return;
   }
-  // Tous les membres (sauf le bot) ont quitté -> inactivité
-  if (oldState.channelId && newState.channelId === oldState.channelId) {
-    const vc = guild.channels.cache.get(oldState.channelId);
-    if (vc && vc.members.size === 1 && vc.members.has(client.user.id)) {
-      setTimeout(() => {
-        if (vc.members.size === 1) {
-          player.destroy();
-          Logger.info(`Bot quitte ${guild.name} (inactivité)`);
-        }
-      }, 5 * 60 * 1000);
-    }
-  }
+  player.handleVoiceStateUpdate(oldState.channelId, newState.channelId);
 });
 
 // Message de bienvenue automatique quand le bot rejoint un nouveau serveur.
