@@ -1,16 +1,15 @@
 /**
- * botHook.js — Execute les commandes du bot a partir d'un fichier (ponts WS / app C#).
- * - Watch Test/cmd.txt : chaque ligne "nom arg1 arg2 ..." declenche client.commands.get(nom).execute(...).
+ * botHook.js — Exécute les commandes du bot depuis le pont local de diagnostic.
+ * - Lit le fichier de passage privé sous data/diagnostics/.
  * - Simule un message Discord minimal (prefixe !) pour les commandes type message.
  *
- * ISOLE dans Test/ (regle enzom) : ne pas mettre en prod sans validation.
+ * Désactivé par défaut; bot.js ne l'installe qu'avec un opt-in et un jeton fort.
  */
 const fs = require('fs');
-const path = require('path');
+const { getCommandFilePath } = require('./shared');
 
 module.exports = function installBotHook(client, deps) {
-  const CMD_FILE = path.join(__dirname, 'cmd.txt');
-  if (!fs.existsSync(CMD_FILE)) fs.writeFileSync(CMD_FILE, '');
+  const CMD_FILE = getCommandFilePath();
 
   // Message Discord factice (prefixe !) : reponse via .reply + .channel.send
   function fakeMessage(userId, guildId, channelId) {

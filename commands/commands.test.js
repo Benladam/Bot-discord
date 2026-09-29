@@ -32,7 +32,7 @@ function serializeCommand(command) {
 
 test('les commandes play et playlist se sérialisent pour l’API Discord', () => {
   for (const name of ['play', 'playlist']) {
-    const command = require(`../commands/${name}`);
+    const command = require(`./${name}`);
     const json = serializeCommand(command);
     assert.equal(json.name, name);
     assert.ok(json.options.length > 0);
@@ -44,7 +44,7 @@ test('les deux systèmes de commandes restent actifs et l’aide affiche les nom
   assert.equal(normalizeCommandPrefix('!'), '!');
   assert.deepEqual(parsePrefixedCommand('!play Niska', '!'), { name: 'play', args: ['Niska'] });
 
-  const command = require('../commands/help');
+  const command = require('./help');
   const registered = new Map([['play', {
     slash: true,
     helpCategory: 'music',
@@ -65,7 +65,7 @@ test('les deux systèmes de commandes restent actifs et l’aide affiche les nom
 });
 
 test('le menu d’aide privé sépare les catégories, pagine et refuse les interactions d’un autre utilisateur', async () => {
-  const command = require('../commands/help');
+  const command = require('./help');
   const registered = new Map();
   for (let index = 0; index < 10; index += 1) {
     registered.set(`track${index}`, {
@@ -144,7 +144,7 @@ test('le menu d’aide privé sépare les catégories, pagine et refuse les inte
 });
 
 test('help par préfixe envoie le menu en DM sans publier la liste dans le salon', async () => {
-  const command = require('../commands/help');
+  const command = require('./help');
   let directMessage;
   let channelReply = false;
   await command.execute({
@@ -165,7 +165,7 @@ test('help par préfixe envoie le menu en DM sans publier la liste dans le salon
 
 test('/24-7 est une commande serveur réservée à la permission Gérer le serveur et bascule son réglage', async () => {
   const { PermissionFlagsBits } = require('discord.js');
-  const command = require('../commands/24-7');
+  const command = require('./24-7');
   const json = serializeCommand(command);
   assert.equal(json.name, '24-7');
   assert.equal(json.default_member_permissions, PermissionFlagsBits.ManageGuild.toString());
@@ -209,7 +209,7 @@ test('/24-7 est une commande serveur réservée à la permission Gérer le serve
 
 test('/24-7 refuse de changer le réglage sans permission Gérer le serveur', async () => {
   const { PermissionFlagsBits } = require('discord.js');
-  const command = require('../commands/24-7');
+  const command = require('./24-7');
   let persisted = false;
   let response;
   await command.execute({
@@ -231,7 +231,7 @@ test('/24-7 refuse de changer le réglage sans permission Gérer le serveur', as
 });
 
 test('/controller renvoie l’adresse publique hébergée et jamais localhost', async () => {
-  const command = require('../commands/controller');
+  const command = require('./controller');
   const previous = process.env.WEB_PUBLIC_URL;
   let response;
   process.env.WEB_PUBLIC_URL = 'https://music.example.org';
@@ -298,7 +298,7 @@ test('le champ /play vide propose les 25 morceaux du classement mondial Deezer',
   assert.equal(formatChoiceName(items[0]), choices[0].name);
   assert.equal(choices[0].value, 'https://www.deezer.com/track/1');
 
-  const playCommand = require('../commands/play');
+  const playCommand = require('./play');
   let response;
   await playCommand.autocomplete({
     options: { getFocused: () => '' },
@@ -308,7 +308,7 @@ test('le champ /play vide propose les 25 morceaux du classement mondial Deezer',
 });
 
 test('/play affiche query immédiatement tout en gardant le Top 25 comme autocomplétion vide', async () => {
-  const playCommand = require('../commands/play');
+  const playCommand = require('./play');
   const option = playCommand.data.options.find((entry) => entry.name === 'query');
   assert.equal(option.required, true);
 
@@ -350,7 +350,7 @@ test('/play affiche query immédiatement tout en gardant le Top 25 comme autocom
 });
 
 test('l’autocomplétion répond avec un choix de secours si un fournisseur dépasse le délai', async () => {
-  const playCommand = require('../commands/play');
+  const playCommand = require('./play');
   let response;
   await playCommand.autocomplete({
     options: { getFocused: () => 'niska' },
@@ -364,7 +364,7 @@ test('l’autocomplétion répond avec un choix de secours si un fournisseur dé
 });
 
 test('le Top mondial en retard renvoie un choix de secours au lieu de laisser expirer Discord', async () => {
-  const playCommand = require('../commands/play');
+  const playCommand = require('./play');
   let response;
   await playCommand.autocomplete({
     options: { getFocused: () => '' },
@@ -378,7 +378,7 @@ test('le Top mondial en retard renvoie un choix de secours au lieu de laisser ex
 });
 
 test('une exception d’autocomplétion du Top mondial renvoie aussi une option réessayable', async () => {
-  const playCommand = require('../commands/play');
+  const playCommand = require('./play');
   let response;
   await playCommand.autocomplete({
     options: { getFocused: () => '' },
@@ -393,7 +393,7 @@ test('une exception d’autocomplétion du Top mondial renvoie aussi une option 
 });
 
 test('l’autocomplétion d’un lien YouTube recherche le titre et affiche les noms, pas les URL', async () => {
-  const playCommand = require('../commands/play');
+  const playCommand = require('./play');
   let searched;
   let response;
   await playCommand.autocomplete({
@@ -415,7 +415,7 @@ test('l’autocomplétion d’un lien YouTube recherche le titre et affiche les 
 });
 
 test('si un fournisseur ne fournit aucun titre, le choix de secours ne révèle pas le lien', async () => {
-  const playCommand = require('../commands/play');
+  const playCommand = require('./play');
   let response;
   await playCommand.autocomplete({
     user: { id: 'user-2' },
@@ -434,7 +434,7 @@ test('si un fournisseur ne fournit aucun titre, le choix de secours ne révèle 
 });
 
 test('un lien /play est résolu et mis en file sans ouvrir de liste de sélection', async () => {
-  const playCommand = require('../commands/play');
+  const playCommand = require('./play');
   let resolvedQuery;
   let queued;
   let edited;
@@ -478,7 +478,7 @@ test('un lien /play est résolu et mis en file sans ouvrir de liste de sélectio
 });
 
 test('un texte libre /play affiche une liste interactive au lieu de lancer un résultat arbitraire', async () => {
-  const playCommand = require('../commands/play');
+  const playCommand = require('./play');
   let searched;
   let edited;
   const ctx = {

@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
-const { OpusSender } = require('../features/music/audioSender');
+const { OpusSender } = require('./audioSender');
 
 function child() {
   const process = new EventEmitter();

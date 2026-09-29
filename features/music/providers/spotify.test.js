@@ -22,7 +22,7 @@ test('les playlists Spotify utilisent /items et expliquent les accès refusés',
   };
 
   try {
-    const { resolveSpotifyLink } = require('../features/music/providers/spotify');
+    const { resolveSpotifyLink } = require('./spotify');
     await assert.rejects(
       resolveSpotifyLink('https://open.spotify.com/playlist/testplaylist'),
       /Aucune musique correspondante/,

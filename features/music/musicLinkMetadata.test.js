@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { getMusicInputInfo, formatMusicAttempt, resolveMusicLinkMetadata, sanitizeDiagnosticText } = require('../features/music/musicLinkMetadata');
-const { parseSpotifyUrl } = require('../features/music/providers/spotify');
+const { getMusicInputInfo, formatMusicAttempt, resolveMusicLinkMetadata, sanitizeDiagnosticText } = require('./musicLinkMetadata');
+const { parseSpotifyUrl } = require('./providers/spotify');
 
 test('Spotify reconnaît les liens localisés et les URI spotify:', () => {
   assert.deepEqual(parseSpotifyUrl('https://open.spotify.com/intl-fr/track/518c5Dr5EmpzACX268Aeqs?si=private'), {
@@ -66,7 +66,7 @@ test('un lien SoundCloud public est converti depuis ses métadonnées oEmbed', a
 });
 
 test('les autres services musicaux fournissent un titre public sans suivre de redirection', async () => {
-  const { providerPresentation } = require('../shared/discord/providerPresentation');
+  const { providerPresentation } = require('../../shared/discord/providerPresentation');
   for (const [link, provider] of [
     ['https://music.apple.com/fr/album/album/123', 'apple_music'],
     ['https://music.amazon.fr/albums/B0001', 'amazon_music'],

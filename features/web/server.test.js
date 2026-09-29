@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { createWebPanel, getWebPanelPublicUrl } = require('../features/web/server');
+const { createWebPanel, getWebPanelPublicUrl } = require('./server');
 
 const ADMIN_TOKEN = 'c'.repeat(64);
 const GUILD_A = '123456789012345678';

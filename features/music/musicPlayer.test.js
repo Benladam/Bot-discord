@@ -1,13 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { OpusSender } = require('../features/music/audioSender');
+const { OpusSender } = require('./audioSender');
 
 test('une erreur d’extraction audio remet le lecteur à l’arrêt', async () => {
   const originalStart = OpusSender.start;
   OpusSender.start = async () => { throw new Error('YouTube bloque la lecture'); };
-  delete require.cache[require.resolve('../features/music/musicPlayer')];
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  delete require.cache[require.resolve('./musicPlayer')];
+  const { MusicPlayer } = require('./musicPlayer');
 
   try {
     const player = new MusicPlayer('guild', {
@@ -23,12 +23,12 @@ test('une erreur d’extraction audio remet le lecteur à l’arrêt', async () 
     assert.equal(player.sender, null);
   } finally {
     OpusSender.start = originalStart;
-    delete require.cache[require.resolve('../features/music/musicPlayer')];
+    delete require.cache[require.resolve('./musicPlayer')];
   }
 });
 
 test('les handshakes vocaux restent isolés par serveur et utilisent le bon shard', async () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   const writes = new Map([[0, []], [1, []]]);
   const shards = new Map([...writes].map(([id, packets]) => [id, {
     send(packet) { packets.push(packet); },
@@ -73,7 +73,7 @@ test('les handshakes vocaux restent isolés par serveur et utilisent le bon shar
 });
 
 test('chaque serveur garde sa propre chanson et sa propre file', () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   const client = { user: { id: 'bot-user', setActivity() {} } };
   const playerA = new MusicPlayer('guild-a', client);
   const playerB = new MusicPlayer('guild-b', client);
@@ -90,7 +90,7 @@ test('chaque serveur garde sa propre chanson et sa propre file', () => {
 });
 
 test('le lecteur publie un état local au serveur et ne change jamais la présence globale', () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   const globalActivities = [];
   const states = [];
   const player = new MusicPlayer('guild-a', { user: { id: 'bot-user', setActivity: (...args) => globalActivities.push(args) } });
@@ -105,8 +105,8 @@ test('le lecteur publie un état local au serveur et ne change jamais la présen
 });
 
 test('chaque lecteur transmet au encodeur le débit de son propre salon vocal', async () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
-  const { VoiceConnection } = require('../features/music/voice');
+  const { MusicPlayer } = require('./musicPlayer');
+  const { VoiceConnection } = require('./voice');
   const originalConnect = VoiceConnection.prototype.connect;
   VoiceConnection.prototype.connect = async function connectForTest() {
     this.connected = true;
@@ -133,7 +133,7 @@ test('chaque lecteur transmet au encodeur le débit de son propre salon vocal', 
 });
 
 test('un envoi Gateway vocal échoué nettoie le listener au lieu de le laisser expirer', async () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   const guildId = '123456789012345678';
   const client = new EventEmitter();
   client.user = { id: 'bot-user' };
@@ -147,7 +147,7 @@ test('un envoi Gateway vocal échoué nettoie le listener au lieu de le laisser 
 });
 
 test('deux ajouts simultanés restent en file sans remplacer la première piste', async () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   const originalStart = OpusSender.start;
   let releaseFirst;
   const firstStart = new Promise((resolve) => { releaseFirst = resolve; });
@@ -187,7 +187,7 @@ test('deux ajouts simultanés restent en file sans remplacer la première piste'
 });
 
 test('un lecteur inactif rejoint le salon demandé, mais ne déplace pas une lecture active', async () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   const originalStart = OpusSender.start;
   OpusSender.start = async () => ({ setVolume() {}, stop() {} });
   try {
@@ -216,7 +216,7 @@ test('un lecteur inactif rejoint le salon demandé, mais ne déplace pas une lec
 });
 
 test('un skip pendant la préparation audio annule le démarrage obsolète', async () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   const originalStart = OpusSender.start;
   const gates = new Map();
   const starts = [];
@@ -262,7 +262,7 @@ test('un skip pendant la préparation audio annule le démarrage obsolète', asy
 });
 
 test('la fin naturelle de la file notifie le demandeur et libère le lecteur', async () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   const originalStart = OpusSender.start;
   let finishTrack;
   let notifiedRequester;
@@ -301,7 +301,7 @@ test('la fin naturelle de la file notifie le demandeur et libère le lecteur', a
 });
 
 test('le délai d’inactivité publie un embed puis quitte le vocal', async () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   let destroyed = false;
   let deleted = 0;
   const leavePackets = [];
@@ -314,7 +314,22 @@ test('le délai d’inactivité publie un embed puis quitte le vocal', async () 
   player.lastChannel = { send: async (payload) => { notifications.push(payload); return { delete: async () => { deleted += 1; } }; } };
 
   player._scheduleIdleLeave();
-  await new Promise((resolve) => setTimeout(resolve, 45));
+  await new Promise((resolve, reject) => {
+    let finished = false;
+    const timeout = setTimeout(() => {
+      finished = true;
+      reject(new Error('l’avis temporaire n’a pas expiré à temps'));
+    }, 2000);
+    const waitForDelete = () => {
+      if (finished) return;
+      if (deleted) {
+        finished = true;
+        clearTimeout(timeout);
+        resolve();
+      } else setTimeout(waitForDelete, 10);
+    };
+    waitForDelete();
+  });
 
   assert.equal(destroyed, true);
   assert.equal(player.connection, null);
@@ -326,7 +341,7 @@ test('le délai d’inactivité publie un embed puis quitte le vocal', async () 
 });
 
 test('le mode 24/7 empêche les minuteurs d’inactivité, même s’il est activé avant leur échéance', async () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   let alwaysOn = false;
   let destroyed = false;
   let notifications = 0;
@@ -352,7 +367,7 @@ test('le mode 24/7 empêche les minuteurs d’inactivité, même s’il est acti
 });
 
 test('l’absence de membres déclenche une notification distincte avant de quitter', async () => {
-  const { MusicPlayer } = require('../features/music/musicPlayer');
+  const { MusicPlayer } = require('./musicPlayer');
   let destroyed = false;
   const leavePackets = [];
   const notifications = [];

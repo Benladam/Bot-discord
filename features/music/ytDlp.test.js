@@ -7,7 +7,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { PassThrough } = require('node:stream');
-const { ensureManagedYtDlp, parseChecksum, releaseAsset } = require('../features/music/ytDlp');
+const { ensureManagedYtDlp, parseChecksum, releaseAsset } = require('./ytDlp');
 const {
   buildYtDlpArgs,
   buildYtDlpSearchArgs,
@@ -16,8 +16,8 @@ const {
   parseYtDlpSearch,
   searchYouTubeCandidates,
   streamUrl,
-} = require('../features/music/audioSender');
-const { getSoundCloudClientId } = require('../features/music/providers/soundcloud');
+} = require('./audioSender');
+const { getSoundCloudClientId } = require('./providers/soundcloud');
 
 test('sélectionne le binaire yt-dlp officiel pour les plateformes courantes', () => {
   assert.equal(releaseAsset('linux', 'x64'), 'yt-dlp_linux');

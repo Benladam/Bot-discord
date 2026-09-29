@@ -1,25 +1,25 @@
 /**
- * wsBridge.js — Pont WebSocket local pour piloter/observer le bot depuis l'app C# (HeussGUI).
+ * wsBridge.js — Pont WebSocket local pour piloter/observer le bot depuis une interface locale.
  * - Ecoute uniquement sur 127.0.0.1:7777; aucune connexion depuis le reseau n'est acceptee.
- * - Exige TEST_BRIDGE_TOKEN avant d'authentifier un client ou de recevoir des commandes.
+ * - Exige DIAGNOSTIC_BRIDGE_TOKEN (ou son ancien alias) avant toute commande.
  * - Envoie aux clients : {"type":"log","line":"..."} a chaque console.log du bot.
- * - Recoit des clients : {"cmd":"play","query":"..."} -> ecrit dans Test/cmd.txt (lu par bot.js).
+ * - Recoit des clients : {"cmd":"play","query":"..."} -> ecrit dans data/diagnostics/.
  *
- * ISOLE dans Test/ (regle enzom) : ne pas mettre en prod sans validation.
+ * Désactivé par défaut; bot.js ne le charge qu'avec un opt-in et un jeton fort.
  */
 const WebSocket = require('ws');
 const fs = require('fs');
-const path = require('path');
 const crypto = require('node:crypto');
+const { getCommandFilePath } = require('./shared');
 
 const PORT = 7777;
 const HOST = '127.0.0.1';
 const AUTH_TIMEOUT_MS = 5000;
-const CMD_FILE = path.join(__dirname, 'cmd.txt'); // le bot lit ce fichier pour executer les commandes
-const BRIDGE_TOKEN = String(process.env.TEST_BRIDGE_TOKEN || '');
+const CMD_FILE = getCommandFilePath(); // consommé par botHook.js
+const BRIDGE_TOKEN = String(process.env.DIAGNOSTIC_BRIDGE_TOKEN || process.env.TEST_BRIDGE_TOKEN || '');
 
 if (Buffer.byteLength(BRIDGE_TOKEN, 'utf8') < 32) {
-  throw new Error('TEST_BRIDGE_TOKEN doit contenir au moins 32 octets.');
+  throw new Error('DIAGNOSTIC_BRIDGE_TOKEN doit contenir au moins 32 octets.');
 }
 
 function validToken(candidate) {
@@ -71,6 +71,6 @@ wss.on('connection', (ws) => {
   ws.on('close', () => { clearTimeout(authTimer); clients.delete(ws); });
 });
 
-console.log(`[bridge] WebSocket de test en ecoute sur ws://${HOST}:${PORT} (jeton requis)`);
+console.log(`[bridge] WebSocket de diagnostic en ecoute sur ws://${HOST}:${PORT} (jeton requis)`);
 
 module.exports = { wss };

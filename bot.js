@@ -17,6 +17,15 @@ const {
 } = require('discord.js');
 require('dotenv').config();
 require('dotenv').config({ path: path.join(__dirname, '.env.minecraft'), quiet: true });
+const { migrateLegacyCommandFile } = require('./tools/diagnostics/shared');
+try {
+  const migration = migrateLegacyCommandFile(__dirname);
+  if (migration.moved) console.info('[diagnostics] Ancien fichier local déplacé vers data/diagnostics/commands.txt.');
+  if (migration.conflict) console.warn('[diagnostics] Migration locale ignorée : les deux fichiers de commandes existent déjà.');
+  if (migration.leftover && !migration.conflict) console.warn('[diagnostics] L’ancien dossier local contient d’autres fichiers; ils sont conservés pour déplacement manuel.');
+} catch (error) {
+  console.warn(`[diagnostics] Migration locale impossible : ${error.message}`);
+}
 const { MusicPlayer } = require('./features/music/musicPlayer');
 const guildDatabase = require('./core/database');
 const { createUpdater } = require('./core/updater');
@@ -27,22 +36,24 @@ const { GuildNowPlayingManager } = require('./features/music/guildNowPlaying');
 const { sanitizeDiagnosticText } = require('./features/music/musicLinkMetadata');
 
 const { setupConsole } = require('./core/consoleCommands');
+const { listCommandFiles } = require('./core/commandFiles');
 const { normalizeCommandPrefix, getGatewayIntents, parsePrefixedCommand } = require('./core/commandConfig');
 const { buildSlashCommands: buildSlashCommandsFromRegistry } = require('./shared/discord/slashCommandBuilder');
 const langStore = require('./core/i18n/langStore');
 const { t: botT } = require('./core/i18n/botI18n');
-// Les outils de Test ne sont jamais chargés par défaut. Leur activation exige
-// un jeton fort; le pont WebSocket reste limité à localhost dans Test/wsBridge.js.
-const TEST_MODULES_REQUESTED = /^(1|true|yes)$/i.test(String(
-  process.env.ENABLE_TEST_HOOKS ?? process.env.ENABLE_TEST_MODULES ?? 'false',
+// Les outils de diagnostic restent inactifs par défaut et exigent un jeton fort.
+// Les anciens noms d'environnement restent acceptés pour ne pas casser les hôtes existants.
+const DIAGNOSTIC_HOOKS_REQUESTED = /^(1|true|yes)$/i.test(String(
+  process.env.ENABLE_DIAGNOSTIC_HOOKS ?? process.env.ENABLE_TEST_HOOKS ?? process.env.ENABLE_TEST_MODULES ?? 'false',
 ));
-const TEST_BRIDGE_TOKEN = String(process.env.TEST_BRIDGE_TOKEN || '');
-const ENABLE_TEST_MODULES = TEST_MODULES_REQUESTED && Buffer.byteLength(TEST_BRIDGE_TOKEN, 'utf8') >= 32;
-if (TEST_MODULES_REQUESTED && !ENABLE_TEST_MODULES) {
-  console.error('[Test] Hooks désactivés : TEST_BRIDGE_TOKEN doit contenir au moins 32 octets.');
+const DIAGNOSTIC_BRIDGE_TOKEN = String(process.env.DIAGNOSTIC_BRIDGE_TOKEN || process.env.TEST_BRIDGE_TOKEN || '');
+const ENABLE_DIAGNOSTIC_HOOKS = DIAGNOSTIC_HOOKS_REQUESTED
+  && Buffer.byteLength(DIAGNOSTIC_BRIDGE_TOKEN, 'utf8') >= 32;
+if (DIAGNOSTIC_HOOKS_REQUESTED && !ENABLE_DIAGNOSTIC_HOOKS) {
+  console.error('[diagnostics] Hooks désactivés : DIAGNOSTIC_BRIDGE_TOKEN doit contenir au moins 32 octets.');
 }
-if (ENABLE_TEST_MODULES) {
-  try { require('./Test/wsBridge'); } catch (e) { console.error('[wsBridge] ' + e.message); }
+if (ENABLE_DIAGNOSTIC_HOOKS) {
+  try { require('./tools/diagnostics/wsBridge'); } catch (e) { console.error('[wsBridge] ' + e.message); }
 }
 
 // --- Configuration ---
@@ -172,7 +183,7 @@ function loadCommands() {
     Logger.warn('Dossier commands/ introuvable');
     return;
   }
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js'));
+  const files = listCommandFiles(dir);
   for (const file of files) {
     try {
       const cmd = require(path.join(dir, file));
@@ -459,9 +470,9 @@ client.login(TOKEN).catch((e) => {
   process.exit(1);
 });
 
-// --- Hook de pilotage externe (Test/ : réservé aux essais sur machine privée) ---
-if (ENABLE_TEST_MODULES) {
-  try { require('./Test/botHook')(client, deps); } catch (e) { Logger.error(`Hook Test: ${e.message}`); }
+// --- Pont de diagnostic externe (opt-in, authentifié et lié à localhost) ---
+if (ENABLE_DIAGNOSTIC_HOOKS) {
+  try { require('./tools/diagnostics/botHook')(client, deps); } catch (e) { Logger.error(`Hook diagnostics: ${e.message}`); }
 }
 
-module.exports = { client, getPlayer };
+module.exports = { client, getPlayer, deps };
