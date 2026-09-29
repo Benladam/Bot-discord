@@ -526,7 +526,7 @@ async function streamUrl(url, {
       errors.push(result.error);
       if (!result.missing && !result.skipped) missingOnly = false;
       if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) {
-        authCandidate = [command, args, cookiesPath];
+        authCandidate = [command, args, cookiesPath, result.error];
       }
       if (result.missing) break;
     }
@@ -540,7 +540,7 @@ async function streamUrl(url, {
         if (result.audioUrl) return result.audioUrl;
         errors.push(result.error);
         if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) {
-          authCandidate = [managed, [], cookiesPath];
+          authCandidate = [managed, [], cookiesPath, result.error];
         }
         if (result.missing) break;
       }
@@ -550,7 +550,16 @@ async function streamUrl(url, {
   }
 
   if (authCandidate) {
-    const [command, args, rejectedCookiesPath] = authCandidate;
+    const [command, args, rejectedCookiesPath, cookieAttemptError] = authCandidate;
+    // yt-dlp has a documented client-order workaround for this specific
+    // response when authenticated cookies trigger "page needs to be reloaded".
+    if (rejectedCookiesPath && /page needs to be reloaded/i.test(cookieAttemptError)) {
+      const alternateClient = await runYtDlp(command, args, url, spawnImpl, {
+        playerClient: 'default,web_embedded', cookiesPath: rejectedCookiesPath, projectRoot, env,
+      });
+      if (alternateClient.audioUrl) return alternateClient.audioUrl;
+      errors.push(alternateClient.error);
+    }
     // Après un rejet explicite des cookies, ne les renvoie pas au client
     // intégré : ils ne feront que répéter l'échec et peuvent être périmés.
     const embedded = await runYtDlp(command, args, url, spawnImpl, {
@@ -558,9 +567,12 @@ async function streamUrl(url, {
     });
     if (embedded.audioUrl) return embedded.audioUrl;
     errors.push(embedded.error);
-    console.warn(`[yt-dlp] Repli YouTube refusé; binaire=${path.basename(command)}; ${describeCookiesFile(rejectedCookiesPath)}; client intégré sans cookies; ${sanitizeYtDlpDiagnostic(embedded.error) || 'aucun détail fourni'}`);
-    const error = new Error('YouTube demande une vérification depuis cet hébergeur; le mode lecteur intégré sans compte n’a pas réussi pour ce titre. Configure YOUTUBE_COOKIES_PATH avec un fichier de cookies local seulement si ce contenu exige un compte, ou choisis un autre titre.');
+    console.warn(`[yt-dlp] Repli YouTube refusé; binaire=${path.basename(command)}; ${describeCookiesFile(rejectedCookiesPath)}; réponse avec cookies: ${sanitizeYtDlpDiagnostic(cookieAttemptError) || 'aucun détail'}; client intégré sans cookies: ${sanitizeYtDlpDiagnostic(embedded.error) || 'aucun détail fourni'}`);
+    const error = new Error(rejectedCookiesPath
+      ? 'YouTube réclame toujours une authentification alors que le fichier de cookies configuré est lisible. La session peut être expirée ou renouvelée par Google, ou le compte peut ne pas avoir accès à cette vidéo. Remplace le fichier par une nouvelle exportation Netscape depuis un navigateur connecté à YouTube.'
+      : 'YouTube réclame une authentification depuis cet hébergeur et aucun fichier de cookies utilisable n’a été fourni. Configure YOUTUBE_COOKIES_PATH avec une exportation Netscape récente depuis un navigateur connecté à YouTube, ou choisis un autre titre.');
     error.code = 'YOUTUBE_AUTH_BLOCKED';
+    error.cookiesConfigured = Boolean(rejectedCookiesPath);
     throw error;
   }
   const detail = errors.filter(Boolean).at(-1);
@@ -569,9 +581,18 @@ async function streamUrl(url, {
 
 function providerFailure(primaryProvider, primaryError, alternateProvider, alternateError) {
   const detail = (error) => String(error?.message || error || 'échec inconnu').replace(/[\r\n]+/g, ' ').slice(0, 300);
+  const soundCloudNeedsClientId = /SOUNDCLOUD_CLIENT_ID/i.test(String(alternateError?.message || alternateError || ''));
+  const youtubeAdvice = primaryError?.code === 'YOUTUBE_AUTH_BLOCKED'
+    ? (primaryError.cookiesConfigured
+      ? 'Le fichier de cookies est déjà configuré mais n’est pas accepté par YouTube; renouvelle son exportation.'
+      : 'Configure YOUTUBE_COOKIES_PATH avec une exportation de cookies YouTube récente, si ce titre exige un compte.')
+    : 'Si YouTube exige un compte, configure YOUTUBE_COOKIES_PATH avec un fichier de cookies YouTube local.';
+  const soundCloudAdvice = soundCloudNeedsClientId
+    ? 'Configure SOUNDCLOUD_CLIENT_ID dans le .env du bot pour activer le repli SoundCloud.'
+    : '';
   const error = new Error(
     `Lecture impossible sur ${primaryProvider} (${detail(primaryError)}) puis ${alternateProvider} (${detail(alternateError)}). `
-    + 'Sur le serveur, configure SOUNDCLOUD_CLIENT_ID et, si YouTube demande une vérification, YOUTUBE_COOKIES_PATH=data/youtube-cookies.txt.',
+    + [youtubeAdvice, soundCloudAdvice].filter(Boolean).join(' '),
   );
   error.code = 'MUSIC_PROVIDERS_FAILED';
   error.cause = primaryError;
