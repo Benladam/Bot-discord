@@ -39,6 +39,7 @@ const { setupConsole } = require('./core/consoleCommands');
 const { listCommandFiles } = require('./core/commandFiles');
 const { normalizeCommandPrefix, getGatewayIntents, parsePrefixedCommand } = require('./core/commandConfig');
 const { buildSlashCommands: buildSlashCommandsFromRegistry } = require('./shared/discord/slashCommandBuilder');
+const { syncGlobalSlashCommands } = require('./core/slashCommandSync');
 const langStore = require('./core/i18n/langStore');
 const { t: botT } = require('./core/i18n/botI18n');
 // Les outils de diagnostic restent inactifs par défaut et exigent un jeton fort.
@@ -210,8 +211,13 @@ async function registerSlashCommands(clientId) {
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   const commands = buildSlashCommands();
   Logger.info(`Enregistrement de ${commands.length} slash command(s)...`);
-  await rest.put(Routes.applicationCommands(clientId), { body: commands });
-  Logger.success('Slash commands enregistrées.');
+  const result = await syncGlobalSlashCommands({
+    rest,
+    route: Routes.applicationCommands(clientId),
+    body: commands,
+    logger: Logger,
+  });
+  if (result.updated) Logger.success('Slash commands enregistrées.');
 }
 
 // --- Gestion du délai de réflexion (cooldown) ---
