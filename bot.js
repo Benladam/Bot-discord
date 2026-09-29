@@ -328,13 +328,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (cmd && typeof cmd.autocomplete === 'function') {
       try { await cmd.autocomplete(interaction, deps); }
       catch (e) {
-        Logger.error(`Erreur autocomplétion /${interaction.commandName}: ${sanitizeDiagnosticText(e.stack || e.message)}`);
+        const guildContext = `guildId=${interaction.guildId || 'DM'}`;
+        Logger.error(`Erreur autocomplétion /${interaction.commandName} ${guildContext}: ${sanitizeDiagnosticText(e.stack || e.message)}`);
         if (!interaction.responded) {
           try {
             const fallback = cmd.autocompleteFallback?.(interaction) || [];
             await interaction.respond(Array.isArray(fallback) ? fallback : [fallback]);
           } catch (fallbackError) {
-            Logger.error(`Réponse de secours autocomplétion /${interaction.commandName} impossible: ${sanitizeDiagnosticText(fallbackError.message)}`);
+            Logger.error(`Réponse de secours autocomplétion /${interaction.commandName} impossible ${guildContext}: ${sanitizeDiagnosticText(fallbackError.message)}`);
           }
         }
       }
@@ -367,7 +368,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       .map((opt) => String(opt.value));
     await cmd.execute(interaction, args, deps);
   } catch (e) {
-    Logger.error(`Erreur /${interaction.commandName}: ${e.message}`);
+    Logger.error(`Erreur /${interaction.commandName} guildId=${interaction.guildId || 'DM'}: ${e.message}`);
     const err = { embeds: [{ title: '❌ Erreur', description: e.message, color: 0xff0000 }] };
     if (interaction.deferred || interaction.replied) await interaction.editReply(err);
     else await interaction.reply({ ...err, flags: MessageFlags.Ephemeral });
@@ -399,7 +400,7 @@ client.on(Events.MessageCreate, async (message) => {
       : `${message.author.tag} ❯ ${fullCmd}`);
     await cmd.execute(message, args, deps);
   } catch (e) {
-    Logger.error(`Erreur ${PREFIX}${name}: ${e.message}`);
+    Logger.error(`Erreur ${PREFIX}${name} guildId=${message.guildId || 'DM'}: ${e.message}`);
     await message.reply({ embeds: [{ title: '❌ Erreur', description: e.message, color: 0xff0000 }] });
   }
 });

@@ -127,18 +127,18 @@ function makeComponents(categories, categoryKey, page, pageCount, userId) {
 
   const navigation = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`${HELP_PREFIX}page:${userId}:${categoryKey}:${Math.max(0, page - 1)}`)
+      .setCustomId(`${HELP_PREFIX}page:${userId}:${categoryKey}:${Math.max(0, page - 1)}:previous`)
       .setLabel('Précédent')
       .setEmoji({ name: '⬅️' })
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(page <= 0),
     new ButtonBuilder()
-      .setCustomId(`${HELP_PREFIX}page:${userId}:${categoryKey}:${page}`)
+      .setCustomId(`${HELP_PREFIX}indicator:${userId}:${categoryKey}:${page}`)
       .setLabel(`${page + 1} / ${pageCount}`)
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(true),
     new ButtonBuilder()
-      .setCustomId(`${HELP_PREFIX}page:${userId}:${categoryKey}:${Math.min(pageCount - 1, page + 1)}`)
+      .setCustomId(`${HELP_PREFIX}page:${userId}:${categoryKey}:${Math.min(pageCount - 1, page + 1)}:next`)
       .setLabel('Suivant')
       .setEmoji({ name: '➡️' })
       .setStyle(ButtonStyle.Primary)
@@ -252,7 +252,7 @@ module.exports = {
 
   async handleInteraction(interaction, deps) {
     if (!interaction.customId?.startsWith(HELP_PREFIX)) return false;
-    const [, action, ownerId, categoryKey, rawPage] = interaction.customId.split(':');
+    const [, action, ownerId, categoryKey, rawPage, direction] = interaction.customId.split(':');
     if (!ownerId || String(interaction.user?.id || '') !== ownerId) {
       await interaction.reply({
         content: 'Ce menu d’aide est réservé à la personne qui l’a ouvert.',
@@ -273,7 +273,8 @@ module.exports = {
     if (action === 'category' && interaction.isStringSelectMenu?.()) {
       targetCategory = interaction.values?.[0];
       targetPage = 0;
-    } else if (action !== 'page' || !interaction.isButton?.() || !Number.isInteger(targetPage)) {
+    } else if (action !== 'page' || !interaction.isButton?.() || !Number.isInteger(targetPage)
+        || (direction !== undefined && !['previous', 'next'].includes(direction))) {
       await interaction.reply({ content: 'Cette navigation d’aide n’est plus valide.', flags: MessageFlags.Ephemeral });
       return true;
     }

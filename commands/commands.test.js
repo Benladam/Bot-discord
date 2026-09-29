@@ -61,6 +61,8 @@ test('les deux systèmes de commandes restent actifs et l’aide affiche les nom
   assert.doesNotMatch(helpText, /[!/](?:play|pause|skip)/);
   assert.equal(response.flags, require('discord.js').MessageFlags.Ephemeral);
   assert.equal(response.components.length, 2, 'le menu privé contient un sélecteur de catégorie et une pagination');
+  const componentIds = response.components.flatMap((row) => row.components.map((component) => component.toJSON().custom_id));
+  assert.equal(new Set(componentIds).size, componentIds.length, 'les identifiants restent uniques même avec une seule page');
   assert.equal(response.files[0].name, 'music-bot-emblem.png');
 });
 
@@ -102,6 +104,8 @@ test('le menu d’aide privé sépare les catégories, pagine et refuse les inte
   assert.match(firstPageEmbed.description, /track07/);
   assert.doesNotMatch(firstPageEmbed.description, /track08|owner-tool/);
   assert.equal(firstPage.flags, require('discord.js').MessageFlags.Ephemeral);
+  const firstPageIds = firstPage.components.flatMap((row) => row.components.map((component) => component.toJSON().custom_id));
+  assert.equal(new Set(firstPageIds).size, firstPageIds.length, 'les identifiants restent uniques sur la première page');
   const menu = firstPage.components[0].components[0].toJSON();
   assert.equal(menu.custom_id, 'helpui:category:user-1');
   assert.deepEqual(menu.options.map((option) => option.value), ['music', 'moderation']);
@@ -130,7 +134,7 @@ test('le menu d’aide privé sépare les catégories, pagine et refuse les inte
 
   let secondPage;
   await command.handleInteraction({
-    customId: 'helpui:page:user-1:music:1',
+    customId: firstPage.components[1].components[2].toJSON().custom_id,
     user: { id: 'user-1' },
     guildId: 'guild-1',
     isButton: () => true,
@@ -291,6 +295,7 @@ test('les suggestions /play ont un format lisible et gardent morceaux et playlis
     ...Array.from({ length: 20 }, (_, i) => ({
       kind: 'track', title: `Titre ${i}`, subtitle: 'Niska', duration: 164, url: `https://music.test/track/${i}`,
     })),
+    { kind: 'track', title: 'Doublon', subtitle: 'Niska', url: 'https://music.test/track/0' },
     ...Array.from({ length: 12 }, (_, i) => ({
       kind: 'playlist', title: `Playlist ${i}`, subtitle: 'par un membre', url: `https://music.test/playlist/${i}`,
     })),
@@ -299,6 +304,7 @@ test('les suggestions /play ont un format lisible et gardent morceaux et playlis
   const selected = selectAutocompleteItems(items);
   const choices = selected.map(toAutocompleteChoice);
   assert.equal(choices.length, 25);
+  assert.equal(new Set(choices.map((choice) => choice.value)).size, choices.length, 'Discord reçoit des valeurs de choix uniques');
   assert.match(choices[0].name, /^🎵 Niska - Titre 0 - 02:44$/);
   assert.ok(choices.some((choice) => choice.name.startsWith('📁 Playlist')));
   assert.ok(choices.every((choice) => choice.name.length <= 100 && choice.value.length <= 100));
@@ -339,6 +345,26 @@ test('le champ /play vide propose les 25 morceaux du classement mondial Deezer',
     respond: async (choices) => { assert.ok(Array.isArray(choices)); response = choices; },
   });
   assert.deepEqual(response, choices);
+});
+
+test('/play fournit des choix d’autocomplétion dans plusieurs serveurs pour le même utilisateur', async () => {
+  const playCommand = require('./play');
+  const items = [{
+    kind: 'track', provider: 'deezer', title: 'Titre', subtitle: 'Artiste',
+    url: 'https://www.deezer.com/track/multi-guild', duration: 164,
+  }];
+  const responses = new Map();
+
+  await Promise.all(['guild-test', 'guild-fipfap'].map((guildId) => playCommand.autocomplete({
+    user: { id: 'same-user' },
+    guildId,
+    options: { getFocused: () => '' },
+    respond: async (choices) => { responses.set(guildId, choices); },
+  }, { getWorldTopTracks: async () => items })));
+
+  for (const guildId of ['guild-test', 'guild-fipfap']) {
+    assert.deepEqual(responses.get(guildId), [{ name: '🎵 Artiste - Titre - 02:44', value: items[0].url }]);
+  }
 });
 
 test('/play affiche query immédiatement tout en gardant le Top 25 comme autocomplétion vide', async () => {

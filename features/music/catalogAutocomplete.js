@@ -47,7 +47,14 @@ function trimChoiceName(value) {
 }
 
 function selectAutocompleteItems(items, limit = MAX_CHOICES) {
-  const valid = items.filter((item) => item?.url && String(item.url).length <= 100);
+  const seenUrls = new Set();
+  const valid = items.filter((item) => {
+    if (!item?.url) return false;
+    const url = String(item.url);
+    if (url.length > 100 || seenUrls.has(url)) return false;
+    seenUrls.add(url);
+    return true;
+  });
   const count = Math.max(0, Math.min(MAX_CHOICES, limit));
   const tracks = valid.filter((item) => item.kind === 'track');
   const playlists = valid.filter((item) => item.kind === 'playlist');
