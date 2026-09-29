@@ -201,7 +201,7 @@ class VoiceConnection extends require('events').EventEmitter {
           reject(new Error('VOCAL_UNAVAILABLE'));
           return;
         }
-        console.log('[voice] IDENTIFY avec session=' + this.sessionId.slice(0, 8) + '... token=' + (this.token || '').slice(0, 6) + '...');
+        console.log('[voice] IDENTIFY : session et jeton vocal présents.');
         this._startHeartbeat(interval);
         this.ws.send(JSON.stringify({
           op: 0, // IDENTIFY (WS vocal : op 0)

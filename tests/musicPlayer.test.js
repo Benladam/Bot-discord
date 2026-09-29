@@ -1,5 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const { OpusSender } = require('../utils/audioSender');
 
 test('une erreur d’extraction audio remet le lecteur à l’arrêt', async () => {
@@ -24,4 +25,63 @@ test('une erreur d’extraction audio remet le lecteur à l’arrêt', async () 
     OpusSender.start = originalStart;
     delete require.cache[require.resolve('../utils/musicPlayer')];
   }
+});
+
+test('les handshakes vocaux restent isolés par serveur et utilisent le bon shard', async () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  const writes = new Map([[0, []], [1, []]]);
+  const shards = new Map([...writes].map(([id, packets]) => [id, {
+    send(packet) { packets.push(packet); },
+  }]));
+
+  const client = new EventEmitter();
+  client.user = { id: 'bot-user' };
+
+  const guildIdForShard = (shardId) => String((40n + BigInt(shardId)) << 22n);
+  const guild0 = guildIdForShard(0);
+  const guild1 = guildIdForShard(1);
+  client.guilds = { cache: new Map([
+    [guild0, { shard: shards.get(0) }],
+    [guild1, { shard: shards.get(1) }],
+  ]) };
+  const player0 = new MusicPlayer(guild0, client);
+  const player1 = new MusicPlayer(guild1, client);
+
+  const request0 = player0._requestVoice('channel-0');
+  let request1Resolved = false;
+  const request1 = player1._requestVoice('channel-1').then((value) => {
+    request1Resolved = true;
+    return value;
+  });
+
+  assert.equal(writes.get(0).length, 1);
+  assert.equal(writes.get(1).length, 1);
+  assert.equal(writes.get(0)[0].d.guild_id, guild0);
+  assert.equal(writes.get(1)[0].d.guild_id, guild1);
+
+  client.emit('raw', { t: 'VOICE_SERVER_UPDATE', d: { guild_id: guild0, endpoint: 'voice-0', token: 'token-0' } });
+  client.emit('raw', { t: 'VOICE_STATE_UPDATE', d: { guild_id: guild0, user_id: 'bot-user', channel_id: 'channel-0', session_id: 'session-0' } });
+  await new Promise(setImmediate);
+  assert.equal(request1Resolved, false, 'les paquets du premier serveur ne doivent pas valider le second handshake');
+
+  client.emit('raw', { t: 'VOICE_STATE_UPDATE', d: { guild_id: guild1, user_id: 'bot-user', channel_id: 'channel-1', session_id: 'session-1' } });
+  client.emit('raw', { t: 'VOICE_SERVER_UPDATE', d: { guild_id: guild1, endpoint: 'voice-1', token: 'token-1' } });
+
+  assert.deepEqual(await request0, { endpoint: 'voice-0', token: 'token-0', sessionId: 'session-0' });
+  assert.deepEqual(await request1, { endpoint: 'voice-1', token: 'token-1', sessionId: 'session-1' });
+  assert.equal(client.listenerCount('raw'), 0);
+});
+
+test('un envoi Gateway vocal échoué nettoie le listener au lieu de le laisser expirer', async () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  const guildId = '123456789012345678';
+  const client = new EventEmitter();
+  client.user = { id: 'bot-user' };
+  client.guilds = { cache: new Map([[guildId, {
+    shard: { send() { throw new Error('gateway write failed'); } },
+  }]]) };
+  const player = new MusicPlayer(guildId, client);
+
+  await assert.rejects(player._requestVoice('channel'), /gateway write failed/);
+  assert.equal(client.listenerCount('raw'), 0);
 });

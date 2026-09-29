@@ -295,6 +295,51 @@ test('réessaie une vidéo YouTube bloquée avec le client intégré sans compte
   assert.ok(calls[1].args.includes('youtube:player_client=web_embedded'));
 });
 
+test('ne renvoie pas un cookie refusé dans le dernier essai YouTube sans compte', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-rejected-cookie-'));
+  const cookiesPath = path.join(directory, 'cookies.txt');
+  await fs.writeFile(cookiesPath, '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tfake-cookie\n');
+  const calls = [];
+  const originalWarn = console.warn;
+  console.warn = () => {};
+
+  const fakeSpawn = (_command, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    setImmediate(() => {
+      const embeddedWithoutCookies = args.includes('--extractor-args')
+        && args.includes('youtube:player_client=web_embedded')
+        && !args.includes('--cookies');
+      const success = embeddedWithoutCookies;
+      child.stdout.end(success ? 'https://audio.example/stream\n' : '');
+      child.stderr.end(success ? '' : 'Sign in to confirm you are not a bot');
+      setImmediate(() => child.emit('close', success ? 0 : 1));
+    });
+    return child;
+  };
+
+  try {
+    const audioUrl = await streamUrl('https://youtube.com/watch?v=test', {
+      candidates: [['yt-dlp', []]],
+      cookiesPaths: [cookiesPath],
+      install: async () => { throw new Error('should not install'); },
+      spawnImpl: fakeSpawn,
+    });
+    assert.equal(audioUrl, 'https://audio.example/stream');
+    assert.equal(calls.length, 3, 'cookie, sans cookie, puis client intégré sans cookie');
+    assert.ok(calls[0].includes('--cookies'));
+    assert.ok(!calls[1].includes('--cookies'));
+    assert.ok(calls[2].includes('youtube:player_client=web_embedded'));
+    assert.ok(!calls[2].includes('--cookies'));
+  } finally {
+    console.warn = originalWarn;
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('essaie le deuxième fichier cookies quand le premier compte est refusé', async () => {
   const cookieDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-cookie-fallback-'));
   const first = path.join(cookieDir, 'account-1.txt');

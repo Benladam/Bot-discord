@@ -2,6 +2,17 @@
 const { VoiceConnection } = require('./voice');
 const { OpusSender } = require('./audioSender');
 
+const VOICE_REQUEST_TIMEOUT_MS = 15_000;
+
+function gatewayShardForGuild(client, guildId) {
+  const guild = client.guilds?.cache?.get?.(String(guildId));
+  const shard = guild?.shard;
+  if (!shard || typeof shard.send !== 'function') {
+    throw new Error(`Serveur Discord ${guildId} absent du cache ou shard indisponible.`);
+  }
+  return shard;
+}
+
 class MusicPlayer {
   constructor(guildId, client) {
     this.guildId = guildId; this.client = client; this.queue = [];
@@ -31,17 +42,54 @@ class MusicPlayer {
 
   _requestVoice(channelId) {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.client.removeListener('raw', onRaw); reject(new Error('VOCAL_UNAVAILABLE')); }, 15_000);
+      let timer;
+      let settled = false;
       let state, server;
-      const done = () => { if (!state || !server) return; clearTimeout(timer); this.client.removeListener('raw', onRaw); resolve({ endpoint: server.endpoint, token: server.token, sessionId: state }); };
-      const onRaw = (pkt) => {
-        if (pkt.t === 'VOICE_STATE_UPDATE' && pkt.d?.user_id === this.client.user.id && pkt.d.channel_id === channelId) { state = pkt.d.session_id; done(); }
-        if (pkt.t === 'VOICE_SERVER_UPDATE' && pkt.d?.endpoint && pkt.d?.token) { server = { endpoint: pkt.d.endpoint, token: pkt.d.token }; done(); }
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        this.client.removeListener('raw', onRaw);
       };
-      this.client.on('raw', onRaw);
-      const send = { op: 4, d: { guild_id: this.guildId, channel_id: channelId, self_mute: false, self_deaf: false } };
-      const shard = this.client.ws.shards?.first?.();
-      if (typeof this.client.ws.send === 'function') this.client.ws.send(send); else if (shard?.send) shard.send(send); else reject(new Error('Gateway Discord indisponible'));
+      const finish = (error, value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (error) reject(error);
+        else resolve(value);
+      };
+      const onRaw = (pkt) => {
+        const data = pkt?.d;
+        // Plusieurs guildes peuvent émettre ces événements en parallèle : les
+        // combiner sans vérifier guild_id peut associer un token vocal erroné.
+        if (String(data?.guild_id || '') !== String(this.guildId)) return;
+        if (pkt.t === 'VOICE_STATE_UPDATE'
+            && data.user_id === this.client.user.id
+            && data.channel_id === channelId
+            && data.session_id) {
+          state = data.session_id;
+        } else if (pkt.t === 'VOICE_SERVER_UPDATE' && data.endpoint && data.token) {
+          server = { endpoint: data.endpoint, token: data.token };
+        }
+        if (state && server) finish(null, { endpoint: server.endpoint, token: server.token, sessionId: state });
+      };
+      try {
+        const shard = gatewayShardForGuild(this.client, this.guildId);
+        this.client.on('raw', onRaw);
+        timer = setTimeout(() => {
+          const error = new Error('La connexion vocale Discord n’a pas répondu à temps. Réessaie dans quelques secondes.');
+          error.code = 'VOCAL_UNAVAILABLE';
+          finish(error);
+        }, VOICE_REQUEST_TIMEOUT_MS);
+        shard.send({ op: 4, d: {
+          guild_id: this.guildId,
+          channel_id: channelId,
+          self_mute: false,
+          self_deaf: false,
+        } });
+      } catch (cause) {
+        const error = new Error(cause?.message || 'Impossible de transmettre la demande au Gateway Discord.');
+        error.code = 'VOCAL_UNAVAILABLE';
+        finish(error);
+      }
     });
   }
 

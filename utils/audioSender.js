@@ -550,13 +550,15 @@ async function streamUrl(url, {
   }
 
   if (authCandidate) {
-    const [command, args, cookiesPath] = authCandidate;
+    const [command, args, rejectedCookiesPath] = authCandidate;
+    // Après un rejet explicite des cookies, ne les renvoie pas au client
+    // intégré : ils ne feront que répéter l'échec et peuvent être périmés.
     const embedded = await runYtDlp(command, args, url, spawnImpl, {
-      playerClient: 'web_embedded', cookiesPath, projectRoot, env,
+      playerClient: 'web_embedded', cookiesPath: '', projectRoot, env,
     });
     if (embedded.audioUrl) return embedded.audioUrl;
     errors.push(embedded.error);
-    console.warn(`[yt-dlp] Repli YouTube refusé; binaire=${path.basename(command)}; ${describeCookiesFile(cookiesPath)}; ${sanitizeYtDlpDiagnostic(embedded.error) || 'aucun détail fourni'}`);
+    console.warn(`[yt-dlp] Repli YouTube refusé; binaire=${path.basename(command)}; ${describeCookiesFile(rejectedCookiesPath)}; client intégré sans cookies; ${sanitizeYtDlpDiagnostic(embedded.error) || 'aucun détail fourni'}`);
     const error = new Error('YouTube demande une vérification depuis cet hébergeur; le mode lecteur intégré sans compte n’a pas réussi pour ce titre. Configure YOUTUBE_COOKIES_PATH avec un fichier de cookies local seulement si ce contenu exige un compte, ou choisis un autre titre.');
     error.code = 'YOUTUBE_AUTH_BLOCKED';
     throw error;
