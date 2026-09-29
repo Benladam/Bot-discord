@@ -33,6 +33,7 @@ module.exports = {
     ],
   },
   slash: true,
+  helpCategory: 'setup',
   ownerOnly: true,
   async execute(ctx, args, deps) {
     const userId = ctx.user?.id || ctx.author?.id;

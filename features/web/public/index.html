@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#111411">
+    <meta name="theme-color" content="#12111a">
     <meta name="web-base-path" content="__WEB_BASE_PATH__">
-    <meta name="description" content="Panneau sécurisé de contrôle musical du bot Heuss.">
-    <title>Heuss — Panneau vocal</title>
+    <meta name="description" content="Panneau sécurisé de contrôle musical du bot Discord.">
+    <title>Bot Discord — Panneau musical</title>
     <link rel="stylesheet" href="__WEB_BASE_PATH__/style.css">
     <script type="module" src="__WEB_BASE_PATH__/app.js"></script>
   </head>
@@ -16,8 +16,8 @@
 
     <section id="login-view" class="login-shell" aria-labelledby="login-title">
       <div class="login-card">
-        <div class="brand-mark" aria-hidden="true">H<span>·</span></div>
-        <p class="eyebrow">HEUSS / CONTROL</p>
+        <div class="brand-mark" aria-hidden="true">♫</div>
+        <p class="eyebrow">BOT DISCORD / MUSIQUE</p>
         <h1 id="login-title">Le son, sous contrôle.</h1>
         <p class="muted">Connecte-toi avec le jeton administrateur configuré sur ton serveur.</p>
         <form id="login-form">
@@ -31,7 +31,7 @@
       <div class="login-aside" aria-hidden="true">
         <div class="aside-orbit orbit-one"></div>
         <div class="aside-orbit orbit-two"></div>
-        <div class="aside-disc"><span>H</span></div>
+        <div class="aside-disc"><span>♫</span></div>
         <p>Une seule console.<br><em>Chaque serveur garde sa propre écoute.</em></p>
         <div class="aside-lines"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       </div>
@@ -39,9 +39,9 @@
 
     <main id="app-view" class="app-shell" hidden>
       <header class="topbar">
-        <a class="brand" href="./" aria-label="Heuss, accueil">
-          <span class="brand-mark brand-mark-small" aria-hidden="true">H<span>·</span></span>
-          <span><strong>HEUSS</strong><small>CONTROL ROOM</small></span>
+        <a class="brand" href="./" aria-label="Accueil du panneau musical">
+          <span class="brand-mark brand-mark-small" aria-hidden="true">♫</span>
+          <span><strong>BOT DISCORD</strong><small>ESPACE MUSICAL</small></span>
         </a>
         <div class="topbar-tools">
           <label class="sr-only" for="server-select">Serveur Discord</label>
@@ -80,7 +80,7 @@
               <span id="play-state" class="state-label">À L’ARRÊT</span>
             </div>
             <div class="track-stage">
-              <div class="record-art" aria-hidden="true"><span>H</span><i></i></div>
+              <div class="record-art" aria-hidden="true"><span>♫</span><i></i></div>
               <div class="track-copy">
                 <p id="track-title" class="track-title">Rien ne joue pour l’instant</p>
                 <p id="track-subtitle" class="muted">Lance une musique avec <code>/play</code> sur Discord.</p>
@@ -88,10 +88,12 @@
             </div>
             <div class="track-meta">
               <span><small>SALON VOCAL</small><strong id="voice-channel">Déconnecté</strong></span>
-              <span><small>VOLUME</small><strong id="volume-value">100%</strong></span>
               <span><small>FILE</small><strong id="queue-count">0 titre</strong></span>
             </div>
-            <div class="volume-track" aria-hidden="true"><span id="volume-meter"></span></div>
+            <label class="volume-control" for="volume-slider">
+              <span>🔉 <strong>Volume</strong><output id="volume-value">100%</output></span>
+              <input id="volume-slider" type="range" min="0" max="100" step="1" value="100" aria-label="Volume de ce serveur">
+            </label>
           </section>
 
           <section class="panel controls-panel" aria-labelledby="controls-title">
@@ -106,6 +108,7 @@
               <button class="button button-primary" id="pause-button" data-action="pause" type="button" disabled><span aria-hidden="true">Ⅱ</span><span>Pause</span></button>
               <button class="button button-secondary" data-action="skip" type="button" disabled><span aria-hidden="true">▶|</span><span>Suivante</span></button>
               <button class="button button-danger" data-action="stop" type="button" disabled><span aria-hidden="true">■</span><span>Arrêter</span></button>
+              <button class="button button-secondary" data-action="shuffle" type="button" disabled><span aria-hidden="true">⤨</span><span>Mélanger</span></button>
               <button class="button button-quiet" data-action="leave" type="button" disabled><span aria-hidden="true">↗</span><span>Quitter le vocal</span></button>
             </div>
             <p class="control-note">Les actions de cette console ne changent rien aux autres serveurs.</p>
@@ -139,7 +142,7 @@
             </label>
           </section>
         </div>
-        <footer class="app-footer"><span>HEUSS · MUSIQUE PAR SERVEUR</span><span>HTTPS via ton reverse proxy</span></footer>
+        <footer class="app-footer"><span>BOT DISCORD · ÉTAT ISOLÉ PAR SERVEUR</span><span>HTTPS via ton reverse proxy</span></footer>
       </div>
     </main>
   </body>

@@ -24,4 +24,3 @@ bot.log
 gui_build/
 .bot-gui-logs/
 Bot-discord-kinetic-*.zip
-Test/cmd.txt

@@ -1,4 +1,5 @@
-const { EmbedBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { createThemedEmbed } = require('../shared/discord/embedTheme');
 
 const SETTING_KEY = 'music24_7';
 
@@ -19,6 +20,7 @@ module.exports = {
     defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
   },
   slash: true,
+  helpCategory: 'music',
 
   async execute(ctx, _args, deps) {
     if (!ctx.guildId || !ctx.guild) {
@@ -47,8 +49,7 @@ module.exports = {
       }
 
       const minutes = inactivityMinutes();
-      const embed = new EmbedBuilder()
-        .setColor(enabled ? 0x2ECC71 : 0xF1C40F)
+      const embed = createThemedEmbed(enabled ? 'success' : 'warning')
         .setTitle(enabled ? '🌙 Mode 24/7 activé' : '⏱️ Déconnexion automatique activée')
         .setDescription(enabled
           ? 'Le bot restera dans le salon vocal même sans musique ou sans membre. Relance `/24-7` pour désactiver ce mode.'

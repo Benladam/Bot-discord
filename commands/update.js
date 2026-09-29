@@ -1,4 +1,5 @@
-const { EmbedBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { createThemedEmbed } = require('../shared/discord/embedTheme');
 
 function isAdministrator(ctx) {
   const permissions = ctx.memberPermissions || ctx.member?.permissions;
@@ -25,8 +26,8 @@ function updateEmbed(status, { title, color, commit, includeHistory = false }) {
     .replace(/\s+/g, ' ')
     .replace(/@/g, '@\u200b')
     .slice(0, 220);
-  const embed = new EmbedBuilder()
-    .setColor(color)
+  const variant = color === 0xF1C40F || color === 0xE67E22 ? 'warning' : color === 0x2ECC71 ? 'success' : 'primary';
+  const embed = createThemedEmbed(variant)
     .setTitle(title)
     .setDescription(`${subject}\n\n${commitUrl ? `[Commit \`${shortSha}\`](${commitUrl})` : `Commit \`${shortSha}\``}`)
     .addFields({ name: 'Branche', value: `\`${branch}\``, inline: true });
@@ -65,6 +66,7 @@ module.exports = {
     defaultMemberPermissions: PermissionFlagsBits.Administrator,
   },
   slash: true,
+  helpCategory: 'setup',
 
   async execute(ctx, _args, deps) {
     if (!ctx.guildId || !ctx.guild) return reply(ctx, 'Cette commande doit être utilisée dans un serveur.');

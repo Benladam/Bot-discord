@@ -5,13 +5,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WEB_DIR = path.join(__dirname, 'public');
-const SESSION_COOKIE = 'heusspanel_session';
+const SESSION_COOKIE = 'discord_music_panel_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const MAX_LOGIN_FAILURES = 5;
 const MAX_BODY_BYTES = 8 * 1024;
 const DISCORD_ID = /^\d{17,20}$/;
-const ACTIONS = new Set(['pause', 'resume', 'skip', 'stop', 'leave', 'toggle-24-7']);
+const ACTIONS = new Set(['pause', 'resume', 'skip', 'stop', 'leave', 'shuffle', 'volume', 'toggle-24-7']);
 
 function normalizeBasePath(value) {
   const input = String(value || '').trim();
@@ -255,7 +255,8 @@ function createWebPanel({ client, getPlayer, database, logger = console, env = p
   }
 
   async function applyMusicAction(guild, input) {
-    if (!exactKeys(input, ['action']) || typeof input.action !== 'string' || !ACTIONS.has(input.action)) {
+    if (!input || typeof input.action !== 'string' || !ACTIONS.has(input.action)
+        || (input.action === 'volume' ? !exactKeys(input, ['action', 'value']) : !exactKeys(input, ['action']))) {
       const error = new Error('Action inconnue ou paramètres supplémentaires refusés.');
       error.statusCode = 400;
       throw error;
@@ -278,7 +279,19 @@ function createWebPanel({ client, getPlayer, database, logger = console, env = p
         await player.stop();
         break;
       case 'leave':
-        await player.destroy();
+        await player.leave();
+        break;
+      case 'shuffle':
+        if (player.queue.length < 2) throw Object.assign(new Error('Ajoute au moins deux titres avant de mélanger la file.'), { statusCode: 409 });
+        player.shuffleQueue();
+        await player._activity?.();
+        break;
+      case 'volume':
+        if (!Number.isInteger(input.value) || input.value < 0 || input.value > 100) {
+          throw Object.assign(new Error('Le volume doit être un nombre entier de 0 à 100.'), { statusCode: 400 });
+        }
+        player.setVolume(input.value / 100);
+        database?.setGuildSetting?.(guild.id, 'defaultVolume', input.value / 100);
         break;
       case 'toggle-24-7': {
         const enabled = database.getGuildSetting(guild.id, 'music24_7', false) !== true;

@@ -1,65 +1,60 @@
-/**
- * Commande: language (!language / /language)
- *
- * Sémantique (demandée par l'utilisateur) :
- *   /language #all fr        -> langue FORCÉE du serveur (tous les users + GUI). Irrévocable par un user.
- *   /language fr             -> langue PERSONNELLE (ce user, et son terminal/GUI s'il est l'opérateur)
- *   Sur Discord, un user ne change QUE sa propre langue (sauf #all réservé propriétaire).
- *
- * Langues supportées : fr, en, es, ar
- */
-const { t: botT } = require('../core/i18n/botI18n');
-const { LANGS } = require('../core/i18n/botI18n');
+const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { t: botT, LANGS } = require('../core/i18n/botI18n');
+const { isSlash, hasPermission, getStringOption } = require('../shared/discord/commandHelpers');
 
 function replyMessage(ctx, text) {
-  if (typeof ctx.reply === 'function') return ctx.reply({ content: text, ephemeral: true });
+  if (isSlash(ctx)) return ctx.reply({ content: text, flags: MessageFlags.Ephemeral });
   if (ctx.channel?.send) return Promise.resolve(ctx.channel.send(text));
+  if (typeof ctx.reply === 'function') return ctx.reply(text);
   return undefined;
 }
 
 module.exports = {
-  data: { name: 'language', description: 'Change la langue (perso ou #all pour le serveur)' },
+  data: {
+    name: 'language', description: 'Choisit la langue personnelle ou celle de ce serveur',
+    options: [
+      { name: 'langue', description: 'Langue à utiliser', type: 3, required: true, choices: [
+        { name: 'Français', value: 'fr' }, { name: 'English', value: 'en' },
+        { name: 'Español', value: 'es' }, { name: 'العربية', value: 'ar' },
+      ] },
+      { name: 'portee', description: 'Préférence personnelle ou réglage du serveur', type: 3, required: false, choices: [
+        { name: 'Ma préférence personnelle', value: 'personal' },
+        { name: 'Tout le serveur (permission Gérer le serveur)', value: 'server' },
+      ] },
+    ],
+  },
   slash: true,
+  helpCategory: 'setup',
+
   async execute(ctx, args, deps) {
     const userId = ctx.user?.id || ctx.author?.id;
     const guildId = ctx.guild?.id;
-    const isOwner = deps.isOwner ? deps.isOwner(userId) : false;
+    const lang = isSlash(ctx)
+      ? String(getStringOption(ctx, 'langue') || '').toLowerCase()
+      : String(args?.[0] || '').toLowerCase();
+    const scope = isSlash(ctx)
+      ? (getStringOption(ctx, 'portee') || 'personal')
+      : (/^(server|serveur|#all)$/i.test(args?.[0] || '') ? 'server' : /^(server|serveur|#all)$/i.test(args?.[1] || '') ? 'server' : 'personal');
+    const selectedLanguage = scope === 'server' && !isSlash(ctx) && /^(server|serveur|#all)$/i.test(args?.[0] || '')
+      ? String(args?.[1] || '').toLowerCase()
+      : lang;
 
-    // args peut venir du slash (tableau) ou du préfixe (tableau aussi, see bot.js)
-    let raw = (args && args.join(' ')) || '';
-    raw = raw.trim();
-
-    // Forme slash : si l'option "all" a été fournie
-    if (ctx.options && ctx.options.get) {
-      const optAll = ctx.options.get('all')?.value;
-      const optLang = ctx.options.get('lang')?.value;
-      if (optAll || optLang) raw = `${optAll ? '#all ' : ''}${optLang || ''}`.trim();
-    }
-
-    if (!raw) {
+    if (!LANGS.includes(selectedLanguage)) {
       const STR = botT(deps.langFor ? deps.langFor(userId, guildId) : 'fr');
-      return replyMessage(ctx, STR.langList);
+      return replyMessage(ctx, `${STR.langList}\n${STR.langUnknown(selectedLanguage || '')}`);
     }
 
-    const forcedServer = /\b#all\b/i.test(raw);
-    const lang = raw.replace(/\B#all\b/i, '').trim().toLowerCase();
-
-    if (!LANGS.includes(lang)) {
-      const STR = botT(deps.langFor ? deps.langFor(userId, guildId) : 'fr');
-      return replyMessage(ctx, STR.langUnknown(lang));
+    const STR = botT(selectedLanguage);
+    if (scope === 'server') {
+      if (!guildId) return replyMessage(ctx, 'Le réglage de langue du serveur doit être utilisé dans un serveur Discord.');
+      if (!hasPermission(ctx, PermissionFlagsBits.ManageGuild)) {
+        return replyMessage(ctx, 'Il te faut la permission « Gérer le serveur » pour changer la langue de ce serveur.');
+      }
+      deps.langStore.setServer(guildId, selectedLanguage, true);
+      return replyMessage(ctx, STR.langSetServer(selectedLanguage));
     }
 
-    const STR = botT(lang);
-
-    if (forcedServer) {
-      // #all réservé au propriétaire
-      if (!isOwner) return replyMessage(ctx, STR.linkOnlyOwner.replace('🔗', '🌐').replace('lien de configuration', 'langue du serveur'));
-      deps.langStore.setServer(guildId, lang, true);
-      return replyMessage(ctx, STR.langSetServer(lang));
-    }
-
-    // Langue personnelle
-    deps.langStore.setUser(userId, lang);
-    return replyMessage(ctx, STR.langSetPersonal(lang));
+    deps.langStore.setUser(userId, selectedLanguage);
+    return replyMessage(ctx, STR.langSetPersonal(selectedLanguage));
   },
 };

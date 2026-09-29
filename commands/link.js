@@ -10,6 +10,7 @@ const { getWebPanelPublicUrl } = require('../features/web/server');
 module.exports = {
   data: { name: 'link', description: 'Lien vers le panneau de configuration (propriétaire)' },
   slash: true,
+  helpCategory: 'setup',
   ownerOnly: true,
 
   async execute(ctx, args, deps) {

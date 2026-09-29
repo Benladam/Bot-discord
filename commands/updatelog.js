@@ -16,6 +16,7 @@ module.exports = {
     defaultMemberPermissions: PermissionFlagsBits.Administrator,
   },
   slash: true,
+  helpCategory: 'setup',
 
   async execute(ctx, _args, deps) {
     if (!ctx.guildId || !ctx.guild) return reply(ctx, 'Cette commande doit être utilisée dans un serveur.');

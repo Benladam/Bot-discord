@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { createThemedEmbed } = require('../shared/discord/embedTheme');
 const { isSlash } = require('../shared/discord/commandHelpers');
 
 module.exports = {
@@ -11,7 +11,7 @@ module.exports = {
       ? (await ctx.reply({ content: 'Mesure en cours…', ephemeral: true }), await ctx.fetchReply())
       : await ctx.reply('Mesure en cours…');
     const roundTrip = response.createdTimestamp - started;
-    const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('🏓 Pong !')
+    const embed = createThemedEmbed('success').setTitle('🏓 Pong !')
       .addFields({ name: 'Passerelle Discord', value: latency, inline: true }, { name: 'Réponse', value: `${roundTrip} ms`, inline: true });
     if (isSlash(ctx)) return ctx.editReply({ content: '', embeds: [embed] });
     return response.edit({ content: '', embeds: [embed] });

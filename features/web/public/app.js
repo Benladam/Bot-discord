@@ -9,6 +9,7 @@ const message = document.querySelector('#app-message');
 const serverSelect = document.querySelector('#server-select');
 const dashboard = document.querySelector('#dashboard');
 const emptyState = document.querySelector('#empty-state');
+const requestedGuildId = String(window.location?.search || '').match(/[?&]guild=(\d{17,20})(?:&|$)/)?.[1] || null;
 let csrfToken = '';
 let isAuthenticated = false;
 let webmcpRegistered = false;
@@ -19,7 +20,7 @@ function setView(authenticated) {
   loginView.hidden = authenticated;
   appView.hidden = !authenticated;
   if (!authenticated) {
-    window.clearInterval(window.heussRefreshTimer);
+    window.clearInterval(window.musicRefreshTimer);
     csrfToken = '';
   }
 }
@@ -61,12 +62,13 @@ function renderState(state) {
   document.querySelector('#play-state').textContent = current ? (current.paused ? 'EN PAUSE' : 'EN LECTURE') : (connected ? 'EN ATTENTE' : 'À L’ARRÊT');
   document.querySelector('#play-state').className = `state-label${current?.paused ? ' paused' : current ? ' active' : ''}`;
   document.querySelector('#track-title').textContent = current?.title || 'Rien ne joue pour l’instant';
+  const providerNames = { youtube: 'YouTube', spotify: 'Spotify', deezer: 'Deezer', soundcloud: 'SoundCloud', apple_music: 'Apple Music', amazon_music: 'Amazon Music', tidal: 'Tidal', bandcamp: 'Bandcamp', audiomack: 'Audiomack', mixcloud: 'Mixcloud', audius: 'Audius', qobuz: 'Qobuz', pandora: 'Pandora', napster: 'Napster' };
   document.querySelector('#track-subtitle').textContent = current
-    ? `${current.source} · ${duration(current.duration)}`
+    ? `${providerNames[current.source] || current.source} · ${duration(current.duration)}`
     : 'Lance une musique avec /play sur Discord.';
   document.querySelector('#voice-channel').textContent = state.voiceChannel?.name || 'Déconnecté';
   document.querySelector('#volume-value').textContent = `${state.volume}%`;
-  document.querySelector('#volume-meter').style.width = `${state.volume}%`;
+  document.querySelector('#volume-slider').value = String(state.volume);
   document.querySelector('#queue-count').textContent = `${state.queueLength} titre${state.queueLength === 1 ? '' : 's'}`;
   document.querySelector('#queue-total').textContent = String(state.queueLength).padStart(2, '0');
   document.querySelector('#always-on-toggle').checked = Boolean(state.alwaysOn);
@@ -78,6 +80,7 @@ function renderState(state) {
   pauseButton.querySelector('span:first-child').textContent = current?.paused ? '▶' : 'Ⅱ';
   document.querySelector('[data-action="skip"]').disabled = !current;
   document.querySelector('[data-action="stop"]').disabled = !current && state.queueLength === 0;
+  document.querySelector('[data-action="shuffle"]').disabled = state.queueLength < 2;
   document.querySelector('[data-action="leave"]').disabled = !connected;
 
   const list = document.querySelector('#queue-list');
@@ -123,7 +126,8 @@ async function refresh() {
     dashboard.hidden = !hasGuilds;
     emptyState.hidden = hasGuilds;
     if (hasGuilds) {
-      serverSelect.value = data.guilds.some((guild) => guild.id === priorId) ? priorId : data.guilds[0].id;
+      const preferredId = data.guilds.some((guild) => guild.id === priorId) ? priorId : requestedGuildId;
+      serverSelect.value = data.guilds.some((guild) => guild.id === preferredId) ? preferredId : data.guilds[0].id;
       await loadSelectedGuild();
     }
   } catch (error) {
@@ -138,7 +142,7 @@ async function registerWebMcp() {
   if (!modelContext?.registerTool || webmcpRegistered) return;
   await modelContext.registerTool({
     name: 'get_music_status',
-    description: 'Read the current track, voice connection, volume, and upcoming queue for one Discord server already available in the Heuss control panel. Does not change playback.',
+    description: 'Read the current track, voice connection, volume, and upcoming queue for one Discord server. Does not change playback.',
     inputSchema: {
       type: 'object',
       properties: { guild_id: { type: 'string', pattern: '^\\d{17,20}$', minLength: 17, maxLength: 20 } },
@@ -147,7 +151,7 @@ async function registerWebMcp() {
     },
     annotations: { readOnlyHint: true, untrustedContentHint: true },
     execute: async (input) => {
-      if (!isAuthenticated) throw new Error('Log in to the Heuss control panel first.');
+      if (!isAuthenticated) throw new Error('Connecte-toi au panneau avant de consulter la musique.');
       if (!input || typeof input !== 'object' || Array.isArray(input)
           || Object.keys(input).length !== 1 || typeof input.guild_id !== 'string'
           || !/^\d{17,20}$/.test(input.guild_id)) {
@@ -171,7 +175,7 @@ loginForm.addEventListener('submit', async (event) => {
     setView(true);
     await registerWebMcp().catch(() => {});
     await refresh();
-    window.heussRefreshTimer = window.setInterval(refresh, 5000);
+    window.musicRefreshTimer = window.setInterval(refresh, 5000);
   } catch (error) {
     loginError.textContent = error.message;
     accessToken.select();
@@ -202,9 +206,26 @@ document.querySelector('.control-buttons').addEventListener('click', async (even
       method: 'POST', body: JSON.stringify({ action }),
     });
     await refresh();
-    showMessage(action === 'skip' ? 'Passage à la piste suivante.' : 'Commande envoyée.');
+    showMessage(action === 'skip' ? 'Passage à la piste suivante.' : action === 'shuffle' ? 'File mélangée pour ce serveur.' : 'Commande envoyée.');
   } catch (error) { showMessage(error.message, true); }
   finally { button.disabled = false; }
+});
+
+document.querySelector('#volume-slider').addEventListener('input', (event) => {
+  document.querySelector('#volume-value').textContent = `${event.target.value}%`;
+});
+
+document.querySelector('#volume-slider').addEventListener('change', async (event) => {
+  const slider = event.target;
+  slider.disabled = true;
+  try {
+    const result = await api(`/api/guilds/${encodeURIComponent(serverSelect.value)}/music/action`, {
+      method: 'POST', body: JSON.stringify({ action: 'volume', value: Number(slider.value) }),
+    });
+    renderState(result.state);
+    showMessage(`Volume réglé à ${result.state.volume} % sur ce serveur.`);
+  } catch (error) { showMessage(error.message, true); await refresh(); }
+  finally { slider.disabled = false; }
 });
 
 document.querySelector('#always-on-toggle').addEventListener('change', async (event) => {
@@ -229,7 +250,7 @@ async function initialize() {
     setView(true);
     await registerWebMcp().catch(() => {});
     await refresh();
-    window.heussRefreshTimer = window.setInterval(refresh, 5000);
+    window.musicRefreshTimer = window.setInterval(refresh, 5000);
   } catch (error) {
     setView(false);
     loginError.textContent = error.message;

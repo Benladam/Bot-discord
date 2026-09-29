@@ -176,40 +176,40 @@ async function findMember(guild, query) {
       || null;
 }
 
-/** Liste des commandes, utilisée par /help et par la GUI. */
+/** Liste des noms de commandes, utilisée par help dans le terminal et la GUI. */
 const HELP = [
-  ['/play <recherche|lien>', 'Lancer une musique (YouTube/Spotify)'],
-  ['/skip', 'Passer à la musique suivante'],
-  ['/pause', 'Mettre en pause'],
-  ['/resume', 'Reprendre la lecture'],
-  ['/stop', 'Arrêter et vider la file'],
-  ['/now', 'Musique en cours'],
-  ['/queue', 'File d’attente'],
-  ['/volume <0-100>', 'Régler le volume'],
-  ['/loop [off|song|queue]', 'Mode de boucle'],
-  ['/shuffle', 'Mélanger la file'],
-  ['/call <#salon> <message>', 'Écrire un message dans un salon texte'],
-  ['/say <#salon> <message>', 'Identique à /call'],
-  ['/reply <#salon> <id> <msg>', 'Répondre à un message précis'],
-  ['/join', 'Rejoindre le salon vocal où est déjà un membre'],
-  ['/leave', 'Faire quitter le salon vocal'],
-  ['/voices', 'Lister les salons vocaux'],
-  ['/channels', 'Lister les salons texte'],
-  ['/servers', 'Lister les serveurs du bot'],
-  ['/members [recherche]', 'Lister/chercher des membres'],
-  ['/roles', 'Lister les rôles du serveur'],
-  ['/ban <membre|@rôle> [raison]', 'Bannir un membre ou tout un rôle'],
-  ['/unban <id> ', 'Débannir par identifiant'],
-  ['/kick <membre|@rôle> [raison]', 'Expulser un membre ou tout un rôle'],
-  ['/timeout <membre> <min>', 'Rendre muet temporairement'],
-  ['/nick <membre> <surnom>', 'Changer le surnom'],
-  ['/dm <membre> <message>', 'Envoyer un message privé'],
-  ['/status <texte>', "Changer l'activité affichée du bot"],
-  ['/language [fr|en|es|ar]', 'Langue personnelle du terminal/GUI'],
-  ['/language #all <lang>', 'Langue forcée du serveur (propriétaire)'],
-  ['/link', 'Lien panneau de config (propriétaire)'],
-  ['/whoami', 'Infos sur le bot connecté'],
-  ['/help', 'Afficher cette aide'],
+  ['play <recherche|lien>', 'Lancer une musique (YouTube/Spotify)'],
+  ['skip', 'Passer à la musique suivante'],
+  ['pause', 'Mettre en pause'],
+  ['resume', 'Reprendre la lecture'],
+  ['stop', 'Arrêter et vider la file'],
+  ['now', 'Musique en cours'],
+  ['queue', 'File d’attente'],
+  ['volume <0-100>', 'Régler le volume'],
+  ['loop [off|song|queue]', 'Mode de boucle'],
+  ['shuffle', 'Mélanger la file'],
+  ['call <#salon> <message>', 'Écrire un message dans un salon texte'],
+  ['say <#salon> <message>', 'Identique à call'],
+  ['reply <#salon> <id> <msg>', 'Répondre à un message précis'],
+  ['join', 'Rejoindre le salon vocal où est déjà un membre'],
+  ['leave', 'Faire quitter le salon vocal'],
+  ['voices', 'Lister les salons vocaux'],
+  ['channels', 'Lister les salons texte'],
+  ['servers', 'Lister les serveurs du bot'],
+  ['members [recherche]', 'Lister/chercher des membres'],
+  ['roles', 'Lister les rôles du serveur'],
+  ['ban <membre|@rôle> [raison]', 'Bannir un membre ou tout un rôle'],
+  ['unban <id>', 'Débannir par identifiant'],
+  ['kick <membre|@rôle> [raison]', 'Expulser un membre ou tout un rôle'],
+  ['timeout <membre> <min>', 'Rendre muet temporairement'],
+  ['nick <membre> <surnom>', 'Changer le surnom'],
+  ['dm <membre> <message>', 'Envoyer un message privé'],
+  ['status <texte>', "Changer l'activité affichée du bot"],
+  ['language [fr|en|es|ar]', 'Langue personnelle du terminal/GUI'],
+  ['language #all <lang>', 'Langue forcée du serveur (propriétaire)'],
+  ['link', 'Lien panneau de config (propriétaire)'],
+  ['whoami', 'Infos sur le bot connecté'],
+  ['help', 'Afficher cette aide'],
 ];
 
 /**
@@ -237,13 +237,10 @@ function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT,
   async function run(line) {
     const raw = String(line || '').trim();
     if (!raw) return;
-    if (!raw.startsWith('/')) {
-      err('Les commandes commencent par « / ». Tapez /help pour la liste.');
-      return;
-    }
-    const sp = raw.indexOf(' ');
-    const cmd = (sp === -1 ? raw.slice(1) : raw.slice(1, sp)).toLowerCase();
-    const rest = sp === -1 ? '' : raw.slice(sp + 1).trim();
+    const input = raw.replace(/^\/+/, '');
+    const sp = input.indexOf(' ');
+    const cmd = (sp === -1 ? input : input.slice(0, sp)).toLowerCase();
+    const rest = sp === -1 ? '' : input.slice(sp + 1).trim();
 
     switch (cmd) {
       // ---------- Écrire dans un salon ----------

@@ -1,17 +1,17 @@
 
 :root {
   color-scheme: dark;
-  --ink: #111411;
-  --surface: #191d19;
-  --surface-raised: #202520;
-  --surface-soft: #272d27;
-  --line: #343b34;
+  --ink: #111018;
+  --surface: #191821;
+  --surface-raised: #20202b;
+  --surface-soft: #282735;
+  --line: #373544;
   --text: #edf0e9;
   --muted: #9aa397;
-  --accent: #bbf36a;
-  --accent-dark: #829e49;
-  --orange: #ef9867;
-  --danger: #f37c70;
+  --accent: #a991ff;
+  --accent-dark: #7257f5;
+  --orange: #55c8e8;
+  --danger: #e55361;
   --radius: 18px;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
@@ -26,8 +26,8 @@ body {
   margin: 0;
   color: var(--text);
   background:
-    radial-gradient(ellipse at 10% 0%, rgba(138, 174, 89, .1), transparent 34rem),
-    linear-gradient(145deg, #131713 0%, var(--ink) 50%, #171b17 100%);
+    radial-gradient(ellipse at 10% 0%, rgba(114, 87, 245, .13), transparent 34rem),
+    linear-gradient(145deg, #15131d 0%, var(--ink) 50%, #191722 100%);
 }
 
 button, input, select { font: inherit; }
@@ -39,8 +39,8 @@ button { color: inherit; }
 code { padding: .12rem .4rem; border: 1px solid var(--line); border-radius: 6px; color: var(--accent); background: rgba(255,255,255,.035); font-size: .88em; }
 
 .ambient { position: fixed; z-index: -1; width: 32rem; height: 32rem; border-radius: 50%; pointer-events: none; filter: blur(100px); opacity: .12; }
-.ambient-a { top: 7%; right: -14rem; background: #94bd50; }
-.ambient-b { bottom: -22rem; left: -10rem; width: 28rem; height: 28rem; background: #df8553; opacity: .08; }
+.ambient-a { top: 7%; right: -14rem; background: #7257f5; }
+.ambient-b { bottom: -22rem; left: -10rem; width: 28rem; height: 28rem; background: #55c8e8; opacity: .08; }
 
 .login-shell { display: grid; grid-template-columns: minmax(360px, 510px) minmax(300px, 1fr); gap: clamp(2rem, 6vw, 7rem); align-items: center; width: min(1120px, calc(100% - 48px)); min-height: 100vh; margin: 0 auto; padding: 60px 0; }
 .login-card { padding: clamp(28px, 4vw, 52px); border: 1px solid var(--line); border-radius: 24px; background: linear-gradient(145deg, rgba(36,42,36,.95), rgba(25,29,25,.96)); box-shadow: 0 30px 100px rgba(0,0,0,.25); }
@@ -105,7 +105,9 @@ code { padding: .12rem .4rem; border: 1px solid var(--line); border-radius: 6px;
 .track-copy .muted { margin: 9px 0 0; font-size: .88rem; }
 .track-meta { display: flex; flex-wrap: wrap; gap: clamp(20px, 5vw, 52px); }
 .track-meta span { display: grid; gap: 6px; }.track-meta small { color: #84907f; font-size: .59rem; font-weight: 750; letter-spacing: .14em; }.track-meta strong { max-width: 200px; overflow: hidden; color: #dbe1d5; font-size: .79rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.volume-track { height: 3px; margin-top: 19px; overflow: hidden; border-radius: 8px; background: #353d33; }.volume-track span { display: block; height: 100%; width: 100%; background: var(--accent); transition: width .2s; }
+.volume-control { display: grid; grid-template-columns: auto minmax(120px, 1fr); align-items: center; gap: 18px; margin-top: 22px; color: var(--muted); font-size: .79rem; }
+.volume-control span { display: inline-flex; align-items: center; gap: 7px; }.volume-control strong { color: var(--text); }.volume-control output { min-width: 3.5em; color: var(--accent); font-variant-numeric: tabular-nums; text-align: right; }
+.volume-control input { width: 100%; accent-color: var(--accent); cursor: pointer; }
 .control-glyph, .moon-mark { color: var(--accent); font-size: 2.4rem; line-height: .7; }
 .control-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: auto 0; padding: 34px 0 19px; }
 .button { display: inline-flex; justify-content: center; align-items: center; gap: 9px; min-height: 45px; padding: 0 15px; border: 1px solid transparent; border-radius: 10px; font-size: .82rem; font-weight: 680; transition: transform .15s, opacity .15s, border-color .15s; cursor: pointer; }

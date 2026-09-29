@@ -11,7 +11,7 @@ $script:Closing = $false
 New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Heuss - Bot Discord"
+$form.Text = "Bot Discord"
 $form.StartPosition = 'CenterScreen'
 $form.Size = New-Object System.Drawing.Size(900, 620)
 $form.MinimumSize = New-Object System.Drawing.Size(700, 450)
@@ -199,7 +199,7 @@ function Start-RequestedBot {
         $status.Text = 'Erreur de demarrage'
         $startButton.Enabled = $true
         Add-Log ('ERREUR: ' + $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Heuss - demarrage impossible', 'OK', 'Error') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Bot Discord - démarrage impossible', 'OK', 'Error') | Out-Null
     }
 }
 
@@ -263,7 +263,7 @@ $timer.Add_Tick({
 $timer.Start()
 $form.Add_FormClosing({
     if (($script:BotProcess -and -not $script:BotProcess.HasExited) -or ($script:SetupProcess -and -not $script:SetupProcess.HasExited)) {
-        $answer = [System.Windows.Forms.MessageBox]::Show('Arreter le bot et fermer la fenetre ?', 'Heuss', 'YesNo', 'Question')
+        $answer = [System.Windows.Forms.MessageBox]::Show('Arreter le bot et fermer la fenetre ?', 'Bot Discord', 'YesNo', 'Question')
         if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { $_.Cancel = $true; return }
         Stop-BotProcess
     }

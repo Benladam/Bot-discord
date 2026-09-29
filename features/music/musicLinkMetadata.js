@@ -7,6 +7,16 @@ const PROVIDER_LABELS = Object.freeze({
   spotify: 'Spotify',
   deezer: 'Deezer',
   soundcloud: 'SoundCloud',
+  apple_music: 'Apple Music',
+  amazon_music: 'Amazon Music',
+  tidal: 'Tidal',
+  bandcamp: 'Bandcamp',
+  audiomack: 'Audiomack',
+  mixcloud: 'Mixcloud',
+  audius: 'Audius',
+  qobuz: 'Qobuz',
+  pandora: 'Pandora',
+  napster: 'Napster',
   other: 'inconnu',
 });
 
@@ -33,6 +43,17 @@ function identifyProvider(link) {
   if (host === 'spotify.com' || host.endsWith('.spotify.com')) return 'spotify';
   if (host === 'deezer.com' || host.endsWith('.deezer.com') || host === 'dzr.page.link') return 'deezer';
   if (host === 'snd.sc' || host === 'soundcloud.com' || host.endsWith('.soundcloud.com')) return 'soundcloud';
+  if (host === 'music.apple.com' || host === 'itunes.apple.com') return 'apple_music';
+  if (host === 'music.amazon.com' || /^music\.amazon\.(?:[a-z]{2,3}|co\.[a-z]{2}|com\.[a-z]{2})$/i.test(host)
+      || ((host === 'amazon.com' || host.endsWith('.amazon.com')) && /^\/music(?:\/|$)/i.test(link?.url?.pathname || ''))) return 'amazon_music';
+  if (host === 'tidal.com' || host.endsWith('.tidal.com')) return 'tidal';
+  if (host === 'bandcamp.com' || host.endsWith('.bandcamp.com')) return 'bandcamp';
+  if (host === 'audiomack.com' || host.endsWith('.audiomack.com')) return 'audiomack';
+  if (host === 'mixcloud.com' || host.endsWith('.mixcloud.com')) return 'mixcloud';
+  if (host === 'audius.co' || host.endsWith('.audius.co')) return 'audius';
+  if (host === 'qobuz.com' || host.endsWith('.qobuz.com')) return 'qobuz';
+  if (host === 'pandora.com' || host.endsWith('.pandora.com')) return 'pandora';
+  if (host === 'napster.com' || host.endsWith('.napster.com')) return 'napster';
   return 'other';
 }
 
@@ -153,6 +174,45 @@ function makeMetadata(provider, title, artist = '', kind = 'track') {
   return { provider, kind, title: cleanTitle, artist: cleanArtist, searchQuery: cleanLogText(searchQuery, 240) };
 }
 
+function decodeHtml(value) {
+  const decodeCodePoint = (source, radix) => {
+    const code = Number.parseInt(source, radix);
+    return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
+      && !(code >= 0xd800 && code <= 0xdfff)
+      ? String.fromCodePoint(code)
+      : '\ufffd';
+  };
+  return String(value || '')
+    .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&#(\d+);/g, (_match, code) => decodeCodePoint(code, 10))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => decodeCodePoint(code, 16));
+}
+
+function metaValue(html, key) {
+  for (const tag of String(html).match(/<meta\b[^>]*>/gi) || []) {
+    const attrs = Object.fromEntries([...tag.matchAll(/([\w:-]+)\s*=\s*(["'])(.*?)\2/gi)]
+      .map((match) => [match[1].toLowerCase(), decodeHtml(match[3])]));
+    if ((attrs.property || attrs.name || '').toLowerCase() === key.toLowerCase()) return attrs.content || '';
+  }
+  return '';
+}
+
+async function resolveGenericPageMetadata(link, provider, fetchImpl, timeoutMs) {
+  // Ne suivre aucune redirection d’un lien utilisateur vers un hôte arbitraire.
+  const response = await fetchImpl(link.value, {
+    headers: { accept: 'text/html', 'user-agent': 'DiscordMusicBot/1.0 (+public link metadata)' },
+    redirect: 'manual',
+    signal: AbortSignal.timeout(timeoutMs),
+  }).catch(() => null);
+  if (!response?.ok) return null;
+  const html = String(await response.text().catch(() => '')).slice(0, 512_000);
+  const title = metaValue(html, 'og:title') || metaValue(html, 'twitter:title');
+  const artist = metaValue(html, 'music:musician') || metaValue(html, 'og:audio:artist');
+  const kind = /playlist|album/i.test(`${metaValue(html, 'og:type')} ${title}`) ? 'playlist' : 'track';
+  return title ? makeMetadata(provider, title, artist, kind) : null;
+}
+
 async function resolveMusicLinkMetadata(input, {
   fetchImpl = globalThis.fetch,
   timeoutMs = 2_500,
@@ -219,6 +279,10 @@ async function resolveMusicLinkMetadata(input, {
     const title = entry.title || entry.name;
     const artist = entry.artist?.name || entry.user?.name || entry.creator?.name || '';
     return title ? makeMetadata(provider, title, artist, kind) : null;
+  }
+
+  if (PROVIDER_LABELS[provider] && provider !== 'other') {
+    return resolveGenericPageMetadata(link, provider, fetchImpl, requestTimeout);
   }
 
   return null;

@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { createThemedEmbed } = require('../shared/discord/embedTheme');
 const { resolveUser, isSlash, deferReply } = require('../shared/discord/commandHelpers');
 
 module.exports = {
@@ -12,7 +12,7 @@ module.exports = {
     const user = await resolveUser(ctx, args, 'utilisateur');
     if (!user) throw new Error('Utilisateur introuvable.');
     const member = ctx.guild?.members.cache.get(user.id) || await ctx.guild?.members.fetch(user.id).catch(() => null);
-    const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(`Utilisateur : ${user.tag || user.username}`)
+    const embed = createThemedEmbed('primary').setTitle(`👤 ${user.tag || user.username}`)
       .setThumbnail(user.displayAvatarURL({ size: 512 }))
       .addFields(
         { name: 'Identifiant', value: user.id, inline: true },

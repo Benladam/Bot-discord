@@ -1,7 +1,7 @@
 /** Lecteur vocal maison : WebSocket vocal + UDP/RTP + Opus. */
 const { VoiceConnection } = require('./voice');
 const { OpusSender } = require('./audioSender');
-const { EmbedBuilder } = require('discord.js');
+const { createThemedEmbed } = require('../../shared/discord/embedTheme');
 
 const VOICE_REQUEST_TIMEOUT_MS = 15_000;
 const configuredIdleMinutes = Number(process.env.VOICE_IDLE_TIMEOUT_MINUTES);
@@ -9,6 +9,8 @@ const VOICE_IDLE_TIMEOUT_MINUTES = configuredIdleMinutes === 1 || configuredIdle
   ? configuredIdleMinutes
   : 2;
 const VOICE_IDLE_TIMEOUT_MS = VOICE_IDLE_TIMEOUT_MINUTES * 60_000;
+const VOICE_NOTICE_SEND_TIMEOUT_MS = 1_500;
+const VOICE_NOTICE_TTL_MS = 30_000;
 
 function gatewayShardForGuild(client, guildId) {
   const guild = client.guilds?.cache?.get?.(String(guildId));
@@ -20,7 +22,7 @@ function gatewayShardForGuild(client, guildId) {
 }
 
 class MusicPlayer {
-  constructor(guildId, client, { keepAlive, inactivityTimeoutMs = VOICE_IDLE_TIMEOUT_MS } = {}) {
+  constructor(guildId, client, { keepAlive, inactivityTimeoutMs = VOICE_IDLE_TIMEOUT_MS, noticeTtlMs = VOICE_NOTICE_TTL_MS } = {}) {
     this.guildId = guildId; this.client = client; this.queue = [];
     this.current = null; this.isPlaying = false; this.isPaused = false;
     this.loopMode = 0; this.volume = 1; this.connection = null;
@@ -29,6 +31,7 @@ class MusicPlayer {
     this._idleTimer = null; this._aloneTimer = null;
     this.keepAlive = typeof keepAlive === 'function' ? keepAlive : () => false;
     this.inactivityTimeoutMs = Math.max(1, Number(inactivityTimeoutMs) || VOICE_IDLE_TIMEOUT_MS);
+    this.noticeTtlMs = Math.max(1, Number(noticeTtlMs) || VOICE_NOTICE_TTL_MS);
     this._enqueueOperation = Promise.resolve();
     this.onQueueEnd = null;
   }
@@ -127,22 +130,57 @@ class MusicPlayer {
     this._clearIdleTimer();
     this._clearAloneTimer();
     const idle = reason === 'idle';
-    const embed = new EmbedBuilder()
-      .setColor(0xF1C40F)
+    const embed = createThemedEmbed('warning')
       .setTitle(idle ? '⏱️ Déconnexion pour inactivité' : '👋 Déconnexion du salon vocal')
       .setDescription(idle
         ? `Je quitte le salon vocal après ${VOICE_IDLE_TIMEOUT_MINUTES} min sans musique. Active **/24-7** pour rester connecté.`
         : `Je quitte le salon vocal car il n’y a plus de membre depuis ${VOICE_IDLE_TIMEOUT_MINUTES} min. Active **/24-7** pour rester connecté.`)
       .setTimestamp();
 
-    try { await this.lastChannel?.send?.({ embeds: [embed] }); }
-    catch (error) { console.warn(`[voice] Notification d’inactivité impossible: ${error.message}`); }
+    const noticePromise = Promise.resolve()
+      .then(() => this.lastChannel?.send?.({ embeds: [embed] }))
+      .then((message) => {
+        if (typeof message?.delete === 'function') {
+          const timer = setTimeout(() => Promise.resolve(message.delete()).catch(() => {}), this.noticeTtlMs);
+          timer.unref?.();
+        }
+        return message;
+      })
+      .catch((error) => {
+        console.warn(`[voice] Notification d’inactivité impossible: ${error.message}`);
+        return null;
+      });
+    let sendTimeout;
+    await Promise.race([
+      noticePromise,
+      new Promise((resolve) => { sendTimeout = setTimeout(resolve, VOICE_NOTICE_SEND_TIMEOUT_MS); }),
+    ]);
+    clearTimeout(sendTimeout);
 
     // La notification est asynchrone : une nouvelle chanson, un membre ou
     // l’activation du mode 24/7 pendant l’envoi doit annuler le départ.
     if (!canLeave()) return;
     console.info(`[voice] Déconnexion après ${VOICE_IDLE_TIMEOUT_MINUTES} min d’inactivité (${reason}, serveur ${this.guildId}).`);
-    this.destroy();
+    this.leave();
+  }
+
+  /** Demande au Gateway principal de quitter le vocal avant de fermer WS/UDP. */
+  leave() {
+    const connection = this.connection;
+    if (connection?.connected) {
+      try {
+        const shard = gatewayShardForGuild(this.client, this.guildId);
+        shard.send({ op: 4, d: {
+          guild_id: String(this.guildId),
+          channel_id: null,
+          self_mute: false,
+          self_deaf: false,
+        } });
+      } catch (error) {
+        console.error(`[voice] Demande de sortie vocale au Gateway impossible: ${error.message}`);
+      }
+    }
+    return this.destroy();
   }
 
   _scheduleIdleLeave() {
@@ -287,29 +325,30 @@ class MusicPlayer {
     if (Object.hasOwn(song, 'requestChannel')) this.lastChannel = song.requestChannel;
     this._activity();
     const generation = ++this._generation;
+    const failTrack = async (error) => {
+      if (generation !== this._generation || !this.isPlaying) return;
+      console.error(`[audio] piste « ${String(song.title || 'inconnue').slice(0, 120)} » interrompue (${error.code || 'AUDIO_ERROR'}): ${error.message}`);
+      this.isPlaying = false;
+      this.isPaused = false;
+      this.current = null;
+      this.sender = null;
+      this._activity();
+      if (this.queue.length) {
+        this.playNext().catch(nextError => console.error('[audio] piste suivante:', nextError.message));
+      } else {
+        this._scheduleIdleLeave();
+      }
+      try {
+        await this.lastChannel?.send(`❌ Lecture interrompue : ${error.message}`);
+      } catch (_) { /* salon supprimé ou permissions manquantes */ }
+    };
     try {
       const sender = await OpusSender.start(this.connection, song.url, () => console.log('🔊 SON ÉMIS — lecture maison active.'), async () => {
         if (generation === this._generation && this.isPlaying) {
           this.sender = null;
           await this.playNext(undefined, { notifyWhenEmpty: true });
         }
-      }, async (error) => {
-        if (generation !== this._generation || !this.isPlaying) return;
-        console.error('[audio] lecture impossible:', error.message);
-        this.isPlaying = false;
-        this.isPaused = false;
-        this.current = null;
-        this.sender = null;
-        this._activity();
-        if (this.queue.length) {
-          this.playNext().catch(nextError => console.error('[audio] piste suivante:', nextError.message));
-        } else {
-          this._scheduleIdleLeave();
-        }
-        try {
-          await this.lastChannel?.send(`❌ Lecture impossible : ${error.message}`);
-        } catch (_) { /* salon supprimé ou permissions manquantes */ }
-      }, song.fallbackQuery);
+      }, failTrack, song.fallbackQuery, { expectedDuration: song.duration });
       if (generation !== this._generation) {
         sender?.stop?.();
         return null;
@@ -374,6 +413,8 @@ class MusicPlayer {
         title: this.current.title,
         thumbnail: this.current.thumbnail || null,
         source: this.current.source || 'youtube',
+        provider: this.current.provider || this.current.source || 'youtube',
+        sourceUrl: this.current.sourceUrl || null,
         duration: Number(this.current.duration) || 0,
       } : null,
       isPlaying: this.isPlaying,

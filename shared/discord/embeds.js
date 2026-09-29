@@ -3,8 +3,14 @@
  * Tous les libellés sont traduits selon la langue (fr, en, es, ar).
  */
 
-const { EmbedBuilder } = require('discord.js');
 const { tr } = require('../i18n/embedI18n');
+const { createThemedEmbed } = require('./embedTheme');
+const { providerPresentation } = require('./providerPresentation');
+
+function setSafeThumbnail(embed, value) {
+  if (typeof value === 'string' && /^https:\/\//i.test(value)) embed.setThumbnail(value);
+  return embed;
+}
 
 function formatDuration(seconds) {
   if (!seconds) return tr('fr').durLabel === 'Durée' ? 'Inconnue' : 'Unknown';
@@ -15,36 +21,32 @@ function formatDuration(seconds) {
 
 function searchEmbed(query, lang = 'fr') {
   const T = tr(lang);
-  return new EmbedBuilder()
+  return createThemedEmbed('primary')
     .setTitle(T.searchTitle)
     .setDescription(T.searchDesc(query))
-    .setColor('#FFA500');
+    .setTimestamp();
 }
 
 function addedEmbed(song, position, remaining, lang = 'fr') {
   const T = tr(lang);
-  return new EmbedBuilder()
+  return setSafeThumbnail(createThemedEmbed('success')
     .setTitle(T.addedTitle)
     .setDescription(`**${song.title}**`)
     .addFields(
       { name: T.posLabel, value: `${position}`, inline: true },
       { name: T.durLabel, value: formatDuration(song.duration), inline: true }
-    )
-    .setThumbnail(song.thumbnail)
-    .setColor('#00FF00');
+    ), song.thumbnail).setTimestamp();
 }
 
 function addedSpotifyEmbed(count, first, remaining, lang = 'fr') {
   const T = tr(lang);
-  return new EmbedBuilder()
+  return setSafeThumbnail(createThemedEmbed('success')
     .setTitle(T.addedSpotifyTitle)
     .setDescription(T.addedSpotifyDesc(count, first.title))
     .addFields(
       { name: T.tracksLabel, value: `${count}`, inline: true },
       { name: T.remainingLabel, value: `${remaining}`, inline: true }
-    )
-    .setThumbnail(first.thumbnail)
-    .setColor('#00FF00');
+    ), first.thumbnail).setTimestamp();
 }
 
 function playingEmbed(song, player, lang = 'fr') {
@@ -52,11 +54,12 @@ function playingEmbed(song, player, lang = 'fr') {
   const remaining = player ? player.queue.length : 0;
   const loopName = player ? T.loopModes[player.loopMode] : 'Off';
   const vol = player ? Math.round((player.volume || 0.5) * 100) : 100;
-  const e = new EmbedBuilder()
+  const source = providerPresentation(song.provider || song.source, song.sourceUrl || song.url);
+  const e = setSafeThumbnail(createThemedEmbed('primary')
     .setTitle(T.playingTitle)
     .setDescription(`**${song.title}**${song.source === 'spotify' ? T.spotifyTag : ''}`)
-    .setThumbnail(song.thumbnail)
-    .setColor('#5865F2');
+    .setAuthor({ name: source.name, iconURL: source.iconURL, ...(source.url ? { url: source.url } : {}) }), song.thumbnail);
+  if (source.url) e.setURL(source.url);
   const fields = [
     { name: T.durLabel, value: formatDuration(song.duration), inline: true },
     { name: T.remainingLabel, value: `${remaining}`, inline: true },
@@ -71,26 +74,26 @@ function playingEmbed(song, player, lang = 'fr') {
 
 function endedEmbed(lang = 'fr') {
   const T = tr(lang);
-  return new EmbedBuilder()
+  return createThemedEmbed('neutral')
     .setTitle(T.endedTitle)
     .setDescription(T.endedDesc)
-    .setColor('#808080');
+    .setTimestamp();
 }
 
 function errorEmbed(message, lang = 'fr') {
   const T = tr(lang);
-  return new EmbedBuilder()
+  return createThemedEmbed('danger')
     .setTitle(T.errorTitle)
     .setDescription(String(message))
-    .setColor('#FF0000');
+    .setTimestamp();
 }
 
 function notFoundEmbed(lang = 'fr') {
   const T = tr(lang);
-  return new EmbedBuilder()
+  return createThemedEmbed('danger')
     .setTitle(T.notFoundTitle || '❌ Son introuvable')
     .setDescription(T.notFoundDesc || 'Je n\'ai pas pu trouver votre son.')
-    .setColor('#FF0000');
+    .setTimestamp();
 }
 
 function queueEmbed(player, prefix, lang = 'fr') {
@@ -109,10 +112,9 @@ function queueEmbed(player, prefix, lang = 'fr') {
       lines.push(T.queueMore(player.queue.length - 10));
     }
   }
-  const e = new EmbedBuilder()
+  const e = createThemedEmbed('primary')
     .setTitle(T.queueTitle)
     .setDescription(lines.join('\n'))
-    .setColor('#0099FF')
     .addFields(
       { name: T.volumeLabel, value: `${player.getQueueInfo().volume}%`, inline: true },
       { name: T.loopLabel, value: T.loopModes[player.loopMode], inline: true }
@@ -123,21 +125,22 @@ function queueEmbed(player, prefix, lang = 'fr') {
 function nowEmbed(player, lang = 'fr') {
   const T = tr(lang);
   if (!player.current) {
-    return new EmbedBuilder()
+    return createThemedEmbed('neutral')
       .setTitle(T.nowTitle)
       .setDescription(T.nowNone)
-      .setColor('#808080');
+      .setTimestamp();
   }
   const s = player.current;
-  return new EmbedBuilder()
+  const source = providerPresentation(s.provider || s.source, s.sourceUrl || s.url);
+  const embed = setSafeThumbnail(createThemedEmbed('primary')
     .setTitle(T.nowTitle)
     .setDescription(`**${s.title}**${s.source === 'spotify' ? T.spotifyTag : ''}`)
     .addFields(
       { name: T.durLabel, value: formatDuration(s.duration), inline: true },
       { name: T.remainingLabel, value: `${player.queue.length}`, inline: true }
-    )
-    .setThumbnail(s.thumbnail)
-    .setColor('#0000FF');
+    ).setAuthor({ name: source.name, iconURL: source.iconURL, ...(source.url ? { url: source.url } : {}) }), s.thumbnail);
+  if (source.url) embed.setURL(source.url);
+  return embed.setTimestamp();
 }
 
 module.exports = {

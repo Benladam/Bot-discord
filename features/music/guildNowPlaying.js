@@ -3,8 +3,11 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder,
+  MessageFlags,
 } = require('discord.js');
+const { createThemedEmbed } = require('../../shared/discord/embedTheme');
+const { providerPresentation } = require('../../shared/discord/providerPresentation');
+const { getWebPanelPublicUrl } = require('../web/server');
 
 const SETTING_KEY = 'musicNowPlayingMessage';
 const LOOP_LABELS = ['Désactivée', 'Titre', 'File'];
@@ -12,8 +15,7 @@ const LOOP_LABELS = ['Désactivée', 'Titre', 'File'];
 function statusEmbed(state, guildName = '') {
   const song = state?.isPlaying ? state.current : null;
   if (!song) {
-    return new EmbedBuilder()
-      .setColor('#808080')
+    return createThemedEmbed('neutral')
       .setTitle('⏹️ Aucune musique en cours')
       .setDescription('Le lecteur de ce serveur est arrêté ou en attente.')
       .setFooter({ text: 'Statut musical propre à ce serveur' });
@@ -21,20 +23,21 @@ function statusEmbed(state, guildName = '') {
 
   const title = String(song.title || 'Musique inconnue').replace(/[\r\n]+/g, ' ').slice(0, 300);
   const loop = LOOP_LABELS[Math.max(0, Math.min(2, Number(state.loopMode) || 0))];
-  const embed = new EmbedBuilder()
-    .setColor(state.isPaused ? '#FFA500' : '#5865F2')
-    .setTitle(state.isPaused ? '⏸️ Lecture en pause' : '🎵 Lecture en cours')
-    .setDescription(`**${title}**`)
+  const source = providerPresentation(song.provider || song.source, song.sourceUrl || song.url);
+  const embed = createThemedEmbed(state.isPaused ? 'warning' : 'primary')
+    .setAuthor({ name: `${source.name} · ${state.isPaused ? 'En pause' : 'Lecture en cours'}`, iconURL: source.iconURL, ...(source.url ? { url: source.url } : {}) })
+    .setTitle(`${state.isPaused ? '⏸️' : '🎶'} ${title}`)
     .setFooter({ text: `Lecteur musical de ${String(guildName || 'ce serveur').slice(0, 100)}` });
   const fields = [];
-  if (state.voiceChannelName) fields.push({ name: '🔊 Salon vocal', value: String(state.voiceChannelName).slice(0, 100), inline: true });
-  fields.push({ name: '📜 File restante', value: String(Math.max(0, Number(state.queueLength) || 0)), inline: true });
   if (state.addedBy) fields.push({ name: '👤 Ajouté par', value: String(state.addedBy).slice(0, 100), inline: true });
-  fields.push({ name: '🔁 Boucle', value: loop, inline: true });
+  if (state.voiceChannelName) fields.push({ name: '🔊 Salon vocal', value: String(state.voiceChannelName).slice(0, 100), inline: true });
+  fields.push({ name: '📜 File', value: `${Math.max(0, Number(state.queueLength) || 0)} titre(s)`, inline: true });
   fields.push({ name: '🔉 Volume', value: `${Math.max(0, Math.min(100, Number(state.volume) || 0))}%`, inline: true });
+  fields.push({ name: '🔁 Répétition', value: loop, inline: true });
   if (Number(song.duration) > 0) fields.push({ name: '⏱️ Durée', value: formatDuration(song.duration), inline: true });
   embed.addFields(fields);
   if (song.thumbnail && /^https:\/\//i.test(String(song.thumbnail))) embed.setThumbnail(song.thumbnail);
+  if (source.url) embed.setURL(source.url);
   return embed;
 }
 
@@ -53,18 +56,30 @@ function controlComponents(guildId, state = {}) {
     .setStyle(style)
     .setDisabled(disabled);
 
-  return [new ActionRowBuilder().addComponents(
+  const controls = [new ActionRowBuilder().addComponents(
     button('pause', state.isPaused ? 'Reprendre' : 'Pause', state.isPaused ? '▶️' : '⏸️', ButtonStyle.Primary),
     button('skip', 'Suivant', '⏭️', ButtonStyle.Secondary),
     button('stop', 'Stop', '⏹️', ButtonStyle.Danger),
     button('loop', `Boucle · ${LOOP_LABELS[loopMode]}`, loopMode === 1 ? '🔂' : '🔁', ButtonStyle.Secondary),
     button('queue', `File · ${Math.max(0, Number(state.queueLength) || 0)}`, '📜', ButtonStyle.Secondary),
   )];
+  const dashboardUrl = getWebPanelPublicUrl();
+  const dashboard = dashboardUrl
+    ? new URL(dashboardUrl)
+    : null;
+  if (dashboard) dashboard.searchParams.set('guild', String(guildId));
+  const dashboardButton = dashboard
+    ? new ButtonBuilder().setLabel('Dashboard').setEmoji({ name: '🎛️' }).setStyle(ButtonStyle.Link).setURL(dashboard.toString())
+    : new ButtonBuilder().setCustomId(`musicctl:${guildId}:dashboard`).setLabel('Dashboard').setEmoji({ name: '🎛️' }).setStyle(ButtonStyle.Secondary);
+  controls.push(new ActionRowBuilder().addComponents(
+    button('shuffle', 'Mélanger', '🔀', ButtonStyle.Secondary, Number(state.queueLength) < 2),
+    dashboardButton,
+  ));
+  return controls;
 }
 
 function finishedQueueEmbed(guildName = '') {
-  return new EmbedBuilder()
-    .setColor('#F0B232')
+  return createThemedEmbed('warning')
     .setTitle('📜 File d’attente terminée')
     .setDescription('Il n’y a plus de chansons dans la file. Vous pouvez en ajouter d’autres avec `/play`.')
     .setFooter({ text: `Merci d’avoir écouté${guildName ? ` sur ${String(guildName).slice(0, 100)}` : ''} 🎶` })
@@ -79,8 +94,7 @@ function queueEmbed(player) {
     lines.push(`**${index + 1}.** ${String(song.title || 'Musique inconnue').slice(0, 160)}`);
   });
   if (player.queue.length > 10) lines.push(`… et ${player.queue.length - 10} autre(s) titre(s).`);
-  return new EmbedBuilder()
-    .setColor('#5865F2')
+  return createThemedEmbed('primary')
     .setTitle(`📜 File d’attente · ${player.queue.length} titre(s)`)
     .setDescription(lines.join('\n').slice(0, 4000));
 }
@@ -153,6 +167,9 @@ class GuildNowPlayingManager {
     const active = Boolean(state?.isPlaying && state.current);
     if (active) await this._clearFinishedNotice(guildId);
     const saved = this.database.getGuildSetting(guildId, SETTING_KEY, null);
+    // La carte durable représente seulement une chanson en lecture. Ne pas
+    // toucher à l’avis « file terminée », qui possède son propre délai de 30 s.
+    if (!active && saved?.finishedNotice) return true;
     let channel = saved?.channelId ? await this._channelFromId(saved.channelId) : null;
     if (!channel || (channel.guildId && String(channel.guildId) !== guildId)) channel = player.lastChannel || null;
     if (!channel || (channel.guildId && String(channel.guildId) !== guildId)) return false;
@@ -162,6 +179,18 @@ class GuildNowPlayingManager {
       if (typeof channel.messages?.fetch === 'function') {
         message = await channel.messages.fetch(String(saved.messageId)).catch(() => null);
       }
+    }
+    if (!active) {
+      if (message && typeof message.delete === 'function') {
+        await Promise.resolve(message.delete()).catch(() => {});
+      }
+      if (saved?.messageId) {
+        this.database.setGuildSetting(guildId, SETTING_KEY, {
+          channelId: String(channel.id),
+          messageId: null,
+        });
+      }
+      return false;
     }
     const payload = {
       embeds: [statusEmbed(state, channel.guild?.name)],
@@ -208,7 +237,7 @@ class GuildNowPlayingManager {
         if (typeof statusMessage.edit === 'function') {
           try {
             await statusMessage.edit({
-              content: safeRequesterId ? `<@${safeRequesterId}>` : undefined,
+              content: safeRequesterId ? `🎶 <@${safeRequesterId}> — ta file de musique est terminée.` : undefined,
               embeds: [finishedQueueEmbed(channel.guild?.name)],
               components: [],
               allowedMentions: { parse: [], users: safeRequesterId ? [safeRequesterId] : [] },
@@ -227,7 +256,7 @@ class GuildNowPlayingManager {
 
     if (!noticeMessage && typeof channel.send === 'function') {
       noticeMessage = await channel.send({
-        content: safeRequesterId ? `<@${safeRequesterId}>` : undefined,
+        content: safeRequesterId ? `🎶 <@${safeRequesterId}> — ta file de musique est terminée.` : undefined,
         embeds: [finishedQueueEmbed(channel.guild?.name)],
         components: [],
         allowedMentions: { parse: [], users: safeRequesterId ? [safeRequesterId] : [] },
@@ -304,27 +333,46 @@ class GuildNowPlayingManager {
     if (!interaction.customId?.startsWith('musicctl:')) return false;
     const [, buttonGuildId, action] = interaction.customId.split(':');
     if (!buttonGuildId || String(interaction.guildId || '') !== buttonGuildId) {
-      await interaction.reply({ content: 'Ce contrôle musical n’appartient pas à ce serveur.', ephemeral: true });
+      await interaction.reply({ content: 'Ce contrôle musical n’appartient pas à ce serveur.', flags: MessageFlags.Ephemeral });
       return true;
     }
     const player = getPlayer(interaction.guildId);
+    if (action === 'dashboard') {
+      await interaction.reply({
+        content: getWebPanelPublicUrl()
+          ? 'Le lien du Dashboard est disponible dans le bouton « Dashboard ».'
+          : 'Le panneau doit être publié sur le serveur et configuré avec WEB_PUBLIC_URL et WEB_ADMIN_TOKEN.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
     const memberVoiceId = interaction.member?.voice?.channelId || interaction.member?.voice?.channel?.id;
     const botVoiceId = player.connection?.connected ? player.connection.channelId : null;
     if (!memberVoiceId || !botVoiceId || String(memberVoiceId) !== String(botVoiceId)) {
-      await interaction.reply({ content: 'Rejoins le même salon vocal que le bot pour utiliser ces contrôles.', ephemeral: true });
+      await interaction.reply({ content: 'Rejoins le même salon vocal que le bot pour utiliser ces contrôles.', flags: MessageFlags.Ephemeral });
       return true;
     }
 
     if (action === 'queue') {
-      await interaction.reply({ embeds: [queueEmbed(player)], ephemeral: true });
+      await interaction.reply({ embeds: [queueEmbed(player)], flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (action === 'shuffle') {
+      if (player.queue.length < 2) {
+        await interaction.reply({ content: 'Ajoute au moins deux titres avant de mélanger la file.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await interaction.deferUpdate();
+      player.shuffleQueue();
+      await player._activity?.();
       return true;
     }
     if (!player.current || !player.isPlaying) {
-      await interaction.reply({ content: 'Aucune musique n’est en cours sur ce serveur.', ephemeral: true });
+      await interaction.reply({ content: 'Aucune musique n’est en cours sur ce serveur.', flags: MessageFlags.Ephemeral });
       return true;
     }
     if (!['pause', 'skip', 'stop', 'loop'].includes(action)) {
-      await interaction.reply({ content: 'Contrôle musical inconnu.', ephemeral: true });
+      await interaction.reply({ content: 'Contrôle musical inconnu.', flags: MessageFlags.Ephemeral });
       return true;
     }
 
@@ -336,7 +384,7 @@ class GuildNowPlayingManager {
     } else if (action === 'skip') {
       await player.skip();
     } else if (action === 'stop') {
-      await player.destroy();
+      await player.stop();
     } else if (action === 'loop') {
       player.loopMode = (Number(player.loopMode) + 1) % 3;
       await player._activity?.();

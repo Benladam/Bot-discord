@@ -26,6 +26,7 @@ module.exports = {
     ],
   },
   slash: true,
+  helpCategory: 'music',
   async autocomplete(interaction, deps) { return playCommand.autocomplete(interaction, deps); },
 
   async execute(ctx, args, deps) {

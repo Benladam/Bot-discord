@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { createThemedEmbed } = require('../shared/discord/embedTheme');
 const { resolveUser, isSlash } = require('../shared/discord/commandHelpers');
 
 module.exports = {
@@ -11,7 +11,7 @@ module.exports = {
     const user = await resolveUser(ctx, args, 'utilisateur');
     if (!user) throw new Error('Utilisateur introuvable.');
     const image = user.displayAvatarURL({ size: 1024 });
-    const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(`Avatar de ${user.username}`).setImage(image).setURL(image);
+    const embed = createThemedEmbed('primary').setTitle(`🖼️ Avatar de ${user.username}`).setImage(image).setURL(image);
     if (isSlash(ctx)) return ctx.reply({ embeds: [embed], ephemeral: false });
     return ctx.reply({ embeds: [embed] });
   },
