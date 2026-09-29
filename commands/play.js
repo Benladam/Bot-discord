@@ -4,13 +4,15 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelect
 const { resolveQuery } = require('../utils/resolve');
 const { cleanMediaQuery } = require('../utils/mediaQuery');
 const { searchCatalog, getArtistAlbums, getWorldTopTracks } = require('../utils/musicCatalog');
-const { selectAutocompleteItems, toAutocompleteChoice, toSearchFallbackChoice } = require('../utils/catalogAutocomplete');
+const { selectAutocompleteItems, toAutocompleteChoice, toSearchFallbackChoice, WORLD_CHART_FALLBACK_VALUE } = require('../utils/catalogAutocomplete');
 const { getMusicInputInfo, formatMusicAttempt, resolveMusicLinkMetadata, cleanLogText, sanitizeDiagnosticText } = require('../utils/musicLinkMetadata');
 const embeds = require('../utils/embeds');
 const { tr } = require('../utils/embedI18n');
 
 const PAGE_SIZE = 25;
-const AUTOCOMPLETE_TIMEOUT_MS = 1_800;
+// Répond tôt pour garder une marge sous le délai d’interaction Discord,
+// surtout lorsque l’hôte distant a une forte latence réseau.
+const AUTOCOMPLETE_TIMEOUT_MS = 1_200;
 const sessions = new Map();
 const SESSION_TTL = 10 * 60 * 1000;
 const AUTOCOMPLETE_TIMEOUT = Symbol('autocomplete timeout');
@@ -87,6 +89,16 @@ function takeLinkReference(value, ctx) {
     throw new Error('Cette référence de lien a expiré. Relance `/play` avec le lien ou le titre.');
   }
   return entry.query;
+}
+
+function autocompleteFallback(interaction) {
+  const focused = interaction.options.getFocused().toString().trim();
+  if (!focused) return [toSearchFallbackChoice('', { worldChart: true })];
+  const inputInfo = getMusicInputInfo(focused);
+  if (inputInfo.kind === 'link') {
+    return [makeLinkReference(focused, interaction, inputInfo.providerLabel)];
+  }
+  return [toSearchFallbackChoice(focused)];
 }
 
 function withinAutocompleteBudget(task, timeoutMs) {
@@ -254,6 +266,7 @@ module.exports = {
   },
   slash: true,
   handleCatalogInteraction,
+  autocompleteFallback,
 
   async autocomplete(interaction, deps = {}) {
     const query = interaction.options.getFocused().toString().trim();
@@ -313,12 +326,13 @@ module.exports = {
 
   async execute(ctx, args, deps) {
     const typedInput = args.join(' ').trim();
+    const worldChartFallback = typedInput === WORLD_CHART_FALLBACK_VALUE;
     let referencedInput = null;
-    try { referencedInput = takeLinkReference(typedInput, ctx); }
+    try { referencedInput = worldChartFallback ? null : takeLinkReference(typedInput, ctx); }
     catch (error) {
       return ctx.reply({ embeds: [embeds.errorEmbed(error.message)], ephemeral: isSlash(ctx) });
     }
-    const rawInput = referencedInput || typedInput;
+    const rawInput = worldChartFallback ? '' : (referencedInput || typedInput);
     const query = cleanMediaQuery(rawInput);
     const lang = deps.langFor ? deps.langFor(userIdOf(ctx), ctx.guild?.id) : 'fr';
     loggerCall(deps, 'info', `[play] ${contextLabel(ctx)} ${formatMusicAttempt(query)}`);

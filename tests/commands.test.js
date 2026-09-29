@@ -122,6 +122,17 @@ test('/play sans query ouvre le Top 25 mondial au lieu de rendre le champ obliga
   assert.equal(response.embeds[0].data.title, '🌍 Top 25 mondial');
   assert.equal(response.components.length, 2);
   assert.equal(response.components[0].components[0].toJSON().options.length, 25);
+
+  const { WORLD_CHART_FALLBACK_VALUE, toSearchFallbackChoice } = require('../utils/catalogAutocomplete');
+  const fallback = toSearchFallbackChoice('', { worldChart: true });
+  assert.equal(fallback.value, WORLD_CHART_FALLBACK_VALUE);
+  assert.deepEqual(playCommand.autocompleteFallback({ options: { getFocused: () => '' } }), [fallback]);
+  const fallbackCtx = { ...ctx, async editReply(payload) { response = payload; return payload; } };
+  await playCommand.execute(fallbackCtx, [fallback.value], {
+    getWorldTopTracks: async () => items,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  assert.equal(response.embeds[0].data.title, '🌍 Top 25 mondial');
 });
 
 test('l’autocomplétion répond avec un choix de secours si un fournisseur dépasse le délai', async () => {
@@ -149,7 +160,22 @@ test('le Top mondial en retard renvoie un choix de secours au lieu de laisser ex
     getWorldTopTracks: () => new Promise(() => {}),
   });
 
-  assert.deepEqual(response, [{ name: '🌍 Rechercher « Top mondial »', value: 'top mondial' }]);
+  assert.deepEqual(response, [{ name: '🌍 Rechercher « Top mondial »', value: 'music-chart:world-top' }]);
+});
+
+test('une exception d’autocomplétion du Top mondial renvoie aussi une option réessayable', async () => {
+  const playCommand = require('../commands/play');
+  let response;
+  await playCommand.autocomplete({
+    options: { getFocused: () => '' },
+    respond: async (choices) => { response = choices; },
+  }, {
+    autocompleteTimeoutMs: 20,
+    getWorldTopTracks: async () => { throw new Error('API indisponible'); },
+  });
+  assert.equal(response.length, 1);
+  assert.equal(response[0].name, '🌍 Rechercher « Top mondial »');
+  assert.equal(response[0].value, 'music-chart:world-top');
 });
 
 test('l’autocomplétion d’un lien YouTube recherche le titre et affiche les noms, pas les URL', async () => {

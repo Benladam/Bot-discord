@@ -23,6 +23,7 @@ const { createUpdater } = require('./utils/updater');
 const { createMinecraftBridge } = require('./utils/minecraftBridge');
 const { PresenceManager } = require('./utils/presenceManager');
 const { GuildNowPlayingManager } = require('./utils/guildNowPlaying');
+const { sanitizeDiagnosticText } = require('./utils/musicLinkMetadata');
 
 const { setupConsole } = require('./console-commands');
 const langStore = require('./langStore');
@@ -309,8 +310,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (cmd && typeof cmd.autocomplete === 'function') {
       try { await cmd.autocomplete(interaction, deps); }
       catch (e) {
-        Logger.error(`Erreur autocomplétion /${interaction.commandName}: ${e.message}`);
-        if (!interaction.responded) await interaction.respond([]).catch(() => {});
+        Logger.error(`Erreur autocomplétion /${interaction.commandName}: ${sanitizeDiagnosticText(e.stack || e.message)}`);
+        if (!interaction.responded) {
+          try {
+            const fallback = cmd.autocompleteFallback?.(interaction) || [];
+            await interaction.respond(Array.isArray(fallback) ? fallback : [fallback]);
+          } catch (fallbackError) {
+            Logger.error(`Réponse de secours autocomplétion /${interaction.commandName} impossible: ${sanitizeDiagnosticText(fallbackError.message)}`);
+          }
+        }
       }
     } else if (!interaction.responded) {
       await interaction.respond([]).catch(() => {});

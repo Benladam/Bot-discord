@@ -1,4 +1,5 @@
 const MAX_CHOICES = 25;
+const WORLD_CHART_FALLBACK_VALUE = 'music-chart:world-top';
 
 function formatDuration(value) {
   const seconds = Math.floor(Number(value) || 0);
@@ -78,7 +79,9 @@ function toAutocompleteChoice(item) {
 
 function toSearchFallbackChoice(query, { worldChart = false } = {}) {
   const rawValue = String(worldChart ? 'top mondial' : query).trim();
-  const value = (/^https?:\/\//i.test(rawValue) ? 'lien musical' : rawValue).slice(0, 100) || 'top mondial';
+  const value = worldChart
+    ? WORLD_CHART_FALLBACK_VALUE
+    : (/^https?:\/\//i.test(rawValue) ? 'lien musical' : rawValue).slice(0, 100) || 'recherche';
   const name = worldChart
     ? '🌍 Rechercher « Top mondial »'
     : `🔎 Rechercher « ${value} »`;
@@ -91,4 +94,5 @@ module.exports = {
   selectAutocompleteItems,
   toAutocompleteChoice,
   toSearchFallbackChoice,
+  WORLD_CHART_FALLBACK_VALUE,
 };
