@@ -1,6 +1,5 @@
 /** Envoi audio maison : yt-dlp stdout -> FFmpeg Ogg/Opus -> RTP/UDP. */
 const fs = require('fs');
-const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('child_process');
 const { PassThrough } = require('node:stream');
@@ -78,6 +77,32 @@ function bestYtDlpError(errors, fallback) {
   return fallback;
 }
 
+function ytDlpSetupFailure(error, action) {
+  if (error?.code === 'ENOSPC') {
+    const wrapped = new Error(
+      `Ressource temporaire indisponible (ENOSPC) pendant ${action} yt-dlp. Vérifie l’espace libre et les quotas du volume de données et du dossier temporaire du conteneur.`,
+    );
+    wrapped.code = 'ENOSPC';
+    wrapped.resourceExhausted = true;
+    wrapped.cause = error;
+    return wrapped;
+  }
+  return error;
+}
+
+function ytDlpResourceError(message, code) {
+  const error = new Error(message || 'Ressources temporaires indisponibles (ENOSPC) pour yt-dlp.');
+  error.code = code || 'ENOSPC';
+  error.resourceExhausted = error.code === 'ENOSPC';
+  return error;
+}
+
+function getYtDlpCookieTempDirectory(options = {}) {
+  return options.cookieTempDirectory || path.join(
+    getDataDirectory({ env: options.env || process.env }), '.cache', 'yt-dlp', 'cookies',
+  );
+}
+
 function sanitizeYtDlpDiagnostic(value) {
   return String(value || '')
     .replace(/\b(set-cookie|cookie|authorization|proxy-authorization)\s*:\s*[^\r\n]*/gi, '$1: [redacted]')
@@ -102,9 +127,13 @@ function describeCookiesFile(cookiesPath) {
   }
 }
 
-function createTemporaryCookiesCopy(sourcePath) {
+function createTemporaryCookiesCopy(sourcePath, temporaryRoot = path.join(
+  getDataDirectory(), '.cache', 'yt-dlp', 'cookies',
+)) {
   if (!sourcePath) return null;
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-discord-ytdlp-cookies-'));
+  fs.mkdirSync(temporaryRoot, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') fs.chmodSync(temporaryRoot, 0o700);
+  const directory = fs.mkdtempSync(path.join(temporaryRoot, 'session-'));
   try {
     if (process.platform !== 'win32') fs.chmodSync(directory, 0o700);
     const workingPath = path.join(directory, 'cookies.txt');
@@ -372,14 +401,15 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
       resolve(result);
     };
     try {
-      cookiesCopy = createTemporaryCookiesCopy(configuredCookiesPath(options));
+      cookiesCopy = createTemporaryCookiesCopy(configuredCookiesPath(options), getYtDlpCookieTempDirectory(options));
       options = { ...options, cookiesPath: cookiesCopy?.path || '' };
       spawnAttempted = true;
       child = spawnImpl(command, buildYtDlpSearchArgs(preArgs, query, options), { windowsHide: true });
     } catch (error) {
       childClosed = true;
       cleanupCookiesCopy();
-      finish({ items: [], error: error.code === 'ENOENT' ? error.message : `Impossible de préparer la recherche yt-dlp (${error.code || 'erreur'}).`, missing: spawnAttempted && error.code === 'ENOENT', skipped: !spawnAttempted });
+      const failure = ytDlpSetupFailure(error, 'la recherche');
+      finish({ items: [], error: failure.code === 'ENOENT' ? failure.message : failure.resourceExhausted ? failure.message : `Impossible de préparer la recherche yt-dlp (${failure.code || 'erreur'}).`, code: failure.code, resourceExhausted: failure.resourceExhausted, missing: spawnAttempted && failure.code === 'ENOENT', skipped: !spawnAttempted });
       return;
     }
     timer = setTimeout(() => {
@@ -397,7 +427,8 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
     child.on('error', (error) => {
       childClosed = true;
       cleanupCookiesCopy();
-      finish({ items: [], error: error.message, missing: error.code === 'ENOENT' });
+      const failure = ytDlpSetupFailure(error, 'la recherche');
+      finish({ items: [], error: failure.message, code: failure.code, resourceExhausted: failure.resourceExhausted, missing: failure.code === 'ENOENT' });
     });
     child.on('close', (code) => {
       childClosed = true;
@@ -426,6 +457,7 @@ async function searchYtDlpCandidates(query, {
   install = ensureManagedYtDlpOnce,
   spawnImpl = spawn,
   cookiesPaths,
+  cookieTempDirectory,
   projectRoot = PROJECT_ROOT,
   env = process.env,
 } = {}) {
@@ -446,6 +478,7 @@ async function searchYtDlpCandidates(query, {
     const result = await runYtDlpSearch(command, args, normalized, spawnImpl, {
       limit: safeLimit,
       cookiesPath: provider === 'youtube' ? cookiesPath : '',
+      cookieTempDirectory,
       playerClient,
       provider,
       searchPrefix,
@@ -454,6 +487,11 @@ async function searchYtDlpCandidates(query, {
       env,
     });
     if (result.items.length) return { items: result.items.slice(0, safeLimit), missing: false };
+    if (result.resourceExhausted) {
+      missingOnly = false;
+      errors.push(result.error);
+      return { items: null, missing: false, resourceExhausted: true, code: result.code, error: result.error };
+    }
     errors.push(result.error);
     if (!result.missing && !result.skipped) missingOnly = false;
     if (provider === 'youtube' && !authCandidate && needsYouTubeAuthentication(result.error)) {
@@ -466,6 +504,7 @@ async function searchYtDlpCandidates(query, {
     for (const cookiesPath of cookieAttempts) {
       const result = await attempt(command, args, cookiesPath);
       if (result.items) return result.items;
+      if (result.resourceExhausted) throw ytDlpResourceError(result.error, result.code);
       if (result.missing) break;
     }
   }
@@ -475,9 +514,11 @@ async function searchYtDlpCandidates(query, {
       for (const cookiesPath of cookieAttempts) {
         const result = await attempt(managed, [], cookiesPath);
         if (result.items) return result.items;
+        if (result.resourceExhausted) throw ytDlpResourceError(result.error, result.code);
         if (result.missing) break;
       }
     } catch (error) {
+      if (error?.resourceExhausted) throw error;
       errors.push(`installation automatique impossible : ${error.message}`);
     }
   }
@@ -531,14 +572,15 @@ function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
     };
     try {
       const sourceCookiesPath = isYouTubeUrl(url) ? configuredCookiesPath(options) : '';
-      cookiesCopy = createTemporaryCookiesCopy(sourceCookiesPath);
+      cookiesCopy = createTemporaryCookiesCopy(sourceCookiesPath, getYtDlpCookieTempDirectory(options));
       options = { ...options, cookiesPath: cookiesCopy?.path || '' };
       spawnAttempted = true;
       child = spawnImpl(command, buildYtDlpArgs(preArgs, url, options), { windowsHide: true });
     } catch (error) {
       childClosed = true;
       cleanupCookiesCopy();
-      finish({ error: error.code === 'ENOENT' ? error.message : `Impossible de préparer le flux yt-dlp (${error.code || 'erreur'}).`, missing: spawnAttempted && error.code === 'ENOENT', skipped: !spawnAttempted });
+      const failure = ytDlpSetupFailure(error, 'le flux');
+      finish({ error: failure.code === 'ENOENT' ? failure.message : failure.resourceExhausted ? failure.message : `Impossible de préparer le flux yt-dlp (${failure.code || 'erreur'}).`, code: failure.code, resourceExhausted: failure.resourceExhausted, missing: spawnAttempted && failure.code === 'ENOENT', skipped: !spawnAttempted });
       return;
     }
 
@@ -558,7 +600,8 @@ function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
     child.on('error', (error) => {
       childClosed = true;
       cleanupCookiesCopy();
-      finish({ error: error.message, missing: error.code === 'ENOENT' });
+      const failure = ytDlpSetupFailure(error, 'le flux');
+      finish({ error: failure.message, code: failure.code, resourceExhausted: failure.resourceExhausted, missing: failure.code === 'ENOENT' });
     });
     child.on('close', (code) => {
       childClosed = true;
@@ -581,6 +624,7 @@ async function streamUrl(url, {
   install = ensureManagedYtDlpOnce,
   spawnImpl = spawn,
   cookiesPaths,
+  cookieTempDirectory,
   projectRoot = PROJECT_ROOT,
   env = process.env,
 } = {}) {
@@ -598,8 +642,9 @@ async function streamUrl(url, {
     : [''];
   for (const [command, args] of candidates) {
     for (const cookiesPath of cookieAttempts) {
-      const result = await runYtDlp(command, args, url, spawnImpl, { cookiesPath, projectRoot, env });
+      const result = await runYtDlp(command, args, url, spawnImpl, { cookiesPath, cookieTempDirectory, projectRoot, env });
       if (result.audioUrl) return result.audioUrl;
+      if (result.resourceExhausted) throw ytDlpResourceError(result.error, result.code);
       errors.push(result.error);
       if (!result.missing && !result.skipped) missingOnly = false;
       if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) {
@@ -613,8 +658,9 @@ async function streamUrl(url, {
     try {
       const managed = await install();
       for (const cookiesPath of cookieAttempts) {
-        const result = await runYtDlp(managed, [], url, spawnImpl, { cookiesPath, projectRoot, env });
+        const result = await runYtDlp(managed, [], url, spawnImpl, { cookiesPath, cookieTempDirectory, projectRoot, env });
         if (result.audioUrl) return result.audioUrl;
+        if (result.resourceExhausted) throw ytDlpResourceError(result.error, result.code);
         errors.push(result.error);
         if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) {
           authCandidate = [managed, [], cookiesPath, result.error];
@@ -622,6 +668,7 @@ async function streamUrl(url, {
         if (result.missing) break;
       }
     } catch (error) {
+      if (error?.resourceExhausted) throw error;
       errors.push(`installation automatique impossible : ${error.message}`);
     }
   }
@@ -632,7 +679,7 @@ async function streamUrl(url, {
     // response when authenticated cookies trigger "page needs to be reloaded".
     if (rejectedCookiesPath && /page needs to be reloaded/i.test(cookieAttemptError)) {
       const alternateClient = await runYtDlp(command, args, url, spawnImpl, {
-        playerClient: 'default,web_embedded', cookiesPath: rejectedCookiesPath, projectRoot, env,
+        playerClient: 'default,web_embedded', cookiesPath: rejectedCookiesPath, cookieTempDirectory, projectRoot, env,
       });
       if (alternateClient.audioUrl) return alternateClient.audioUrl;
       errors.push(alternateClient.error);
@@ -640,7 +687,7 @@ async function streamUrl(url, {
     // Après un rejet explicite des cookies, ne les renvoie pas au client
     // intégré : ils ne feront que répéter l'échec et peuvent être périmés.
     const embedded = await runYtDlp(command, args, url, spawnImpl, {
-      playerClient: 'web_embedded', cookiesPath: '', projectRoot, env,
+      playerClient: 'web_embedded', cookiesPath: '', cookieTempDirectory, projectRoot, env,
     });
     if (embedded.audioUrl) return embedded.audioUrl;
     errors.push(embedded.error);
@@ -695,14 +742,15 @@ function runYtDlpPipe(command, preArgs, url, spawnImpl = spawn, options = {}) {
       if (!audioStream.destroyed) audioStream.destroy();
     };
     try {
-      cookiesCopy = createTemporaryCookiesCopy(configuredCookiesPath(options));
+      cookiesCopy = createTemporaryCookiesCopy(configuredCookiesPath(options), getYtDlpCookieTempDirectory(options));
       options = { ...options, cookiesPath: cookiesCopy?.path || '', outputToStdout: true };
       child = spawnImpl(command, buildYtDlpArgs(preArgs, url, options), { windowsHide: true });
       child.stdout.pipe(audioStream);
     } catch (error) {
       childClosed = true;
       cleanupCookiesCopy();
-      finish({ error: error.message, diagnostic: error.message, missing: error.code === 'ENOENT' });
+      const failure = ytDlpSetupFailure(error, 'le flux');
+      finish({ error: failure.message, diagnostic: failure.message, code: failure.code, resourceExhausted: failure.resourceExhausted, missing: failure.code === 'ENOENT' });
       return;
     }
     timer = setTimeout(() => {
@@ -721,7 +769,10 @@ function runYtDlpPipe(command, preArgs, url, spawnImpl = spawn, options = {}) {
     child.on('error', (error) => {
       childClosed = true;
       cleanupCookiesCopy();
-      if (!started) finish({ error: error.message, diagnostic: error.message, missing: error.code === 'ENOENT' });
+      if (!started) {
+        const failure = ytDlpSetupFailure(error, 'le flux');
+        finish({ error: failure.message, diagnostic: failure.message, code: failure.code, resourceExhausted: failure.resourceExhausted, missing: failure.code === 'ENOENT' });
+      }
       else audioStream.destroy(error);
     });
     child.on('close', (code, signal) => {
@@ -749,6 +800,7 @@ async function streamYtDlp(url, {
   install = ensureManagedYtDlpOnce,
   spawnImpl = spawn,
   cookiesPaths,
+  cookieTempDirectory,
   projectRoot = PROJECT_ROOT,
   env = process.env,
 } = {}) {
@@ -766,11 +818,13 @@ async function streamYtDlp(url, {
   const attempt = async (command, args, cookiesPath, playerClient) => {
     const result = await runYtDlpPipe(command, args, url, spawnImpl, {
       cookiesPath: youtubeUrl ? cookiesPath : '',
+      cookieTempDirectory,
       playerClient,
       projectRoot,
       env,
     });
     if (result.stream) return result.stream;
+    if (result.resourceExhausted) throw ytDlpResourceError(result.error, result.code);
     errors.push(result.error);
     if (!result.missing) missingOnly = false;
     if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.diagnostic || result.error)) {
@@ -794,6 +848,7 @@ async function streamYtDlp(url, {
         if (stream) return stream;
       }
     } catch (error) {
+      if (error?.resourceExhausted) throw error;
       errors.push(`installation automatique impossible : ${error.message}`);
     }
   }

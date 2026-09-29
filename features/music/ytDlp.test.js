@@ -103,6 +103,7 @@ test('recherche YouTube installe le binaire géré après ENOENT et conserve le 
     const results = await searchYouTubeCandidates('Artiste - Titre', {
       candidates: [['yt-dlp', []]],
       cookiesPaths: [cookiePath],
+      cookieTempDirectory: path.join(cookieDir, 'working-cookies'),
       install: async () => { installs++; return 'managed-yt-dlp'; },
       spawnImpl: fakeSpawn,
       limit: 1,
@@ -113,11 +114,68 @@ test('recherche YouTube installe le binaire géré après ENOENT et conserve le 
     assert.ok(calls[1].args.includes('ytsearch1:Artiste - Titre'));
     assert.equal(cookieCopies.length, 2);
     assert.ok(cookieCopies.every(copy => copy.path !== cookiePath && copy.contents === cookieContents));
+    assert.ok(cookieCopies.every(copy => copy.path.startsWith(path.join(cookieDir, 'working-cookies'))));
     assert.notEqual(cookieCopies[0].path, cookieCopies[1].path);
     assert.equal(await fs.readFile(cookiePath, 'utf8'), cookieContents);
   } finally {
     await fs.rm(cookieDir, { recursive: true, force: true });
   }
+});
+
+test('une erreur ENOSPC arrête immédiatement les essais yt-dlp et donne une indication utile', async () => {
+  let spawnCalls = 0;
+  let installCalls = 0;
+  const spawnImpl = () => {
+    spawnCalls++;
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    setImmediate(() => {
+      const error = new Error('spawn yt-dlp ENOSPC');
+      error.code = 'ENOSPC';
+      child.emit('error', error);
+    });
+    return child;
+  };
+
+  await assert.rejects(searchYouTubeCandidates('Artiste - Titre', {
+    candidates: [['yt-dlp', []], ['python3', ['-m', 'yt_dlp']], ['fallback', []]],
+    cookiesPaths: [],
+    install: async () => { installCalls++; throw new Error('ne doit pas installer'); },
+    spawnImpl,
+  }), error => {
+    assert.equal(error.code, 'ENOSPC');
+    assert.match(error.message, /volume de données et du dossier temporaire/);
+    return true;
+  });
+  assert.equal(spawnCalls, 1);
+  assert.equal(installCalls, 0);
+});
+
+test('une erreur ENOSPC sur un flux ne déclenche pas un second lancement yt-dlp', async () => {
+  let spawnCalls = 0;
+  const spawnImpl = () => {
+    spawnCalls++;
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    setImmediate(() => {
+      const error = new Error('spawn yt-dlp ENOSPC');
+      error.code = 'ENOSPC';
+      child.emit('error', error);
+    });
+    return child;
+  };
+
+  await assert.rejects(streamUrl('https://www.youtube.com/watch?v=test', {
+    candidates: [['yt-dlp', []], ['fallback', []]],
+    cookiesPaths: [],
+    install: async () => { throw new Error('ne doit pas installer'); },
+    spawnImpl,
+  }), error => error.code === 'ENOSPC' && error.resourceExhausted);
+  assert.equal(spawnCalls, 1);
 });
 
 test('une erreur YouTube utile n’est pas masquée par un binaire yt-dlp absent', async () => {
@@ -280,6 +338,7 @@ test('journalise la cause du repli YouTube en masquant cookies, jetons et URLs',
     await assert.rejects(streamUrl('https://youtube.com/watch?v=test', {
       candidates: [['yt-dlp', []]],
       cookiesPaths: [cookiesPath],
+      cookieTempDirectory: path.join(dataDir, 'working-cookies'),
       install: async () => { throw new Error('should not install'); },
       spawnImpl: fakeSpawn,
     }), error => error.code === 'YOUTUBE_AUTH_BLOCKED');
@@ -353,6 +412,7 @@ test('ne renvoie pas un cookie refusé dans le dernier essai YouTube sans compte
     const audioUrl = await streamUrl('https://youtube.com/watch?v=test', {
       candidates: [['yt-dlp', []]],
       cookiesPaths: [cookiesPath],
+      cookieTempDirectory: path.join(directory, 'working-cookies'),
       install: async () => { throw new Error('should not install'); },
       spawnImpl: fakeSpawn,
     });
@@ -400,6 +460,7 @@ test('essaie le deuxième fichier cookies quand le premier compte est refusé', 
     const audioUrl = await streamUrl('https://youtube.com/watch?v=test', {
       candidates: [['yt-dlp', []]],
       cookiesPaths: [first, second],
+      cookieTempDirectory: path.join(cookieDir, 'working-cookies'),
       install: async () => { throw new Error('should not install'); },
       spawnImpl: fakeSpawn,
     });
