@@ -23,5 +23,6 @@ RUN npm install
 # Copier le reste du code
 COPY . .
 
-# Le conteneur est un worker Discord : il n'a pas besoin d'ouvrir un port HTTP.
+# HTTP : health check, pont Minecraft et panneau web authentifié partagent le port PORT.
+EXPOSE 8080
 CMD ["node", "supervisor.js"]

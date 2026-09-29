@@ -19,7 +19,7 @@ const DISCORD_ID_PATTERN = /^[0-9]{17,20}$/;
 const MAX_FRAME_BYTES = 16 * 1024;
 const REQUEST_TIMEOUT_MS = 20_000;
 
-function createMinecraftBridge({ client, getPlayer, database, logger = console }) {
+function createMinecraftBridge({ client, getPlayer, database, logger = console, handleWebRequest }) {
   const token = String(process.env.MINECRAFT_BRIDGE_TOKEN || '').trim();
   const guildId = String(process.env.MINECRAFT_GUILD_ID || '').trim();
   const minecraftChannelId = String(process.env.MINECRAFT_CHANNEL_ID || '').trim();
@@ -46,6 +46,10 @@ function createMinecraftBridge({ client, getPlayer, database, logger = console }
       });
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(body);
+      return;
+    }
+    if (typeof handleWebRequest === 'function') {
+      void handleWebRequest(request, response);
       return;
     }
     response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });

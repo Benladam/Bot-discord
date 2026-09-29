@@ -92,7 +92,12 @@ cp .env.example .env
 | `MINECRAFT_GUILD_ID` | pont Minecraft | ID du serveur Discord associé au serveur Minecraft |
 | `MINECRAFT_BRIDGE_TOKEN` | pont Minecraft | Secret partagé d'au moins 32 caractères |
 | `MINECRAFT_CHANNEL_ID` | pont Minecraft | Salon réservé aux changelogs Minecraft publiés après un redémarrage réussi |
-| `PORT` | pont Minecraft | Port attribué au WebSocket du bot sur Kinetic (`SERVER_PORT` est aussi reconnu) |
+| `PORT` | hébergement Kinetic | Port HTTP attribué au service; `/healthz`, le panneau web et le pont WebSocket Minecraft le partagent (`SERVER_PORT` est prioritaire) |
+| `WEB_ADMIN_TOKEN` | oui pour le panneau | Jeton d’accès d’au moins 32 octets; génère-en un aléatoire et garde-le uniquement dans la configuration privée du serveur |
+| `WEB_PUBLIC_URL` | non | URL publique HTTPS du panneau, par exemple `https://BotHeuss.fr`; utilisée par `/controller` et `/link` |
+| `WEB_BASE_PATH` | non | Préfixe de chemin facultatif si le reverse proxy publie le panneau sous un sous-chemin |
+| `WEB_COOKIE_SECURE` | non | Utilise des cookies HTTPS `Secure` (recommandé avec un proxy SSL) |
+| `WEB_TRUST_PROXY` | non | Active la lecture des en-têtes transmis par le proxy; à activer seulement si le proxy remplace ces en-têtes |
 | `YTDLP_PATH` | non | Chemin vers `yt-dlp` si absent du PATH |
 | `YOUTUBE_COOKIES_PATH` | non | Un ou plusieurs chemins relatifs à la racine du bot ou absolus vers des fichiers cookies YouTube Netscape, séparés par `;`. Le premier est prioritaire, les suivants servent de secours. Si vide, `data/youtube-cookies.txt` est détecté automatiquement. Le dossier `data/` est ignoré par Git; ne publie jamais ces fichiers : l’usage de cookies de compte peut entraîner des restrictions du compte. |
 | `FFMPEG_PATH` | non | Chemin vers FFmpeg si absent du PATH |
@@ -179,6 +184,24 @@ processus Node après installation ; le serveur Minecraft reste en ligne.
 Configure `PORT` avec le port du split Kinetic, puis configure un endpoint WSS
 TLS accessible depuis Minecraft et le même secret dans le fichier de config du
 mod. Garde `MINECRAFT_CHANNEL_ID` séparé du salon `/updatelog`.
+
+#### Panneau web derrière le reverse proxy
+
+Le site est servi directement par le processus du bot; il n’y a pas de machine locale à joindre. Le panneau réutilise le serveur HTTP déjà ouvert sur `SERVER_PORT` (sinon `PORT`), donc le reverse proxy Kinetic doit cibler l’allocation du bot. Dans la configuration montrée, cette allocation est `eu-lu-p5-a2-s.kineticpanel.net:25610`. `/healthz`, l’interface web et le pont Minecraft cohabitent sur ce port; aucun second port web n’est nécessaire.
+
+Dans l’environnement privé du split, configure au minimum :
+
+```env
+WEB_ADMIN_TOKEN=<jeton-aléatoire-de-64-caractères-hexadécimaux>
+WEB_PUBLIC_URL=https://BotHeuss.fr
+WEB_COOKIE_SECURE=true
+```
+
+Génère le secret sur ta machine avec `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`, puis colle-le dans la configuration privée Kinetic — jamais dans Discord, un log, `.env.example` ou Git. Le propriétaire se connecte au site avec ce jeton. `/controller` et `/link` donneront l’URL publique configurée. Sans configuration, le panneau reste désactivé et les commandes expliquent quoi renseigner au lieu d’afficher une fausse adresse `localhost`.
+
+Dans Kinetic, associe `BotHeuss.fr` à l’allocation du bot ci-dessus, active SSL et règle le DNS du domaine comme le demande le panneau. Le navigateur accède en HTTPS; le proxy transmet les requêtes au service HTTP du bot. Le formulaire indique qu’il créera un certificat pour le proxy : utilise cette émission automatique si disponible plutôt qu’un certificat auto-signé. Un certificat public doit être émis après vérification du contrôle du domaine. Si Kinetic continue d’exiger des blocs certificat/clé malgré l’option d’émission automatique, ne colle pas un certificat inventé : il faudra que Kinetic fournisse ces valeurs ou documente le flux manuel avant que l’on puisse installer un certificat public valide.
+
+Le site permet de voir et piloter la musique, la file et le réglage 24/7 de chaque serveur Discord. Les recherches et l’ajout de musique restent sur `/play` dans Discord. Les commandes `/pause`, `/skip`, `/stop`, `/leave` et `/24-7` restent aussi disponibles dans Discord.
 
 ### Inviter le bot sur un serveur Discord
 1. https://discord.com/developers/applications → New Application

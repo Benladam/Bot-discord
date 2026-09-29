@@ -6,6 +6,9 @@ function serializeCommand(command) {
   let builder = new SlashCommandBuilder()
     .setName(command.data.name)
     .setDescription(command.data.description || 'Commande');
+  if (command.data.defaultMemberPermissions !== undefined) {
+    builder = builder.setDefaultMemberPermissions(command.data.defaultMemberPermissions);
+  }
 
   for (const option of command.data.options || command.options || []) {
     if (option.type === 4) {
@@ -34,6 +37,93 @@ test('les commandes play et playlist se sérialisent pour l’API Discord', () =
     assert.equal(json.name, name);
     assert.ok(json.options.length > 0);
   }
+});
+
+test('/24-7 est une commande serveur réservée à la permission Gérer le serveur et bascule son réglage', async () => {
+  const { PermissionFlagsBits } = require('discord.js');
+  const command = require('../commands/24-7');
+  const json = serializeCommand(command);
+  assert.equal(json.name, '24-7');
+  assert.equal(json.default_member_permissions, PermissionFlagsBits.ManageGuild.toString());
+
+  let enabled = false;
+  const saved = [];
+  const calls = [];
+  const player = {
+    connection: { connected: true, channelId: 'voice-1' },
+    _clearIdleTimer: () => calls.push('clear-idle'),
+    _clearAloneTimer: () => calls.push('clear-alone'),
+    _scheduleIdleLeave: () => calls.push('schedule-idle'),
+    _scheduleAloneLeave: (channelId) => calls.push(`schedule-alone:${channelId}`),
+  };
+  const replies = [];
+  const ctx = {
+    guildId: 'guild-1',
+    guild: { name: 'Serveur test' },
+    memberPermissions: { has: (permission) => permission === PermissionFlagsBits.ManageGuild },
+    isChatInputCommand: () => true,
+    reply: async (payload) => { replies.push(payload); return payload; },
+  };
+  const deps = {
+    database: {
+      getGuildSetting: (_guildId, key, fallback) => { assert.equal(key, 'music24_7'); return enabled ?? fallback; },
+      setGuildSetting: (guildId, key, value) => { saved.push([guildId, key, value]); enabled = value; },
+    },
+    getPlayer: (guildId) => { assert.equal(guildId, 'guild-1'); return player; },
+  };
+
+  await command.execute(ctx, [], deps);
+  assert.deepEqual(saved[0], ['guild-1', 'music24_7', true]);
+  assert.deepEqual(calls, ['clear-idle', 'clear-alone']);
+  assert.match(replies[0].embeds[0].data.title, /24\/7 activé/);
+
+  await command.execute(ctx, [], deps);
+  assert.deepEqual(saved[1], ['guild-1', 'music24_7', false]);
+  assert.deepEqual(calls.slice(2), ['schedule-idle', 'schedule-alone:voice-1']);
+  assert.match(replies[1].embeds[0].data.title, /Déconnexion automatique activée/);
+});
+
+test('/24-7 refuse de changer le réglage sans permission Gérer le serveur', async () => {
+  const { PermissionFlagsBits } = require('discord.js');
+  const command = require('../commands/24-7');
+  let persisted = false;
+  let response;
+  await command.execute({
+    guildId: 'guild-2', guild: { name: 'Serveur privé' },
+    memberPermissions: { has: () => false },
+    isChatInputCommand: () => true,
+    reply: async (payload) => { response = payload; },
+  }, [], {
+    database: {
+      getGuildSetting: () => persisted,
+      setGuildSetting: () => { persisted = true; },
+    },
+    getPlayer: () => { throw new Error('ne doit pas être appelé'); },
+  });
+  assert.equal(persisted, false);
+  assert.equal(response.flags, require('discord.js').MessageFlags.Ephemeral);
+  assert.match(response.content, /Gérer le serveur/);
+  assert.ok(PermissionFlagsBits.ManageGuild);
+});
+
+test('/controller renvoie l’adresse publique hébergée et jamais localhost', async () => {
+  const command = require('../commands/controller');
+  const previous = process.env.WEB_PUBLIC_URL;
+  let response;
+  process.env.WEB_PUBLIC_URL = 'https://BotHeuss.fr';
+  try {
+    await command.execute({
+      guildId: '123456789012345678',
+      isChatInputCommand: () => true,
+      reply: async (payload) => { response = payload; },
+    });
+  } finally {
+    if (previous === undefined) delete process.env.WEB_PUBLIC_URL;
+    else process.env.WEB_PUBLIC_URL = previous;
+  }
+  assert.equal(response.flags, require('discord.js').MessageFlags.Ephemeral);
+  assert.match(response.embeds[0].data.description, /https:\/\/botheuss\.fr\//i);
+  assert.doesNotMatch(response.embeds[0].data.description, /localhost|127\.0\.0\.1/);
 });
 
 test('les suggestions /play ont un format lisible et gardent morceaux et playlists', () => {

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111411">
+    <meta name="web-base-path" content="__WEB_BASE_PATH__">
+    <meta name="description" content="Panneau sécurisé de contrôle musical du bot Heuss.">
+    <title>Heuss — Panneau vocal</title>
+    <link rel="stylesheet" href="__WEB_BASE_PATH__/style.css">
+    <script type="module" src="__WEB_BASE_PATH__/app.js"></script>
+  </head>
+  <body>
+    <div class="ambient ambient-a" aria-hidden="true"></div>
+    <div class="ambient ambient-b" aria-hidden="true"></div>
+
+    <section id="login-view" class="login-shell" aria-labelledby="login-title">
+      <div class="login-card">
+        <div class="brand-mark" aria-hidden="true">H<span>·</span></div>
+        <p class="eyebrow">HEUSS / CONTROL</p>
+        <h1 id="login-title">Le son, sous contrôle.</h1>
+        <p class="muted">Connecte-toi avec le jeton administrateur configuré sur ton serveur.</p>
+        <form id="login-form">
+          <label for="access-token">Jeton d’accès</label>
+          <input id="access-token" name="token" type="password" autocomplete="current-password" minlength="32" required>
+          <button class="button button-primary button-wide" type="submit">Ouvrir le panneau <span aria-hidden="true">↗</span></button>
+          <p id="login-error" class="form-message" role="alert" aria-live="polite"></p>
+        </form>
+        <p class="fine-print">Session privée · Le jeton n’est jamais conservé dans le navigateur.</p>
+      </div>
+      <div class="login-aside" aria-hidden="true">
+        <div class="aside-orbit orbit-one"></div>
+        <div class="aside-orbit orbit-two"></div>
+        <div class="aside-disc"><span>H</span></div>
+        <p>Une seule console.<br><em>Chaque serveur garde sa propre écoute.</em></p>
+        <div class="aside-lines"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </section>
+
+    <main id="app-view" class="app-shell" hidden>
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="Heuss, accueil">
+          <span class="brand-mark brand-mark-small" aria-hidden="true">H<span>·</span></span>
+          <span><strong>HEUSS</strong><small>CONTROL ROOM</small></span>
+        </a>
+        <div class="topbar-tools">
+          <label class="sr-only" for="server-select">Serveur Discord</label>
+          <select id="server-select" aria-label="Choisir un serveur"></select>
+          <span id="connection-badge" class="status-badge"><i></i><span>Connexion…</span></span>
+          <button id="refresh-button" class="icon-button" type="button" aria-label="Actualiser">↻</button>
+          <button id="logout-button" class="text-button" type="button">Déconnexion</button>
+        </div>
+      </header>
+
+      <div class="content-shell">
+        <section class="page-intro">
+          <div>
+            <p class="eyebrow">CONSOLE MUSICALE <span id="server-kicker">/ —</span></p>
+            <h1>La cabine.</h1>
+            <p class="muted">Lecture indépendante, état et file d’attente de ce serveur.</p>
+          </div>
+          <div class="live-stamp"><span class="live-dot"></span><span>ÉTAT EN DIRECT</span></div>
+        </section>
+
+        <p id="app-message" class="app-message" role="status" aria-live="polite"></p>
+
+        <section id="empty-state" class="empty-state" hidden>
+          <p class="eyebrow">PAS ENCORE DE SERVEUR</p>
+          <h2>Le bot n’a rejoint aucun serveur.</h2>
+          <p class="muted">Dès qu’il sera invité, ses serveurs apparaîtront ici.</p>
+        </section>
+
+        <div id="dashboard" class="dashboard-grid" hidden>
+          <section class="panel now-panel" aria-labelledby="now-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">01 / LECTEUR</p>
+                <h2 id="now-title">En ce moment</h2>
+              </div>
+              <span id="play-state" class="state-label">À L’ARRÊT</span>
+            </div>
+            <div class="track-stage">
+              <div class="record-art" aria-hidden="true"><span>H</span><i></i></div>
+              <div class="track-copy">
+                <p id="track-title" class="track-title">Rien ne joue pour l’instant</p>
+                <p id="track-subtitle" class="muted">Lance une musique avec <code>/play</code> sur Discord.</p>
+              </div>
+            </div>
+            <div class="track-meta">
+              <span><small>SALON VOCAL</small><strong id="voice-channel">Déconnecté</strong></span>
+              <span><small>VOLUME</small><strong id="volume-value">100%</strong></span>
+              <span><small>FILE</small><strong id="queue-count">0 titre</strong></span>
+            </div>
+            <div class="volume-track" aria-hidden="true"><span id="volume-meter"></span></div>
+          </section>
+
+          <section class="panel controls-panel" aria-labelledby="controls-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">02 / TRANSPORT</p>
+                <h2 id="controls-title">Commandes</h2>
+              </div>
+              <span class="control-glyph" aria-hidden="true">⌁</span>
+            </div>
+            <div class="control-buttons">
+              <button class="button button-primary" id="pause-button" data-action="pause" type="button" disabled><span aria-hidden="true">Ⅱ</span><span>Pause</span></button>
+              <button class="button button-secondary" data-action="skip" type="button" disabled><span aria-hidden="true">▶|</span><span>Suivante</span></button>
+              <button class="button button-danger" data-action="stop" type="button" disabled><span aria-hidden="true">■</span><span>Arrêter</span></button>
+              <button class="button button-quiet" data-action="leave" type="button" disabled><span aria-hidden="true">↗</span><span>Quitter le vocal</span></button>
+            </div>
+            <p class="control-note">Les actions de cette console ne changent rien aux autres serveurs.</p>
+          </section>
+
+          <section class="panel queue-panel" aria-labelledby="queue-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">03 / À SUIVRE</p>
+                <h2 id="queue-title">Dans la file</h2>
+              </div>
+              <span id="queue-total" class="count-pill">00</span>
+            </div>
+            <ol id="queue-list" class="queue-list"></ol>
+            <p id="queue-empty" class="queue-empty">La file est vide. Ajoute un titre avec <code>/play</code>.</p>
+          </section>
+
+          <section class="panel always-panel" aria-labelledby="always-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">04 / PRÉSENCE</p>
+                <h2 id="always-title">Rester dans le vocal</h2>
+              </div>
+              <span class="moon-mark" aria-hidden="true">☾</span>
+            </div>
+            <p class="muted">Le mode 24/7 désactive la déconnexion automatique après une période sans musique ou sans membre.</p>
+            <label class="switch-row" for="always-on-toggle">
+              <span><strong>Mode 24/7</strong><small>Enregistré séparément pour ce serveur</small></span>
+              <input id="always-on-toggle" type="checkbox">
+              <span class="switch" aria-hidden="true"></span>
+            </label>
+          </section>
+        </div>
+        <footer class="app-footer"><span>HEUSS · MUSIQUE PAR SERVEUR</span><span>HTTPS via ton reverse proxy</span></footer>
+      </div>
+    </main>
+  </body>
+</html>

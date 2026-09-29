@@ -17,6 +17,7 @@
  */
 
 const { ChannelType, PermissionsBitField } = require('discord.js');
+const { getWebPanelPublicUrl } = require('./utils/webPanel');
 
 // Pour lancer les commandes musique depuis le terminal, on simule un
 // « contexte » comme si la commande venait de Discord, en s'appuyant sur
@@ -450,9 +451,13 @@ function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT,
       // ---------- Lien de configuration (propriétaire) + Langue ----------
       case 'link': {
         // Sur le terminal, l'opérateur local est considéré comme le propriétaire.
-        const url = `http://localhost:${process.env.GUI_PORT || 7790}/`;
-        ok(`🔗 ${STR().linkTitle}`);
-        ok(STR().linkOpen(url));
+        const url = getWebPanelPublicUrl();
+        if (url) {
+          ok(`🔗 ${STR().linkTitle}`);
+          ok(STR().linkOpen(url));
+        } else {
+          err('Le panneau web n’est pas configuré : définis WEB_PUBLIC_URL et WEB_ADMIN_TOKEN sur l’hébergement.');
+        }
         return;
       }
       case 'language': {

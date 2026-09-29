@@ -1,38 +1,34 @@
 /**
  * Commande: controller (!controller / /controller)
- * Donne le lien vers le panneau de contrôle web (GUI).
+ * Affiche l’URL publique du panneau musical hébergé avec le bot.
  */
+
+const { EmbedBuilder, MessageFlags } = require('discord.js');
+const { getWebPanelPublicUrl } = require('../utils/webPanel');
 
 module.exports = {
   data: {
     name: 'controller',
-    description: 'Ouvre le panneau de contrôle du bot (musique, modération, réglages)',
+    description: 'Ouvre le panneau web de contrôle musical du bot',
   },
   slash: true,
 
-  async execute(ctx, args, deps) {
-    const port = process.env.GUI_PORT || '7777';
-    const url = `http://127.0.0.1:${port}`;
-    const reply = (o) => ctx.reply(o);
-    const edit = (o) => (typeof ctx.editReply === 'function' ? ctx.editReply(o) : ctx.reply(o));
+  async execute(ctx) {
+    const url = getWebPanelPublicUrl();
+    const embed = new EmbedBuilder()
+      .setColor(url ? 0x7d9c4f : 0xe0a642)
+      .setTitle(url ? '🖥️ Panneau musical' : '🛠️ Panneau non configuré')
+      .setDescription(url
+        ? `Panneau hébergé avec le bot : ${url}\n\nConnecte-toi avec le jeton d’accès configuré par le propriétaire du bot. Les états et commandes affichés sont séparés par serveur Discord.`
+        : 'Le panneau web n’a pas encore d’adresse publique. L’administrateur doit configurer WEB_PUBLIC_URL et WEB_ADMIN_TOKEN sur l’hébergement, puis redémarrer le bot. Aucun lien localhost ne fonctionnera depuis ton appareil.')
+      .addFields(
+        { name: '🎵 Lecture', value: 'Voir la musique et la file; pause, reprise, skip et arrêt.', inline: true },
+        { name: '🔊 Serveur', value: 'Choisir un serveur et régler son mode vocal 24/7.', inline: true },
+      )
+      .setFooter({ text: 'Pour rechercher ou ajouter une piste, utilise /play sur Discord.' });
 
-    const embed = {
-      color: 0x5865f2,
-      title: '🖥️ Panneau de contrôle',
-      description:
-        `Le panneau web du bot est disponible ici : **${url}**\n\n` +
-        'Il permet de contrôler la musique, la modération et les réglages直接从 ton navigateur.',
-      fields: [
-        { name: '🎵 Musique', value: 'Rechercher, voir la file, ajouter des musiques', inline: true },
-        { name: '🛡️ Modération', value: 'Kick, ban, timeout…', inline: true },
-        { name: '⚙️ Réglages', value: 'Tokens, mise à jour GitHub, aide', inline: true },
-      ],
-      footer: { text: 'Le panneau s\'ouvre automatiquement au lancement du bot.' },
-    };
-
-    if (ctx.guild) {
-      return reply({ embeds: [embed], ephemeral: true });
-    }
-    return reply({ embeds: [embed] });
+    const payload = { embeds: [embed] };
+    if (ctx.isChatInputCommand?.() && ctx.guildId) payload.flags = MessageFlags.Ephemeral;
+    return ctx.reply(payload);
   },
 };

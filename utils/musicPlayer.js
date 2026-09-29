@@ -1,6 +1,7 @@
 /** Lecteur vocal maison : WebSocket vocal + UDP/RTP + Opus. */
 const { VoiceConnection } = require('./voice');
 const { OpusSender } = require('./audioSender');
+const { EmbedBuilder } = require('discord.js');
 
 const VOICE_REQUEST_TIMEOUT_MS = 15_000;
 const configuredIdleMinutes = Number(process.env.VOICE_IDLE_TIMEOUT_MINUTES);
@@ -19,13 +20,15 @@ function gatewayShardForGuild(client, guildId) {
 }
 
 class MusicPlayer {
-  constructor(guildId, client) {
+  constructor(guildId, client, { keepAlive, inactivityTimeoutMs = VOICE_IDLE_TIMEOUT_MS } = {}) {
     this.guildId = guildId; this.client = client; this.queue = [];
     this.current = null; this.isPlaying = false; this.isPaused = false;
     this.loopMode = 0; this.volume = 1; this.connection = null;
     this.connecting = null; this.sender = null; this.lastChannel = null;
     this.addedBy = '?'; this.voiceChannelName = '?'; this._generation = 0;
     this._idleTimer = null; this._aloneTimer = null;
+    this.keepAlive = typeof keepAlive === 'function' ? keepAlive : () => false;
+    this.inactivityTimeoutMs = Math.max(1, Number(inactivityTimeoutMs) || VOICE_IDLE_TIMEOUT_MS);
     this._enqueueOperation = Promise.resolve();
     this.onQueueEnd = null;
   }
@@ -103,31 +106,68 @@ class MusicPlayer {
     return channel.members.some(member => !member.user?.bot);
   }
 
+  _isAlwaysOn() {
+    try { return Boolean(this.keepAlive()); }
+    catch (error) {
+      console.warn(`[voice] Lecture du réglage 24/7 impossible (serveur ${this.guildId}): ${error.message}`);
+      return false;
+    }
+  }
+
+  async _leaveForInactivity(connection, reason, channelId) {
+    if (this.connection !== connection || this._isAlwaysOn()) return;
+    const canLeave = () => {
+      if (this.connection !== connection || this._isAlwaysOn()) return false;
+      if (reason === 'idle') return !this.isPlaying && !this.current && this.queue.length === 0;
+      return String(connection.channelId) === String(channelId) && !this._hasHumanMembers(channelId);
+    };
+    if (!canLeave()) return;
+
+    // Une seule des deux échéances doit notifier/déconnecter le lecteur.
+    this._clearIdleTimer();
+    this._clearAloneTimer();
+    const idle = reason === 'idle';
+    const embed = new EmbedBuilder()
+      .setColor(0xF1C40F)
+      .setTitle(idle ? '⏱️ Déconnexion pour inactivité' : '👋 Déconnexion du salon vocal')
+      .setDescription(idle
+        ? `Je quitte le salon vocal après ${VOICE_IDLE_TIMEOUT_MINUTES} min sans musique. Active **/24-7** pour rester connecté.`
+        : `Je quitte le salon vocal car il n’y a plus de membre depuis ${VOICE_IDLE_TIMEOUT_MINUTES} min. Active **/24-7** pour rester connecté.`)
+      .setTimestamp();
+
+    try { await this.lastChannel?.send?.({ embeds: [embed] }); }
+    catch (error) { console.warn(`[voice] Notification d’inactivité impossible: ${error.message}`); }
+
+    // La notification est asynchrone : une nouvelle chanson, un membre ou
+    // l’activation du mode 24/7 pendant l’envoi doit annuler le départ.
+    if (!canLeave()) return;
+    console.info(`[voice] Déconnexion après ${VOICE_IDLE_TIMEOUT_MINUTES} min d’inactivité (${reason}, serveur ${this.guildId}).`);
+    this.destroy();
+  }
+
   _scheduleIdleLeave() {
     this._clearIdleTimer();
-    if (!this.connection?.connected || this.isPlaying || this.current || this.queue.length) return;
+    if (this._isAlwaysOn() || !this.connection?.connected || this.isPlaying || this.current || this.queue.length) return;
     const connection = this.connection;
     this._idleTimer = setTimeout(() => {
       this._idleTimer = null;
-      if (this.connection !== connection || this.isPlaying || this.current || this.queue.length) return;
-      console.info(`[voice] Déconnexion après ${VOICE_IDLE_TIMEOUT_MINUTES} min sans musique (serveur ${this.guildId}).`);
-      this.destroy();
-    }, VOICE_IDLE_TIMEOUT_MS);
+      this._leaveForInactivity(connection, 'idle').catch(error => {
+        console.error(`[voice] Déconnexion d’inactivité impossible: ${error.message}`);
+      });
+    }, this.inactivityTimeoutMs);
     this._idleTimer.unref?.();
   }
 
   _scheduleAloneLeave(channelId) {
     this._clearAloneTimer();
     const connection = this.connection;
-    if (!connection?.connected || String(connection.channelId) !== String(channelId)) return;
+    if (this._isAlwaysOn() || !connection?.connected || String(connection.channelId) !== String(channelId)) return;
     this._aloneTimer = setTimeout(() => {
       this._aloneTimer = null;
-      if (this.connection !== connection
-          || String(connection.channelId) !== String(channelId)
-          || this._hasHumanMembers(channelId)) return;
-      console.info(`[voice] Déconnexion après ${VOICE_IDLE_TIMEOUT_MINUTES} min sans membre humain (serveur ${this.guildId}).`);
-      this.destroy();
-    }, VOICE_IDLE_TIMEOUT_MS);
+      this._leaveForInactivity(connection, 'alone', channelId).catch(error => {
+        console.error(`[voice] Déconnexion sans membre impossible: ${error.message}`);
+      });
+    }, this.inactivityTimeoutMs);
     this._aloneTimer.unref?.();
   }
 

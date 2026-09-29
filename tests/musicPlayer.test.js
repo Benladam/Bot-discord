@@ -299,3 +299,65 @@ test('la fin naturelle de la file notifie le demandeur et libère le lecteur', a
     OpusSender.start = originalStart;
   }
 });
+
+test('le délai d’inactivité publie un embed puis quitte le vocal', async () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  let destroyed = false;
+  const notifications = [];
+  const player = new MusicPlayer('guild-idle-notice', { user: { id: 'bot-user' } }, { inactivityTimeoutMs: 10 });
+  player.connection = { connected: true, channelId: 'voice-idle', destroy() { destroyed = true; } };
+  player.lastChannel = { send: async (payload) => { notifications.push(payload); } };
+
+  player._scheduleIdleLeave();
+  await new Promise((resolve) => setTimeout(resolve, 35));
+
+  assert.equal(destroyed, true);
+  assert.equal(player.connection, null);
+  assert.equal(notifications.length, 1);
+  assert.match(notifications[0].embeds[0].data.title, /inactivité/);
+  assert.match(notifications[0].embeds[0].data.description, /\/24-7/);
+});
+
+test('le mode 24/7 empêche les minuteurs d’inactivité, même s’il est activé avant leur échéance', async () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  let alwaysOn = false;
+  let destroyed = false;
+  let notifications = 0;
+  const player = new MusicPlayer('guild-always-on', { user: { id: 'bot-user' } }, {
+    inactivityTimeoutMs: 10,
+    keepAlive: () => alwaysOn,
+  });
+  player.connection = { connected: true, channelId: 'voice-always-on', destroy() { destroyed = true; } };
+  player.lastChannel = { send: async () => { notifications += 1; } };
+  player._hasHumanMembers = () => false;
+
+  player._scheduleIdleLeave();
+  player._scheduleAloneLeave('voice-always-on');
+  assert.ok(player._idleTimer);
+  assert.ok(player._aloneTimer);
+  alwaysOn = true;
+  await new Promise((resolve) => setTimeout(resolve, 35));
+
+  assert.equal(destroyed, false);
+  assert.ok(player.connection);
+  assert.equal(notifications, 0);
+  player.destroy();
+});
+
+test('l’absence de membres déclenche une notification distincte avant de quitter', async () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  let destroyed = false;
+  const notifications = [];
+  const player = new MusicPlayer('guild-alone-notice', { user: { id: 'bot-user' } }, { inactivityTimeoutMs: 10 });
+  player.connection = { connected: true, channelId: 'voice-empty', destroy() { destroyed = true; } };
+  player._hasHumanMembers = () => false;
+  player.lastChannel = { send: async (payload) => { notifications.push(payload); } };
+
+  player._scheduleAloneLeave('voice-empty');
+  await new Promise((resolve) => setTimeout(resolve, 35));
+
+  assert.equal(destroyed, true);
+  assert.equal(notifications.length, 1);
+  assert.match(notifications[0].embeds[0].data.title, /salon vocal/);
+  assert.match(notifications[0].embeds[0].data.description, /\/24-7/);
+});

@@ -21,6 +21,7 @@ const { MusicPlayer } = require('./utils/musicPlayer');
 const guildDatabase = require('./utils/database');
 const { createUpdater } = require('./utils/updater');
 const { createMinecraftBridge } = require('./utils/minecraftBridge');
+const { createWebPanel } = require('./utils/webPanel');
 const { PresenceManager } = require('./utils/presenceManager');
 const { GuildNowPlayingManager } = require('./utils/guildNowPlaying');
 const { sanitizeDiagnosticText } = require('./utils/musicLinkMetadata');
@@ -96,7 +97,9 @@ client.cooldowns = new Collection();
 
 function getPlayer(guildId) {
   if (!client.musicPlayers.has(guildId)) {
-    const p = new MusicPlayer(guildId, client);
+    const p = new MusicPlayer(guildId, client, {
+      keepAlive: () => guildDatabase.getGuildSetting(guildId, 'music24_7', false) === true,
+    });
     if (guildId) {
       const savedVolume = Number(guildDatabase.getGuildSetting(guildId, 'defaultVolume', 1));
       p.volume = Number.isFinite(savedVolume) ? Math.max(0, Math.min(1, savedVolume)) : 1;
@@ -125,18 +128,25 @@ function isOwner(userId) { return !!ownerId && userId === ownerId; }
 function langFor(userId, guildId) { return langStore.resolve(userId, guildId); }
 
 const deps = { getPlayer, prefix: PREFIX, isOwner, langFor, langStore, botT, updater, database: guildDatabase, presence, logger: Logger, commands: client.commands };
-const minecraftBridge = createMinecraftBridge({
+const webPanel = createWebPanel({
   client,
   getPlayer,
   database: guildDatabase,
   logger: Logger,
 });
+const minecraftBridge = createMinecraftBridge({
+  client,
+  getPlayer,
+  database: guildDatabase,
+  logger: Logger,
+  handleWebRequest: webPanel.handleHttp,
+});
 
 // --- Mode de lancement rapide (Phase 5) ---
 // BOT_MODE = 'all' (défaut) | 'music' (musique seule) | 'admin' (admin seule)
 const BOT_MODE = (process.env.BOT_MODE || 'all').toLowerCase();
-const MUSIC_CMDS = new Set(['play', 'playlist', 'pause', 'resume', 'skip', 'stop', 'queue', 'now', 'volume', 'loop', 'shuffle', 'leave', 'help']);
-const CORE_CMDS = new Set(['link', 'language', 'update', 'updatelog', 'presence', 'about']);
+const MUSIC_CMDS = new Set(['play', 'playlist', 'pause', 'resume', 'skip', 'stop', 'queue', 'now', 'volume', 'loop', 'shuffle', 'leave', '24-7', 'help']);
+const CORE_CMDS = new Set(['controller', 'link', 'language', 'update', 'updatelog', 'presence', 'about']);
 function commandMode(name) {
   if (CORE_CMDS.has(name)) return 'core';
   if (MUSIC_CMDS.has(name)) return 'music';
@@ -256,6 +266,7 @@ client.once(Events.ClientReady, async (c) => {
   presence.start();
   c_defaultActivity();
   updater.start();
+  await webPanel.start();
 
 
 
