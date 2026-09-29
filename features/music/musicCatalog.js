@@ -3,11 +3,12 @@ const play = require('play-dl');
 const { searchSpotifyCatalog, getSpotifyArtistAlbums } = require('./providers/spotify');
 const { configureSoundCloud } = require('./providers/soundcloud');
 const { searchYouTubeCandidates } = require('./audioSender');
+const { collectCatalogResults } = require('./catalogSearch');
 
 const cache = new Map();
 const pendingSearches = new Map();
-const CACHE_TTL = 30_000;
-const DEFAULT_SOURCE_TIMEOUT_MS = 6_000;
+const CACHE_TTL = 2 * 60_000;
+const DEFAULT_SOURCE_TIMEOUT_MS = 2_500;
 const WORLD_CHART_TTL = 10 * 60_000;
 let worldChartCache = null;
 let worldChartRequest = null;
@@ -121,7 +122,7 @@ async function searchCatalog(query, { limit = 10, fresh = false, sourceTimeoutMs
   const sourceWaitMs = Number.isFinite(sourceTimeoutMs)
     ? Math.max(100, Math.min(15_000, sourceTimeoutMs))
     : DEFAULT_SOURCE_TIMEOUT_MS;
-  const cacheKey = `${normalized.toLocaleLowerCase()}|${limit}|${sourceWaitMs}`;
+  const cacheKey = `${normalized.toLocaleLowerCase()}|${limit}`;
   const cached = cache.get(cacheKey);
   if (!fresh && cached && cached.expiresAt > Date.now()) return cached.items;
   if (!fresh && pendingSearches.has(cacheKey)) return pendingSearches.get(cacheKey);
@@ -131,6 +132,7 @@ async function searchCatalog(query, { limit = 10, fresh = false, sourceTimeoutMs
     const tasks = [
       safeSearch('YouTube vidéos', async () => (await searchYouTubeCandidates(normalized, {
         limit: perType,
+        timeoutMs: sourceWaitMs,
       })).map((item) => normalizeYoutube(item, 'track')), sourceWaitMs),
       safeSearch('YouTube playlists', async () => (await play.search(normalized, {
         limit: Math.min(5, perType), source: { youtube: 'playlist' },
@@ -151,17 +153,16 @@ async function searchCatalog(query, { limit = 10, fresh = false, sourceTimeoutMs
         limit: perType, source: { soundcloud: 'tracks' },
       })).map(normalizeSoundCloud), sourceWaitMs));
     }
-    const groups = await Promise.all(tasks);
-    const items = [];
-    const seen = new Set();
-    for (const item of groups.flat()) {
-      if (!item.url || seen.has(item.url)) continue;
-      seen.add(item.url);
-      item.description = describe(item);
-      items.push(item);
-    }
-    cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL, items });
-    if (cache.size > 100) cache.delete(cache.keys().next().value);
+    const storeResults = (results) => {
+      if (!results.length || (cache.get(cacheKey)?.items.length || 0) > results.length) return;
+      results.forEach(item => { item.description = describe(item); });
+      cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL, items: results });
+      if (cache.size > 100) cache.delete(cache.keys().next().value);
+    };
+    const items = await collectCatalogResults(tasks, {
+      timeoutMs: Math.min(1500, sourceWaitMs), onComplete: storeResults,
+    });
+    storeResults(items);
     return items;
   })();
 

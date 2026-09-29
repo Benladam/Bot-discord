@@ -3,6 +3,16 @@ const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
 const { prepareInput, soundCloudStream, buildYtDlpArgs, soundCloudSearchStream, youtubeSearchStream } = require('./audioSender');
 
+test('Djadja & Dinaz : ne remplace pas le lien par un upload anonyme seulement parce que son titre correspond', async () => {
+  let opened = false;
+  await assert.rejects(soundCloudSearchStream("Djadja & Dinaz - J'fais mes affaires", {
+    expectedTitle: "Djadja & Dinaz - J'fais mes affaires [Clip Officiel]",
+    searchCandidates: async () => [{ title: "Djadja & Dinaz - J'fais mes affaires", user: { username: 'joris.py' }, url: 'https://soundcloud.com/joris/upload', duration: 276.5 }],
+    openTrack: async () => { opened = true; return new PassThrough(); },
+  }), { code: 'MUSIC_TRACK_MISMATCH' });
+  assert.equal(opened, false);
+});
+
 test('Niska Réseaux en file : cherche le titre nettoyé et accepte le bon résultat après cinq mauvais', async () => {
   const opened = [];
   const stream = await soundCloudSearchStream('Niska Officiel - Niska - Réseaux (Clip Officiel)', {
@@ -12,7 +22,7 @@ test('Niska Réseaux en file : cherche le titre nettoyé et accepte le bon résu
       assert.equal(options.limit, 10);
       return [
         ...Array.from({ length: 5 }, (_, index) => ({ title: 'Niska - Autre chanson', url: `https://soundcloud.com/niska/other-${index}` })),
-        { title: 'Niska - Réseaux', durationInSec: 196, url: 'https://soundcloud.com/niska/reseaux' },
+        { title: 'Niska - Réseaux', user: { username: 'Niska' }, durationInSec: 196, url: 'https://soundcloud.com/niska/reseaux' },
       ];
     },
     openTrack: async url => { opened.push(url); return new PassThrough(); },

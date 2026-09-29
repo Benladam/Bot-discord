@@ -27,7 +27,7 @@ module.exports = {
         embeds: [createThemedEmbed('danger').setTitle(`⚠️ ${T.errorTitle}`).setDescription(T.volumeRange).setTimestamp()],
       });
     }
-    const vol = player.setVolume(raw);
+    const vol = player.setVolume(raw / 100);
     if (ctx.guildId) guildDatabase.setGuildSetting(ctx.guildId, 'defaultVolume', raw / 100);
     return ctx.reply({
       embeds: [createThemedEmbed('success').setTitle(`🔉 ${T.volTitle}`).setDescription(T.volumeSet(vol)).setTimestamp()],

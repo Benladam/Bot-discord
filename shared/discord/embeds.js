@@ -114,7 +114,7 @@ function queueEmbed(player, prefix, lang = 'fr') {
   }
   const e = createThemedEmbed('primary')
     .setTitle(T.queueTitle)
-    .setDescription(lines.join('\n'))
+    .setDescription(lines.join('\n\n').slice(0, 4000))
     .addFields(
       { name: T.volumeLabel, value: `${player.getQueueInfo().volume}%`, inline: true },
       { name: T.loopLabel, value: T.loopModes[player.loopMode], inline: true }

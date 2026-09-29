@@ -137,7 +137,7 @@ function renderSession(id, session) {
   session.page = Math.max(0, Math.min(session.page, pages - 1));
   const start = session.page * PAGE_SIZE;
   const pageItems = session.items.slice(start, start + PAGE_SIZE);
-  let description = `Choisis un morceau, album, artiste ou une playlist. Page ${session.page + 1}/${pages} · ${session.items.length} résultats.`;
+  let description = `Choisis un morceau, album, artiste ou une playlist.\n\n**${session.items.length} résultats** · Page **${session.page + 1}/${pages}**`;
   if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET) {
     description += ' Spotify est désactivé : configure ses identifiants dans .env.';
   } else if (session.items.some((item) => item.provider === 'spotify' && item.kind === 'playlist')) {
@@ -181,13 +181,13 @@ async function queueSongs(ctx, deps, songs) {
 }
 
 async function resolveCatalogItem(item) {
-  if (item.provider === 'soundcloud') {
+  if (item.kind === 'track' && ['youtube', 'soundcloud'].includes(item.provider)) {
     return [{
       title: item.title || 'Musique SoundCloud',
       url: item.url,
       duration: item.duration || 0,
       thumbnail: item.thumbnail || null,
-      source: 'soundcloud',
+      source: item.provider,
       provider: item.provider,
       sourceUrl: item.url,
       fallbackQuery: [item.subtitle, item.title].filter(Boolean).join(' - '),

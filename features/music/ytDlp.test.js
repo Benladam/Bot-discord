@@ -153,7 +153,7 @@ test('le repli SoundCloud refuse les extraits courts et essaie un résultat comp
     expectedDuration: 181,
     searchCandidates: async () => [
       { title: 'Artiste - Titre', permalink: 'https://soundcloud.com/example/preview', durationInSec: 29 },
-      { title: 'Artiste - Titre', permalink: 'https://soundcloud.com/example/full-track', durationInSec: 180 },
+      { title: 'Artiste - Titre', user: { username: 'Artiste' }, permalink: 'https://soundcloud.com/example/full-track', durationInSec: 180 },
     ],
     openTrack: async (url) => { opened.push(url); return new PassThrough(); },
   });

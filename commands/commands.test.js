@@ -2,6 +2,19 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { SlashCommandBuilder } = require('discord.js');
 
+test('volume transmet un gain fractionnaire, pas le pourcentage brut', async () => {
+  const database = require('../core/database');
+  const originalSave = database.setGuildSetting;
+  database.setGuildSetting = () => {};
+  let gain;
+  try {
+    await require('./volume').execute({ guildId: 'guild', guild: { id: 'guild' }, isChatInputCommand: () => false, reply: async () => {} }, ['40'], {
+      getPlayer: () => ({ setVolume(value) { gain = value; return Math.round(value * 100); } }),
+    });
+    assert.equal(gain, 0.4);
+  } finally { database.setGuildSetting = originalSave; }
+});
+
 function serializeCommand(command) {
   let builder = new SlashCommandBuilder()
     .setName(command.data.name)

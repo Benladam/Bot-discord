@@ -31,15 +31,20 @@ function candidateTitle(track) {
 }
 
 function candidateArtist(track) {
-  return String(track?.artist?.name || track?.publisher?.artist || track?.channel?.name
+  return String(track?.artist?.name || (typeof track?.artist === 'string' ? track.artist : '') || track?.publisher_metadata?.artist || track?.publisher?.artist || track?.channel?.name
     || track?.user?.username || track?.user?.name || track?.uploader || '').trim();
 }
 
-function matchesRequestedTrack(track, { query, expectedTitle, expectedDuration } = {}) {
+function matchesRequestedTrack(track, { query, expectedTitle, expectedDuration, requireArtistIdentity = false } = {}) {
   const title = candidateTitle(track);
   if (!title) return false;
   const requested = expectedTitle || query;
   const artist = String(query || '').split(/\s+[-–—]\s+/u);
+  if (requireArtistIdentity) {
+    const artistTokens = tokens(artist.length > 1 ? artist[0] : String(requested || '').split(/\s+[-–—]\s+/u)[0]);
+    const identity = new Set(tokens(candidateArtist(track)));
+    if (!artistTokens.length || artistTokens.some(token => !identity.has(token))) return false;
+  }
   const required = new Set([
     ...tokens(requested),
     ...(artist.length > 1 ? tokens(artist[0]) : []),

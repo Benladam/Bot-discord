@@ -22,17 +22,19 @@ function statusEmbed(state, guildName = '') {
       .setFooter({ text: 'Statut musical propre à ce serveur' });
   }
 
-  const title = String(song.title || 'Musique inconnue').replace(/[\r\n]+/g, ' ').slice(0, 300);
+  const title = String(song.title || 'Musique inconnue').replace(/[\r\n]+/g, ' ').slice(0, 240);
   const loop = LOOP_LABELS[Math.max(0, Math.min(2, Number(state.loopMode) || 0))];
   const source = providerPresentation(song.provider || song.source, song.sourceUrl || song.url);
   const embed = createThemedEmbed(state.isPaused ? 'warning' : 'primary')
     .setAuthor({ name: `${source.name} · ${state.isPaused ? 'En pause' : 'Lecture en cours'}`, iconURL: source.iconURL, ...(source.url ? { url: source.url } : {}) })
     .setTitle(`${state.isPaused ? '⏸️' : '🎶'} ${title}`)
-    .setFooter({ text: `Lecteur musical de ${String(guildName || 'ce serveur').slice(0, 100)}` });
+    .setDescription('\u200b\nUtilise les boutons ci-dessous pour contrôler la lecture.\n\u200b')
+    .setFooter({ text: 'Lecteur musical · synchronisé à ce serveur' });
   const fields = [];
   if (state.addedBy) fields.push({ name: '👤 Ajouté par', value: String(state.addedBy).slice(0, 100), inline: true });
   if (state.voiceChannelName) fields.push({ name: '🔊 Salon vocal', value: String(state.voiceChannelName).slice(0, 100), inline: true });
   fields.push({ name: '📜 File', value: `${Math.max(0, Number(state.queueLength) || 0)} titre(s)`, inline: true });
+  fields.push({ name: '\u200b', value: '\u200b', inline: false });
   fields.push({ name: '🔉 Volume', value: `${Math.max(0, Math.min(100, Number(state.volume) || 0))}%`, inline: true });
   fields.push({ name: '🔁 Répétition', value: loop, inline: true });
   if (Number(song.duration) > 0) fields.push({ name: '⏱️ Durée', value: formatDuration(song.duration), inline: true });
@@ -64,19 +66,41 @@ function controlComponents(guildId, state = {}) {
     button('loop', `Boucle · ${LOOP_LABELS[loopMode]}`, loopMode === 1 ? '🔂' : '🔁', ButtonStyle.Secondary),
     button('queue', `File · ${Math.max(0, Number(state.queueLength) || 0)}`, '📜', ButtonStyle.Secondary),
   )];
-  const dashboardUrl = getWebPanelPublicUrl();
-  const dashboard = dashboardUrl
-    ? new URL(dashboardUrl)
-    : null;
-  if (dashboard) dashboard.searchParams.set('guild', String(guildId));
-  const dashboardButton = dashboard
-    ? new ButtonBuilder().setLabel('Dashboard').setEmoji({ name: '🎛️' }).setStyle(ButtonStyle.Link).setURL(dashboard.toString())
-    : new ButtonBuilder().setCustomId(`musicctl:${guildId}:dashboard`).setLabel('Dashboard').setEmoji({ name: '🎛️' }).setStyle(ButtonStyle.Secondary);
+  const dashboardButton = button('dashboard', 'Dashboard', '🎛️', ButtonStyle.Secondary, false);
   controls.push(new ActionRowBuilder().addComponents(
     button('shuffle', 'Mélanger', '🔀', ButtonStyle.Secondary, Number(state.queueLength) < 2),
     dashboardButton,
   ));
   return controls;
+}
+
+function dashboardPayload(player) {
+  const volume = Math.round(player.volume * 100);
+  const embed = createThemedEmbed('primary')
+    .setTitle('🎛️ Dashboard musical')
+    .setDescription(`**${String(player.current?.title || 'Aucune musique en cours').slice(0, 250)}**\n\nRéglages synchronisés au lecteur de ce serveur.\nLes modifications s’appliquent immédiatement.`)
+    .addFields(
+      { name: '🔉 Volume', value: `**${volume}%**`, inline: true },
+      { name: '📜 File', value: `${player.queue.length} titre(s)`, inline: true },
+      { name: '🔁 Répétition', value: LOOP_LABELS[player.loopMode] || LOOP_LABELS[0], inline: true },
+    );
+  const button = (action, label, emoji, disabled = false) => new ButtonBuilder()
+    .setCustomId(`musicctl:${player.guildId}:dash-${action}`).setLabel(label)
+    .setEmoji({ name: emoji }).setStyle(ButtonStyle.Secondary).setDisabled(disabled);
+  const rows = [new ActionRowBuilder().addComponents(
+    button('down', '−10%', '🔉', volume <= 0), button('up', '+10%', '🔊', volume >= 100),
+    button('mute', volume === 0 ? 'Rétablir' : 'Muet', '🔇'), button('reset', '100%', '🎚️'),
+  ), new ActionRowBuilder().addComponents(
+    button('loop', 'Répétition', '🔁'), button('shuffle', 'Mélanger', '🔀', player.queue.length < 2),
+    button('refresh', 'Actualiser', '🔄'),
+  )];
+  const webUrl = getWebPanelPublicUrl();
+  if (webUrl) {
+    const url = new URL(webUrl);
+    url.searchParams.set('guild', String(player.guildId));
+    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('Panneau web').setStyle(ButtonStyle.Link).setURL(url.toString())));
+  }
+  return { embeds: [embed], components: rows };
 }
 
 function finishedQueueEmbed(guildName = '') {
@@ -97,7 +121,7 @@ function queueEmbed(player) {
   if (player.queue.length > 10) lines.push(`… et ${player.queue.length - 10} autre(s) titre(s).`);
   return createThemedEmbed('primary')
     .setTitle(`📜 File d’attente · ${player.queue.length} titre(s)`)
-    .setDescription(lines.join('\n').slice(0, 4000));
+    .setDescription(lines.join('\n\n').slice(0, 4000));
 }
 
 class GuildNowPlayingManager {
@@ -338,19 +362,31 @@ class GuildNowPlayingManager {
       return true;
     }
     const player = getPlayer(interaction.guildId);
-    if (action === 'dashboard') {
-      await interaction.reply({
-        content: getWebPanelPublicUrl()
-          ? 'Le lien du Dashboard est disponible dans le bouton « Dashboard ».'
-          : 'Le panneau doit être publié sur le serveur et configuré avec WEB_PUBLIC_URL et WEB_ADMIN_TOKEN.',
-        flags: MessageFlags.Ephemeral,
-      });
-      return true;
-    }
     const memberVoiceId = interaction.member?.voice?.channelId || interaction.member?.voice?.channel?.id;
     const botVoiceId = player.connection?.connected ? player.connection.channelId : null;
     if (!memberVoiceId || !botVoiceId || String(memberVoiceId) !== String(botVoiceId)) {
       await interaction.reply({ content: 'Rejoins le même salon vocal que le bot pour utiliser ces contrôles.', flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    if (action === 'dashboard') {
+      await interaction.reply({ ...dashboardPayload(player), flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (action.startsWith('dash-')) {
+      const change = action.slice(5);
+      if (!['down', 'up', 'mute', 'reset', 'loop', 'shuffle', 'refresh'].includes(change)) return false;
+      await interaction.deferUpdate();
+      if (change === 'down' || change === 'up') player.setVolume(player.volume + (change === 'up' ? 0.1 : -0.1));
+      if (change === 'reset') player.setVolume(1);
+      if (change === 'mute') {
+        if (player.volume > 0) { player._unmutedVolume = player.volume; player.setVolume(0); }
+        else player.setVolume(player._unmutedVolume || 1);
+      }
+      if (change === 'loop') player.loopMode = (Number(player.loopMode) + 1) % 3;
+      if (change === 'shuffle' && player.queue.length > 1) player.shuffleQueue();
+      await player._activity?.();
+      await interaction.editReply(dashboardPayload(player));
       return true;
     }
 
@@ -398,6 +434,7 @@ module.exports = {
   GuildNowPlayingManager,
   statusEmbed,
   controlComponents,
+  dashboardPayload,
   finishedQueueEmbed,
   SETTING_KEY,
 };

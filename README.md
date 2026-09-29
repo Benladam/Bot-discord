@@ -120,6 +120,30 @@ YouTube peut toutefois refuser un cookie expiré ou ne pas autoriser l’accès 
 une vidéo; dans ce cas, le code ne contourne pas la vérification et tente le
 repli SoundCloud.
 
+### Recherche et contrôles musicaux
+
+Les catalogues sont interrogés en parallèle : les premiers résultats sont
+affichés après une courte fenêtre de regroupement (180 ms), avec un budget
+de réponse de 1,5 seconde. Les résultats tardifs enrichissent un cache de deux
+minutes, partagé entre recherche et autocomplétion. Ce budget concerne le
+catalogue, pas le téléchargement audio ni le handshake Discord.
+
+Pour un lecteur déconnecté, le flux audio est préparé **avant** de rejoindre
+le vocal. Le bouton **Dashboard** ouvre un embed privé dans Discord : volume
+±10 %, muet, rétablissement, répétition et mélange. Il utilise automatiquement
+le lecteur du serveur courant et exige le même salon vocal que le bot. Aucun
+site web n'est nécessaire ; un lien web supplémentaire apparaît seulement si
+le panneau est configuré. Le gain est appliqué en PCM avant l'encodage Opus,
+sans redémarrer le titre et sans fichier audio temporaire.
+
+Le repli automatique SoundCloud exige aussi une identité d'artiste cohérente,
+pas seulement un titre identique. Les uploads tiers sans artiste identifiable
+sont refusés ; cette vérification de métadonnées n'est pas une empreinte audio.
+Un lien SoundCloud explicitement choisi reste une source directe.
+Une interruption de flux annule la file au lieu de lancer un autre morceau
+silencieusement. Une fin normale ou **Suivant** passe au titre suivant ;
+**Stop** invalide aussi les demandes encore en attente de préparation.
+
 ### Présence du bot
 
 Le propriétaire du bot peut utiliser `/presence` ou `!presence` pour régler le

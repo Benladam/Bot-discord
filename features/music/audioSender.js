@@ -8,6 +8,7 @@ const play = require('play-dl');
 const { ensureManagedYtDlp, getDataDirectory } = require('./ytDlp');
 const { configureSoundCloud } = require('./providers/soundcloud');
 const { matchesRequestedTrack, candidateTitle, candidateArtist, fallbackSearchQuery } = require('./trackMatching');
+const { PcmVolume } = require('./pcmVolume');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
@@ -291,7 +292,7 @@ async function soundCloudSearchStream(query, {
       rejectedShortTracks++;
       continue;
     }
-    if (!matchesRequestedTrack(track, { query, expectedTitle, expectedDuration })) {
+    if (!matchesRequestedTrack(track, { query, expectedTitle, expectedDuration, requireArtistIdentity: true })) {
       rejectedDifferentTracks++;
       console.info(`[audio] résultat SoundCloud refusé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))}`);
       continue;
@@ -514,8 +515,8 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
     }
     timer = setTimeout(() => {
       try { child.kill(); } catch (_) { /* processus déjà terminé */ }
-      finish({ items: [], error: `Recherche YouTube dépassée après ${YTDLP_TIMEOUT_MS / 1000} secondes.` });
-    }, YTDLP_TIMEOUT_MS);
+      finish({ items: [], error: 'Le délai de recherche du catalogue a été dépassé.' });
+    }, options.timeoutMs || YTDLP_TIMEOUT_MS);
     child.stdout.on('data', (chunk) => {
       if (stdout.length < YTDLP_OUTPUT_LIMIT) stdout += chunk.toString().slice(0, YTDLP_OUTPUT_LIMIT - stdout.length);
       else {
@@ -553,6 +554,7 @@ async function searchYtDlpCandidates(query, {
   inputMode = 'search',
   searchPrefix = provider === 'soundcloud' ? 'scsearch' : 'ytsearch',
   limit = 5,
+  timeoutMs = YTDLP_TIMEOUT_MS,
   candidates = ytDlpCandidates(),
   install = ensureManagedYtDlpOnce,
   spawnImpl = spawn,
@@ -563,6 +565,7 @@ async function searchYtDlpCandidates(query, {
   env = process.env,
 } = {}) {
   const normalized = String(query || '').trim().slice(0, inputMode === 'direct' ? 2_048 : 200);
+  const deadline = Date.now() + Math.max(100, Math.min(YTDLP_TIMEOUT_MS, Number(timeoutMs) || YTDLP_TIMEOUT_MS));
   if (inputMode === 'search' && normalized.length < 2) throw new Error(`Recherche ${provider === 'soundcloud' ? 'SoundCloud' : 'YouTube'} trop courte.`);
   const safeLimit = Math.max(1, Math.min(inputMode === 'direct' ? 100 : 10, Number(limit) || 5));
   const configuredCookiesPaths = provider !== 'youtube' ? [] : cookiesPaths === undefined
@@ -576,7 +579,10 @@ async function searchYtDlpCandidates(query, {
   let authCandidate = null;
 
   const attempt = async (command, args, cookiesPath, playerClient) => {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw new Error('Le délai de recherche du catalogue a été dépassé.');
     const result = await runYtDlpSearch(command, args, normalized, spawnImpl, {
+      timeoutMs: remainingMs,
       limit: safeLimit,
       cookiesPath: provider === 'youtube' ? cookiesPath : '',
       cookieTempDirectory,
@@ -944,6 +950,9 @@ async function streamYtDlp(url, {
       if (stream) return stream;
       if (missingOnly && errors.length && /spawn .* ENOENT/i.test(String(errors.at(-1)))) break;
     }
+    // Un refus de compte/IP ne dépend pas du nom du binaire. Ne pas répéter
+    // tous les essais avec Python puis le binaire géré pour la même vidéo.
+    if (authCandidate) break;
   }
   if (missingOnly) {
     try {
@@ -1045,7 +1054,7 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
 }
 
 async function start(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies = {}) {
-  const media = await (dependencies.prepareInput || prepareInput)(url, fallbackQuery, {
+  const media = dependencies.preparedMedia || await (dependencies.prepareInput || prepareInput)(url, fallbackQuery, {
     expectedDuration: dependencies.expectedDuration,
     expectedTitle: dependencies.expectedTitle,
     guildId: dependencies.guildId,
@@ -1063,15 +1072,22 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
     ? Math.min(192_000, Math.max(64_000, Math.round(requestedBitrate / 1_000) * 1_000))
     : 160_000;
   let ffmpeg;
+  let decoder;
+  const gain = new PcmVolume(dependencies.initialVolume ?? 1);
   try {
-    ffmpeg = (dependencies.spawn || spawn)(bin('ffmpeg', 'FFMPEG_PATH'), [
+    decoder = (dependencies.spawn || spawn)(bin('ffmpeg', 'FFMPEG_PATH'), [
       '-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-i', media.stream ? 'pipe:0' : media.url, '-vn',
-      '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+      '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11', '-ar', '48000', '-ac', '2',
+      '-c:a', 'pcm_s16le', '-f', 's16le', 'pipe:1',
+    ], { windowsHide: true });
+    ffmpeg = (dependencies.spawn || spawn)(bin('ffmpeg', 'FFMPEG_PATH'), [
+      '-hide_banner', '-loglevel', 'error', '-nostdin', '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0', '-vn',
       '-c:a', 'libopus', '-application', 'audio', '-vbr', 'on', '-compression_level', '10',
       '-frame_duration', '20', '-ar', '48000', '-ac', '2', '-b:a', `${bitrate / 1_000}k`,
       '-f', 'opus', 'pipe:1',
     ], { windowsHide: true });
   } catch (error) {
+    decoder?.kill(); gain.destroy();
     try { media.stream?.cleanup?.(); } catch (_) {}
     try { media.stream?.destroy(); } catch (_) {}
     throw error;
@@ -1088,6 +1104,8 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
     try { media.stream?.cleanup?.(); } catch (_) {}
     try { media.stream?.destroy(); } catch (_) {}
     try { ffmpeg.kill(); } catch (_) {}
+    try { decoder.kill(); } catch (_) {}
+    gain.destroy();
   };
   const reportFfmpegError = (error) => {
     if (stopped || errorReported) return;
@@ -1097,6 +1115,7 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
     onError?.(error);
   };
   const tick = setInterval(() => {
+    if (dependencies.shouldStart && !dependencies.shouldStart()) { stopped = true; cleanup(); return; }
     if (stopped || paused || !connection.connected || !frames.length) return;
     if (connection.daveRequired && (!connection.dave || !connection.dave.ready)) return;
     let ok;
@@ -1121,17 +1140,31 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
     // FFmpeg au lieu de sauter silencieusement des morceaux du flux.
     if (frames.length >= MAX_BUFFERED_OPUS_FRAMES && !ffmpeg.stdout.isPaused()) ffmpeg.stdout.pause();
   }));
+  decoder.stdout.pipe(gain).pipe(ffmpeg.stdin);
+  decoder.on('error', reportFfmpegError);
+  decoder.stdout.on('error', reportFfmpegError);
+  decoder.stdin.on('error', reportFfmpegError);
+  gain.on('error', reportFfmpegError);
+  ffmpeg.stdin.on('error', reportFfmpegError);
   if (media.stream) {
     media.stream.on('error', reportFfmpegError);
-    ffmpeg.stdin.on('error', reportFfmpegError);
-    media.stream.pipe(ffmpeg.stdin);
+    media.stream.pipe(decoder.stdin);
   }
   // Never retain arbitrary stderr: signed URLs can span chunks and truncation
   // can remove their scheme, defeating URL-based redaction.
-  ffmpeg.stderr.on('data', d => {
+  const recordDiagnostic = d => {
     const diagnostic = ffmpegError + d.toString();
     if (/HTTP 403 Forbidden|(?:HTTP(?: error)?|Server returned)\s*:?\s*403|403\s+Forbidden/i.test(diagnostic)) ffmpegError = 'HTTP 403 Forbidden';
     else if (ffmpegError !== 'HTTP 403 Forbidden') ffmpegError = diagnostic.slice(-80);
+  };
+  ffmpeg.stderr.on('data', recordDiagnostic);
+  decoder.stderr.on('data', recordDiagnostic);
+  decoder.on('close', (code, signal) => {
+    if (stopped || code === 0) return;
+    const forbidden = ffmpegError === 'HTTP 403 Forbidden';
+    const error = new Error(forbidden ? 'Le fournisseur refuse le flux audio (HTTP 403).' : `Décodage audio interrompu (${signal || code || 'inconnu'}).`);
+    error.code = forbidden ? 'AUDIO_HTTP_FORBIDDEN' : 'FFMPEG_FAILED';
+    reportFfmpegError(error);
   });
   ffmpeg.on('error', e => {
     console.error('[ffmpeg] démarrage impossible:', e.message);
@@ -1166,7 +1199,7 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
       onEnd?.();
     }, 100);
   });
-  return { pause() { paused = true; }, resume() { paused = false; }, setVolume() {}, stop() { stopped = true; cleanup(); } };
+  return { pause() { paused = true; }, resume() { paused = false; }, setVolume(value) { gain.setVolume(value); }, stop() { stopped = true; cleanup(); } };
 }
 
 class OggParser {
@@ -1184,7 +1217,7 @@ class OggParser {
   }
 }
 module.exports = {
-  OpusSender: { start },
+  OpusSender: { start, prepare: prepareInput },
   streamUrl,
   streamYtDlp,
   buildYtDlpArgs,

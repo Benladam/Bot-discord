@@ -2,6 +2,37 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { GuildNowPlayingManager, SETTING_KEY, controlComponents, statusEmbed } = require('./guildNowPlaying');
 
+test('la carte espace les groupes et tronque les longs titres aux limites Discord', () => {
+  const data = statusEmbed({ isPlaying: true, current: { title: 'A'.repeat(500), duration: 180 }, addedBy: 'Adam', voiceChannelName: 'Vocal', volume: 60, queueLength: 3 }).toJSON();
+  assert.ok(data.title.length <= 256);
+  assert.match(data.description, /\n/);
+  assert.ok(data.fields.some(field => field.inline === false));
+  assert.doesNotMatch(data.footer.text, /Adam|Vocal/);
+});
+
+test('Dashboard privé sans site web, réglages synchronisés au bon lecteur et contrôle vocal obligatoire', async () => {
+  const { MusicPlayer } = require('./musicPlayer');
+  const manager = new GuildNowPlayingManager({ client: {}, database: {} });
+  const player = new MusicPlayer('guild-dashboard', { user: { id: 'bot' } });
+  player.connection = { connected: true, channelId: 'voice' };
+  player.current = { title: 'Chanson' }; player.isPlaying = true; player.volume = 0.6;
+  let payload;
+  const interaction = { guildId: player.guildId, member: { voice: { channelId: 'voice' } }, customId: `musicctl:${player.guildId}:dashboard`,
+    reply: async value => { payload = value; }, deferUpdate: async () => {}, editReply: async value => { payload = value; } };
+  await manager.handleControl(interaction, () => player);
+  assert.equal(payload.flags, 64);
+  assert.match(payload.embeds[0].toJSON().description, /synchronisés/);
+  assert.doesNotMatch(JSON.stringify(payload), /WEB_ADMIN_TOKEN|Sélectionne.*serveur/);
+  interaction.customId = `musicctl:${player.guildId}:dash-up`;
+  await manager.handleControl(interaction, () => player);
+  assert.equal(Math.round(player.volume * 100), 70);
+  assert.match(JSON.stringify(payload), /70%/);
+  interaction.member.voice.channelId = 'other';
+  await manager.handleControl(interaction, () => player);
+  assert.equal(Math.round(player.volume * 100), 70);
+  assert.match(payload.content, /même salon vocal/);
+});
+
 function makeGuild(guildId, guildName, channelId) {
   const messages = new Map();
   let nextId = 0;

@@ -3,6 +3,97 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { OpusSender } = require('./audioSender');
 
+test('Stop invalide les ajouts anciens en attente de la préparation précédente', async () => {
+  const { MusicPlayer } = require('./musicPlayer');
+  const originalStart = OpusSender.start;
+  let release;
+  const urls = [];
+  OpusSender.start = async (_connection, url) => {
+    urls.push(url);
+    await new Promise(resolve => { release = resolve; });
+    return { stop() {}, setVolume() {} };
+  };
+  const player = new MusicPlayer('epoch', { user: { id: 'bot' } });
+  player.connection = { connected: true, channelId: 'voice' };
+  try {
+    const first = player.enqueueSongs([{ title: 'Premier', url: 'first' }], { voiceChannel: { id: 'voice' } });
+    await new Promise(setImmediate);
+    const oldRequest = player.enqueueSongs([{ title: 'Je suis un voyou', url: 'old' }], { voiceChannel: { id: 'voice' } });
+    const cancelled = Promise.all([assert.rejects(first, { code: 'AUDIO_CANCELLED' }), assert.rejects(oldRequest, { code: 'AUDIO_CANCELLED' })]);
+    player.stop(); release(); await cancelled;
+    assert.deepEqual(urls, ['first']); assert.equal(player.current, null); assert.deepEqual(player.queue, []);
+  } finally { player._clearIdleTimer(); OpusSender.start = originalStart; }
+});
+
+test('un flux interrompu ne déclenche pas un ancien titre de la file', async () => {
+  const { MusicPlayer } = require('./musicPlayer');
+  const originalStart = OpusSender.start;
+  let fail;
+  const starts = [];
+  OpusSender.start = async (_connection, url, _begin, _end, onError) => {
+    starts.push(url); fail = onError;
+    return { stop() {}, setVolume() {} };
+  };
+  const player = new MusicPlayer('no-auto-error', { user: { id: 'bot' } });
+  player.connection = { connected: true, channelId: 'voice' };
+  try {
+    await player.enqueueSongs([{ title: 'J’fais mes affaires', url: 'requested' }, { title: 'Je suis un voyou', url: 'old' }], { voiceChannel: { id: 'voice' } });
+    await fail(new Error('Flux coupé'));
+    assert.deepEqual(starts, ['requested']); assert.equal(player.current, null); assert.deepEqual(player.queue, []);
+  } finally { player.stop(); player._clearIdleTimer(); OpusSender.start = originalStart; }
+});
+
+test('prépare le flux avant de rejoindre le vocal et ne le recherche pas deux fois', async () => {
+  const { MusicPlayer } = require('./musicPlayer');
+  const originalPrepare = OpusSender.prepare;
+  const originalStart = OpusSender.start;
+  const events = [];
+  const media = { url: 'https://example.test/audio' };
+  const player = new MusicPlayer('prepare-guild', { user: { id: 'bot' } });
+  OpusSender.prepare = async () => { events.push('prepare'); return media; };
+  OpusSender.start = async (_conn, _url, _begin, _end, _error, _query, options) => {
+    events.push('start'); assert.equal(options.preparedMedia, media);
+    return { setVolume() {}, stop() {} };
+  };
+  player.ensureConnection = async channel => { events.push('connect'); player.connection = { connected: true, channelId: channel.id }; };
+  try {
+    await player.enqueueSongs([{ title: 'Titre', url: 'song' }], { voiceChannel: { id: 'voice' } });
+    assert.deepEqual(events, ['prepare', 'connect', 'start']);
+    assert.equal(player.isPlaying, true);
+    player.stop(); player._clearIdleTimer();
+  } finally { OpusSender.prepare = originalPrepare; OpusSender.start = originalStart; }
+});
+
+test('une recherche audio ratée ne fait pas rejoindre le vocal', async () => {
+  const { MusicPlayer } = require('./musicPlayer');
+  const originalPrepare = OpusSender.prepare;
+  const player = new MusicPlayer('no-join', { user: { id: 'bot' } });
+  player.ensureConnection = assert.fail;
+  OpusSender.prepare = async () => { throw new Error('introuvable'); };
+  try {
+    await assert.rejects(player.enqueueSongs([{ title: 'Titre', url: 'song' }], { voiceChannel: { id: 'voice' } }), /introuvable/);
+    assert.equal(player.current, null); assert.equal(player.connection, null);
+  } finally { OpusSender.prepare = originalPrepare; }
+});
+
+test('Stop pendant la recherche ferme la source et ne rejoint pas le vocal', async () => {
+  const { MusicPlayer } = require('./musicPlayer');
+  const { PassThrough } = require('node:stream');
+  const originalPrepare = OpusSender.prepare;
+  const player = new MusicPlayer('cancel-prepare', { user: { id: 'bot' } });
+  const source = new PassThrough();
+  let release;
+  OpusSender.prepare = () => new Promise(resolve => { release = resolve; });
+  player.ensureConnection = assert.fail;
+  try {
+    const pending = player.enqueueSongs([{ title: 'Ancien', url: 'old' }], { voiceChannel: { id: 'voice' } });
+    await new Promise(setImmediate);
+    player.stop(); release({ stream: source });
+    await assert.rejects(pending, { code: 'AUDIO_CANCELLED' });
+    assert.equal(source.destroyed, true); assert.equal(player.current, null); assert.equal(player.queue.length, 0);
+  } finally { OpusSender.prepare = originalPrepare; }
+});
+
 test('une erreur d’extraction audio remet le lecteur à l’arrêt', async () => {
   const originalStart = OpusSender.start;
   OpusSender.start = async () => { throw new Error('YouTube bloque la lecture'); };
@@ -251,6 +342,8 @@ test('deux ajouts simultanés restent en file sans remplacer la première piste'
 test('un lecteur inactif rejoint le salon demandé, mais ne déplace pas une lecture active', async () => {
   const { MusicPlayer } = require('./musicPlayer');
   const originalStart = OpusSender.start;
+  const originalPrepare = OpusSender.prepare;
+  OpusSender.prepare = async () => ({ url: 'https://example.test/audio' });
   OpusSender.start = async () => ({ setVolume() {}, stop() {} });
   try {
     const player = new MusicPlayer('guild-channel-guard', { user: { id: 'bot-user' } });
@@ -274,6 +367,7 @@ test('un lecteur inactif rejoint le salon demandé, mais ne déplace pas une lec
     player._clearIdleTimer();
   } finally {
     OpusSender.start = originalStart;
+    OpusSender.prepare = originalPrepare;
   }
 });
 

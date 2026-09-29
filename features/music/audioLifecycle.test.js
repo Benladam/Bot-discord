@@ -50,7 +50,7 @@ test('FFmpeg 403 never exposes a signed URL split across chunks and closes its s
   const stream = new PassThrough();
   const errors = [];
   const sender = await OpusSender.start({}, 'unused', null, null, e => errors.push(e), '', {
-    prepareInput: async () => ({ stream }), spawn: () => process,
+    prepareInput: async () => ({ stream }), spawn: (_bin, args) => args.includes('pcm_s16le') ? child() : process,
   });
   process.stderr.write('Error opening https://example.invalid/?sig=');
   process.stderr.write('SECRET'.repeat(500));
@@ -68,15 +68,19 @@ test('FFmpeg 403 never exposes a signed URL split across chunks and closes its s
 test('normal end cleans sender timers and calls onEnd only once', async () => {
   const process = child();
   let ended = 0;
-  const sender = await OpusSender.start({ connected: true, sendOpus: () => true }, 'unused', null, () => ended++, assert.fail, '', {
-    prepareInput: async () => ({ url: 'https://example.invalid/audio' }), spawn: () => process,
+  let resolveEnd;
+  const done = new Promise(resolve => { resolveEnd = resolve; });
+  const sender = await OpusSender.start({ connected: true, sendOpus: () => true }, 'unused', null, () => { ended++; resolveEnd(); }, assert.fail, '', {
+    prepareInput: async () => ({ url: 'https://example.invalid/audio' }), spawn: (_bin, args) => args.includes('pcm_s16le') ? child() : process,
   });
   process.stdout.write(opusPage(50));
   process.emit('close', 0, null);
-  await new Promise(resolve => setTimeout(resolve, 2_000));
-  assert.equal(ended, 1);
-  assert.equal(process.killed, true);
-  sender.stop();
+  let timeout;
+  try {
+    await Promise.race([done, new Promise((_resolve, reject) => { timeout = setTimeout(() => reject(new Error('Le lecteur ne termine pas sa file de trames')), 6000); })]);
+    assert.equal(ended, 1);
+    assert.equal(process.killed, true);
+  } finally { clearTimeout(timeout); sender.stop(); }
 });
 
 test('un flux FFmpeg vide ou nettement trop court est signalé comme interrompu', async () => {
@@ -84,7 +88,7 @@ test('un flux FFmpeg vide ou nettement trop court est signalé comme interrompu'
   const errors = [];
   let ended = 0;
   const sender = await OpusSender.start({}, 'unused', null, () => ended++, error => errors.push(error), '', {
-    prepareInput: async () => ({ url: 'https://example.invalid/audio' }), spawn: () => process,
+    prepareInput: async () => ({ url: 'https://example.invalid/audio' }), spawn: (_bin, args) => args.includes('pcm_s16le') ? child() : process,
     expectedDuration: 120,
   });
   process.stdout.write(opusPage(50)); // environ une seconde d’audio pour un titre annoncé à deux minutes
@@ -99,7 +103,7 @@ test('un flux FFmpeg vide ou nettement trop court est signalé comme interrompu'
 test('un flux Opus en attente applique la contre-pression au lieu de supprimer des trames', async () => {
   const process = child();
   const sender = await OpusSender.start({ connected: true, sendOpus: () => true }, 'unused', null, null, assert.fail, '', {
-    prepareInput: async () => ({ url: 'https://example.invalid/audio' }), spawn: () => process,
+    prepareInput: async () => ({ url: 'https://example.invalid/audio' }), spawn: (_bin, args) => args.includes('pcm_s16le') ? child() : process,
   });
   process.stdout.write(opusPage(252));
   await new Promise(setImmediate);
@@ -110,14 +114,18 @@ test('un flux Opus en attente applique la contre-pression au lieu de supprimer d
 test('encode la musique en Opus stéréo haute qualité', async () => {
   const process = child();
   let args;
+  let decoderArgs;
   const sender = await OpusSender.start({ audioBitrate: 256_000 }, 'unused', null, null, assert.fail, '', {
     prepareInput: async () => ({ url: 'https://example.invalid/audio' }),
-    spawn: (_command, ffmpegArgs) => { args = ffmpegArgs; return process; },
+    spawn: (_command, ffmpegArgs) => {
+      if (ffmpegArgs.includes('pcm_s16le')) { decoderArgs = ffmpegArgs; return child(); }
+      args = ffmpegArgs; return process;
+    },
   });
   assert.ok(args.includes('192k'));
   assert.ok(args.includes('48000'));
   assert.ok(args.includes('2'));
-  assert.ok(args.includes('loudnorm=I=-16:TP=-1.5:LRA=11'));
+  assert.ok(decoderArgs.includes('loudnorm=I=-16:TP=-1.5:LRA=11'));
   sender.stop();
 });
 
@@ -126,7 +134,10 @@ test('adapte le débit Opus au plafond du salon vocal', async () => {
   let args;
   const sender = await OpusSender.start({ audioBitrate: 96_000 }, 'unused', null, null, assert.fail, '', {
     prepareInput: async () => ({ url: 'https://example.invalid/audio' }),
-    spawn: (_command, ffmpegArgs) => { args = ffmpegArgs; return process; },
+    spawn: (_command, ffmpegArgs) => {
+      if (ffmpegArgs.includes('pcm_s16le')) return child();
+      args = ffmpegArgs; return process;
+    },
   });
   assert.ok(args.includes('96k'));
   sender.stop();

@@ -33,11 +33,19 @@ class MusicPlayer {
     this.inactivityTimeoutMs = Math.max(1, Number(inactivityTimeoutMs) || VOICE_IDLE_TIMEOUT_MS);
     this.noticeTtlMs = Math.max(1, Number(noticeTtlMs) || VOICE_NOTICE_TTL_MS);
     this._enqueueOperation = Promise.resolve();
+    this._queueEpoch = 0;
     this.onQueueEnd = null;
   }
   addToQueue(song) { this._clearIdleTimer(); this.queue.push(song); }
   getNextSong() { if (this.loopMode === 2 && this.current) this.queue.push(this.current); return this.queue.shift(); }
   clearQueue() { this.queue = []; }
+  shuffleQueue() {
+    for (let index = this.queue.length - 1; index > 0; index--) {
+      const other = Math.floor(Math.random() * (index + 1));
+      [this.queue[index], this.queue[other]] = [this.queue[other], this.queue[index]];
+    }
+    return this.queue;
+  }
 
   enqueueSongs(songs, {
     voiceChannel,
@@ -49,8 +57,14 @@ class MusicPlayer {
   } = {}) {
     const list = Array.isArray(songs) ? songs.filter(Boolean) : [];
     if (!list.length) return Promise.reject(new Error('Aucune musique jouable à ajouter à la file.'));
+    const epoch = this._queueEpoch;
 
     const enqueue = async () => {
+      if (epoch !== this._queueEpoch) {
+        const error = new Error('Demande musicale annulée par Stop ou déconnexion.');
+        error.code = 'AUDIO_CANCELLED';
+        throw error;
+      }
       const connected = Boolean(this.connection?.connected);
       const active = connected && Boolean(this.isPlaying || this.current || this.sender);
       if (active && voiceChannel?.id && String(this.connection.channelId) !== String(voiceChannel.id)) {
@@ -58,7 +72,6 @@ class MusicPlayer {
       }
       if (!active) {
         if (!voiceChannel) throw new Error('Rejoins un salon vocal avant d’ajouter une musique.');
-        await this.ensureConnection(voiceChannel);
       }
 
       const entries = list.map((song) => ({
@@ -73,8 +86,13 @@ class MusicPlayer {
       else this.queue.push(...entries);
       this._clearIdleTimer();
 
-      if (!active) await this.playNext();
+      if (!active) await this.playNext(undefined, { voiceChannel });
       else await this._activity();
+      if (epoch !== this._queueEpoch) {
+        const error = new Error('Demande musicale annulée par Stop ou déconnexion.');
+        error.code = 'AUDIO_CANCELLED';
+        throw error;
+      }
 
       return {
         added: entries.length,
@@ -298,7 +316,7 @@ class MusicPlayer {
     });
   }
 
-  async playNext(onEmbed, { notifyWhenEmpty = false, endedRequesterId = null, endedTrack = false } = {}) {
+  async playNext(onEmbed, { notifyWhenEmpty = false, endedRequesterId = null, endedTrack = false, voiceChannel = null } = {}) {
     this._clearIdleTimer();
     if (this.loopMode === 1 && this.current) this.queue.unshift(this.current);
     const song = this.getNextSong();
@@ -316,15 +334,15 @@ class MusicPlayer {
       this._scheduleIdleLeave();
       return null;
     }
-    if (!this.connection?.connected) throw new Error("Le bot n'est connecté à aucun canal vocal.");
+    if (!this.connection?.connected && !voiceChannel) throw new Error("Le bot n'est connecté à aucun canal vocal.");
     if (this.sender) this.sender.stop();
     this.current = song; this.isPlaying = true; this.isPaused = false;
     this.addedBy = song.addedBy || this.addedBy;
     this.voiceChannelName = song.voiceChannelName || this.voiceChannelName;
     this.nowPlayingLang = song.nowPlayingLang || this.nowPlayingLang || 'fr';
     if (Object.hasOwn(song, 'requestChannel')) this.lastChannel = song.requestChannel;
-    this._activity();
     const generation = ++this._generation;
+    let preparedMedia = null;
     const failTrack = async (error) => {
       if (generation !== this._generation || !this.isPlaying) return;
       console.error(`[audio] piste « ${String(song.title || 'inconnue').slice(0, 120)} » interrompue (${error.code || 'AUDIO_ERROR'}): ${error.message}`);
@@ -333,16 +351,38 @@ class MusicPlayer {
       this.current = null;
       this.sender = null;
       this._activity();
-      if (this.queue.length) {
-        this.playNext().catch(nextError => console.error('[audio] piste suivante:', nextError.message));
-      } else {
-        this._scheduleIdleLeave();
-      }
+      // Une erreur de flux n'est pas une fin normale. Ne jamais remplacer
+      // silencieusement la piste demandée par un ancien titre en attente.
+      this.clearQueue();
+      this._scheduleIdleLeave();
       try {
-        await this.lastChannel?.send(`❌ Lecture interrompue : ${error.message}`);
+        await this.lastChannel?.send({ content: `❌ Lecture interrompue : ${error.message}\nLa file a été annulée pour éviter de lancer un autre titre involontairement.`, allowedMentions: { parse: [] } });
       } catch (_) { /* salon supprimé ou permissions manquantes */ }
     };
     try {
+      // Résoudre le flux avant le handshake, sans stocker de flux entre guildes.
+      // Stop/leave invalide cette préparation et ferme sa source asynchrone.
+      if (voiceChannel && (!this.connection?.connected || this.connection.channelId !== voiceChannel.id)) {
+        this.isPlaying = false;
+        preparedMedia = await OpusSender.prepare(song.url, song.fallbackQuery, {
+          expectedDuration: song.duration, expectedTitle: song.title, guildId: this.guildId,
+        });
+        if (generation !== this._generation) {
+          preparedMedia.stream?.cleanup?.(); preparedMedia.stream?.destroy?.();
+          return null;
+        }
+        await this.ensureConnection(voiceChannel);
+        if (generation !== this._generation) {
+          preparedMedia.stream?.cleanup?.(); preparedMedia.stream?.destroy?.();
+          if (!this.current && !this.isPlaying) await this.leave();
+          return null;
+        }
+        this.isPlaying = true;
+      }
+      if (preparedMedia?.stream?.errored || preparedMedia?.stream?.destroyed) {
+        throw preparedMedia.stream.errored || new Error('Le flux audio a été fermé pendant la connexion vocale.');
+      }
+      console.info(`[audio] démarrage serveur=${this.guildId} session=${generation} titre=${JSON.stringify(song.title)} file=${this.queue.length}`);
       const sender = await OpusSender.start(this.connection, song.url, () => console.log('🔊 SON ÉMIS — lecture maison active.'), async () => {
         if (generation === this._generation && this.isPlaying) {
           this.sender = null;
@@ -357,6 +397,8 @@ class MusicPlayer {
         expectedDuration: song.duration,
         expectedTitle: song.title,
         guildId: this.guildId,
+        preparedMedia,
+        initialVolume: this.volume,
         shouldStart: () => generation === this._generation && this.isPlaying,
       });
       if (generation !== this._generation) {
@@ -366,6 +408,7 @@ class MusicPlayer {
       this.sender = sender;
       if (this.isPaused) this.sender?.pause?.();
     } catch (error) {
+      preparedMedia?.stream?.cleanup?.(); preparedMedia?.stream?.destroy?.();
       if (generation !== this._generation) return null;
       // L'extraction du flux peut échouer avant que le processus audio existe.
       // Réinitialiser l'état évite qu'une tentative ratée bloque toute la file.
@@ -374,6 +417,7 @@ class MusicPlayer {
         this.isPaused = false;
         this.current = null;
         this.sender = null;
+        this.clearQueue();
         this._activity();
         this._scheduleIdleLeave();
       }
@@ -397,6 +441,7 @@ class MusicPlayer {
     return this.playNext(undefined, { notifyWhenEmpty: true, endedRequesterId: requesterId, endedTrack: true });
   }
   stop() {
+    ++this._queueEpoch;
     ++this._generation; this._clearIdleTimer(); this.clearQueue(); this.sender?.stop();
     this.sender = null; this.current = null; this.isPlaying = false; this.isPaused = false;
     const update = this._activity();
