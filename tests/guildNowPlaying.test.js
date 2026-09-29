@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { GuildNowPlayingManager, SETTING_KEY, controlComponents } = require('../features/music/guildNowPlaying');
+const { GuildNowPlayingManager, SETTING_KEY, controlComponents, statusEmbed } = require('../features/music/guildNowPlaying');
 
 function makeGuild(guildId, guildName, channelId) {
   const messages = new Map();
@@ -51,15 +51,17 @@ test('chaque serveur possède et modifie son propre message en cours de lecture'
   assert.doesNotMatch(JSON.stringify(messageB.payload.embeds[0].toJSON()), /Titre serveur Test/);
 
   await manager.update(playerA, { isPlaying: false, current: null, queueLength: 0, volume: 100 });
-  assert.match(messageA.payload.embeds[0].toJSON().title, /Aucune musique/);
+  assert.equal(a.messages.has(messageA.id), false, 'la carte en cours est retirée dès que le lecteur est inactif');
+  assert.equal(database.getGuildSetting('guild-a', SETTING_KEY).messageId, null);
   assert.match(JSON.stringify(messageB.payload.embeds[0].toJSON()), /Titre serveur fipfap/);
 });
 
 test('la carte musicale fournit pause, suivant, stop, boucle et file sans bouton d’ajout', () => {
-  const controls = controlComponents('guild-controls', {
+  const rows = controlComponents('guild-controls', {
     current: { title: 'Chanson' }, isPlaying: true, isPaused: false,
     queueLength: 2, loopMode: 0,
-  })[0].toJSON().components;
+  }).map((row) => row.toJSON().components);
+  const controls = rows[0];
   assert.deepEqual(controls.map((item) => item.custom_id), [
     'musicctl:guild-controls:pause',
     'musicctl:guild-controls:skip',
@@ -69,6 +71,26 @@ test('la carte musicale fournit pause, suivant, stop, boucle et file sans bouton
   ]);
   assert.ok(controls.every((item) => item.emoji?.name));
   assert.ok(controls.every((item) => !/ajouter|play music/i.test(item.label)));
+  assert.equal(rows[1][0].custom_id, 'musicctl:guild-controls:shuffle');
+  assert.equal(rows[1][0].disabled, false);
+  assert.match(rows[1][1].label, /Dashboard/);
+  assert.ok(rows[1][1].url || rows[1][1].custom_id);
+});
+
+test('la carte affiche la plateforme et lie la piste sans republier les paramètres secrets', () => {
+  const embed = statusEmbed({
+    isPlaying: true,
+    current: {
+      title: 'Une chanson', provider: 'spotify',
+      sourceUrl: 'https://open.spotify.com/track/abc123?si=secret-value',
+    },
+    queueLength: 1, volume: 72, loopMode: 1, addedBy: 'Adam', voiceChannelName: 'Général',
+  }, 'Serveur Alpha').toJSON();
+  assert.equal(embed.author.name, 'Spotify · Lecture en cours');
+  assert.equal(embed.url, 'https://open.spotify.com/track/abc123');
+  assert.match(embed.title, /Une chanson/);
+  assert.doesNotMatch(JSON.stringify(embed), /secret-value/);
+  assert.match(JSON.stringify(embed.fields), /72%|72/);
 });
 
 test('les boutons agissent uniquement depuis le même salon vocal', async () => {
@@ -128,7 +150,7 @@ test('à la fin de la file, la carte est remplacée par un avis qui expire en 30
   assert.equal(messages.has(oldStatus.id), false, 'l’ancienne carte « en cours » est supprimée');
   const notice = [...messages.values()][0];
   assert.equal(notice.payload.embeds[0].toJSON().title, '📜 File d’attente terminée');
-  assert.equal(notice.payload.content, '<@123456789012345678>');
+  assert.equal(notice.payload.content, '🎶 <@123456789012345678> — ta file de musique est terminée.');
   assert.deepEqual(notice.payload.allowedMentions.users, ['123456789012345678']);
   assert.equal(database.getGuildSetting('guild-end', SETTING_KEY).messageId, notice.id);
   assert.equal(database.getGuildSetting('guild-end', SETTING_KEY).finishedNotice, true);

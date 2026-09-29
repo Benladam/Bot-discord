@@ -13,7 +13,7 @@ const {
   Events,
   REST,
   Routes,
-  SlashCommandBuilder,
+  MessageFlags,
 } = require('discord.js');
 require('dotenv').config();
 require('dotenv').config({ path: path.join(__dirname, '.env.minecraft'), quiet: true });
@@ -27,6 +27,8 @@ const { GuildNowPlayingManager } = require('./features/music/guildNowPlaying');
 const { sanitizeDiagnosticText } = require('./features/music/musicLinkMetadata');
 
 const { setupConsole } = require('./core/consoleCommands');
+const { normalizeCommandPrefix, getGatewayIntents, parsePrefixedCommand } = require('./core/commandConfig');
+const { buildSlashCommands } = require('./shared/discord/slashCommandBuilder');
 const langStore = require('./core/i18n/langStore');
 const { t: botT } = require('./core/i18n/botI18n');
 // Les outils de Test ne sont jamais chargés par défaut. Leur activation exige
@@ -45,7 +47,7 @@ if (ENABLE_TEST_MODULES) {
 
 // --- Configuration ---
 const TOKEN = process.env.DISCORD_TOKEN;
-const PREFIX = process.env.COMMAND_PREFIX || '!';
+const PREFIX = normalizeCommandPrefix(process.env.COMMAND_PREFIX ?? '!');
 const CLIENT_ID = process.env.CLIENT_ID; // optionnel : fourni sinon déduit au login
 
 if (!TOKEN) {
@@ -63,12 +65,7 @@ const Logger = {
 
 // --- Client ---
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-  ],
+  intents: getGatewayIntents(GatewayIntentBits, PREFIX),
 });
 
 const updater = createUpdater({
@@ -123,6 +120,7 @@ function getPlayer(guildId) {
 // Priorité : OWNER_ID du .env, sinon le propriétaire de l'application Discord.
 let ownerId = process.env.OWNER_ID || null;
 async function resolveOwnerId() {
+  if (ownerId) return ownerId;
   try {
     const app = await client.application?.fetch?.();
     if (app && app.owner && app.owner.id) ownerId = app.owner.id;
@@ -194,41 +192,7 @@ function loadCommands() {
 
 // --- Construction des slash commands pour l'API Discord ---
 function buildSlashCommands() {
-  const arr = [];
-  for (const cmd of client.commands.values()) {
-    if (!cmd.slash) continue;
-    let builder = new SlashCommandBuilder()
-      .setName(cmd.data.name)
-      .setDescription(cmd.data.description || 'Commande');
-    if (cmd.data.defaultMemberPermissions !== undefined) {
-      builder = builder.setDefaultMemberPermissions(cmd.data.defaultMemberPermissions);
-    }
-    // Les options sont définies dans `data.options` par les modules de commande.
-    // Accepte aussi `cmd.options` pour rester compatible avec d'anciens modules.
-    const options = Array.isArray(cmd.data.options) ? cmd.data.options : cmd.options;
-    if (Array.isArray(options)) {
-      for (const opt of options) {
-        if (opt.type === 4) builder = builder.addIntegerOption((o) => {
-          o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required);
-          if (Number.isInteger(opt.minValue)) o.setMinValue(opt.minValue);
-          if (Number.isInteger(opt.maxValue)) o.setMaxValue(opt.maxValue);
-          return o;
-        });
-        else if (opt.type === 3) builder = builder.addStringOption((o) => {
-          o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required);
-          if (Array.isArray(opt.choices)) o.addChoices(...opt.choices);
-          else if (opt.autocomplete) o.setAutocomplete(true);
-          if (Number.isInteger(opt.minLength)) o.setMinLength(opt.minLength);
-          if (Number.isInteger(opt.maxLength)) o.setMaxLength(opt.maxLength);
-          return o;
-        });
-        else if (opt.type === 5) builder = builder.addBooleanOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
-        else if (opt.type === 6) builder = builder.addUserOption((o) => o.setName(opt.name).setDescription(opt.description || '').setRequired(!!opt.required));
-      }
-    }
-    arr.push(builder.toJSON());
-  }
-  return arr;
+  return buildSlashCommands(client.commands);
 }
 
 async function registerSlashCommands(clientId) {
@@ -269,7 +233,7 @@ client.once(Events.ClientReady, async (c) => {
     Logger.error(`Échec enregistrement slash commands: ${e.message}`);
   }
   await resolveOwnerId();
-  if (ownerId) Logger.info(`Propriétaire du bot : ${ownerId}`);
+  if (ownerId) Logger.info('Commandes réservées au propriétaire activées.');
   presence.start();
   c_defaultActivity();
   updater.start();
@@ -296,7 +260,7 @@ client.once(Events.ClientReady, async (c) => {
     getPlayer,
     langFor,
   });
-  Logger.info('Console prête — tapez /help pour les commandes (ex: /call #général salut).');
+  Logger.info(`Console prête — tapez help pour les commandes.${PREFIX ? ` Préfixe Discord facultatif actif : ${PREFIX}` : ' Commandes texte Discord désactivées (utilisez les commandes slash).'}`);
 
   // Écrit l'état de la file d'attente dans un fichier lu par le panneau GUI.
   // On écrit dans %APPDATA% car le dossier du projet (Documents/GitHub) est
@@ -323,8 +287,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       try { await guildNowPlaying.handleControl(interaction, getPlayer); }
       catch (e) {
         Logger.error(`Erreur contrôle musical: ${e.message}`);
-        if (interaction.deferred || interaction.replied) await interaction.followUp({ content: `Erreur contrôle musical : ${e.message}`, ephemeral: true }).catch(() => {});
-        else await interaction.reply({ content: `Erreur contrôle musical : ${e.message}`, ephemeral: true }).catch(() => {});
+        if (interaction.deferred || interaction.replied) await interaction.followUp({ content: `Erreur contrôle musical : ${e.message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
+        else await interaction.reply({ content: `Erreur contrôle musical : ${e.message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
       }
       return;
     }
@@ -333,7 +297,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       catch (e) {
         Logger.error(`Erreur catalogue musical: ${e.message}`);
         if (interaction.deferred || interaction.replied) await interaction.editReply({ content: `Erreur catalogue : ${e.message}`, embeds: [], components: [] }).catch(() => {});
-        else await interaction.reply({ content: `Erreur catalogue : ${e.message}`, ephemeral: true }).catch(() => {});
+        else await interaction.reply({ content: `Erreur catalogue : ${e.message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
       }
       return;
     }
@@ -367,11 +331,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const message = interaction.commandName === 'link'
       ? botT(langFor(interaction.user.id, interaction.guildId)).linkOnlyOwner
       : 'Cette commande est réservée au propriétaire du bot.';
-    return interaction.reply({ content: message, ephemeral: true });
+    return interaction.reply({ content: message, flags: MessageFlags.Ephemeral });
   }
 
   if (isInCooldown(interaction.user.id, interaction.commandName)) {
-    return interaction.reply({ content: '⏱️ Trop rapide !', ephemeral: true });
+    return interaction.reply({ content: '⏱️ Trop rapide !', flags: MessageFlags.Ephemeral });
   }
 
   try {
@@ -386,35 +350,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
     Logger.error(`Erreur /${interaction.commandName}: ${e.message}`);
     const err = { embeds: [{ title: '❌ Erreur', description: e.message, color: 0xff0000 }] };
     if (interaction.deferred || interaction.replied) await interaction.editReply(err);
-    else await interaction.reply(err);
+    else await interaction.reply({ ...err, flags: MessageFlags.Ephemeral });
   }
 });
 
-// « Parler à travers le bot » sur Discord : un vrai membre écrit
-//   /call salut tout le monde
-// (sans #salon) dans un salon texte. Le bot supprime le message du membre
-// et le re-poste en son nom. Évite le spam : ne réagit QU'à « /call » et
-// ignore les messages du bot et ceux qui contiennent déjà un #salon.
+// Les commandes texte sont optionnelles : le mode slash n’a pas besoin de
+// l’intent privilégié Message Content.
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
-  const content = message.content.trim();
-  if (!content.toLowerCase().startsWith('/call ')) return;      // uniquement /call
-  const body = content.slice(6).trim();
-  if (!body || body.includes('#')) return;                     // #salon -> commande terminal, on ignore
-  try {
-    await message.delete().catch(() => {});                     // supprime le message du membre
-    await message.channel.send(`${message.member ? message.member.displayName : message.author.username} : ${body}`);
-  } catch (e) {
-    Logger.error(`/call (Discord) : ${e.message}`);
-  }
-});
-
-// Commandes préfixe (!)
-client.on(Events.MessageCreate, async (message) => {
-  if (!message.content.startsWith(PREFIX) || message.author.bot) return;
-
-  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-  const name = args.shift().toLowerCase();
+  const parsed = parsePrefixedCommand(message.content, PREFIX);
+  if (!parsed) return;
+  const { name, args } = parsed;
   const cmd = client.commands.get(name);
   if (!cmd) return;
 
@@ -465,11 +411,18 @@ client.on(Events.GuildCreate, async (guild) => {
     }
     if (!channel || !channel.permissionsFor(guild.members.me).has('SendMessages')) return;
 
+    const displayName = String(process.env.BOT_DISPLAY_NAME || c.user?.username || 'Discord Music Bot').slice(0, 80);
+    const supportUrl = (() => {
+      try {
+        const url = new URL(process.env.SUPPORT_URL || '');
+        return url.protocol === 'https:' ? url.toString() : null;
+      } catch (_) { return null; }
+    })();
     const embed = {
       color: 0x5865f2,
       title: `👋 Merci de m'avoir ajouté sur ${guild.name} !`,
       description:
-        '**Heuss l\'Enfoiré** réunit musique, modération et outils pour ton serveur Discord.\n' +
+        `**${displayName}** réunit musique, modération et outils pour ton serveur Discord.\n` +
         'Voici comment démarrer :',
       fields: [
         { name: '🎵 Jouer de la musique', value: 'Rejoins un salon vocal puis tape `/play <musique ou lien>`', inline: false },
@@ -478,7 +431,7 @@ client.on(Events.GuildCreate, async (guild) => {
         { name: '🧰 Outils serveur', value: '`/ping` · `/userinfo` · `/serverinfo` · `/avatar` · `/poll`', inline: false },
         { name: '❓ Aide', value: 'Tape `/help` pour la liste des commandes, `/about` pour les crédits.', inline: false },
       ],
-      footer: { text: 'Support : discord.gg/YpAyfZ9Bs7' },
+      ...(supportUrl ? { footer: { text: `Support : ${supportUrl}` } } : {}),
     };
     await channel.send({ embeds: [embed] });
     Logger.info(`Message de bienvenue envoyé sur ${guild.name}`);

@@ -1,3 +1,5 @@
+const { MessageFlags } = require('discord.js');
+
 function isSlash(ctx) {
   return typeof ctx?.isChatInputCommand === 'function' && ctx.isChatInputCommand();
 }
@@ -6,13 +8,20 @@ function sendReply(ctx, content, { ephemeral = true, embeds } = {}) {
   const payload = { content, embeds };
   if (isSlash(ctx)) {
     if (ctx.deferred || ctx.replied) return ctx.editReply(payload);
-    return ctx.reply({ ...payload, ephemeral });
+    return ctx.reply(ephemeral ? { ...payload, flags: MessageFlags.Ephemeral } : payload);
   }
   return ctx.reply(payload);
 }
 
 async function deferReply(ctx, { ephemeral = true } = {}) {
-  if (isSlash(ctx) && !ctx.deferred && !ctx.replied) await ctx.deferReply({ ephemeral });
+  if (isSlash(ctx) && !ctx.deferred && !ctx.replied) {
+    await ctx.deferReply(ephemeral ? { flags: MessageFlags.Ephemeral } : {});
+  }
+}
+
+function requireGuildContext(ctx) {
+  if (!ctx?.guildId || !ctx?.guild) throw new Error('Cette commande doit être utilisée dans un serveur Discord.');
+  return ctx.guild;
 }
 
 function hasPermission(ctx, permission) {
@@ -73,4 +82,4 @@ function getIntegerOption(ctx, name) {
   try { return ctx.options?.getInteger?.(name) ?? null; } catch (_) { return null; }
 }
 
-module.exports = { isSlash, sendReply, deferReply, hasPermission, requirePermission, resolveMember, resolveUser, getStringOption, getIntegerOption };
+module.exports = { isSlash, sendReply, deferReply, requireGuildContext, hasPermission, requirePermission, resolveMember, resolveUser, getStringOption, getIntegerOption };

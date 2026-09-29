@@ -11,6 +11,8 @@ const { configureSoundCloud } = require('./providers/soundcloud');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
+const MAX_BUFFERED_OPUS_FRAMES = 250;
+const RESUME_OPUS_BUFFER_FRAMES = 125;
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 let managedInstallPromise = null;
 
@@ -896,6 +898,7 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
   }
   const parser = new OggParser(); let frames = []; let paused = false; let started = false; let stopped = false;
   let ffmpegError = ''; let errorReported = false;
+  let totalAudioFrames = 0;
   let readinessTimer = null;
   let drainTimer = null;
   const cleanup = () => {
@@ -921,6 +924,7 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
     catch (error) { reportFfmpegError(error); return; }
     if (!ok) return;
     frames.shift();
+    if (frames.length <= RESUME_OPUS_BUFFER_FRAMES && ffmpeg.stdout.isPaused()) ffmpeg.stdout.resume();
     if (readinessTimer) { clearTimeout(readinessTimer); readinessTimer = null; }
     if (!started) { started = true; onStart?.(); }
   }, 20);
@@ -931,7 +935,11 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
   }, 30_000);
   ffmpeg.stdout.on('data', chunk => parser.feed(chunk, frame => {
     frames.push(frame);
-    if (frames.length > 250) frames.shift();
+    totalAudioFrames += 1;
+    // Ne supprime pas les anciennes trames quand l’envoi Discord ralentit
+    // (notamment pendant l’initialisation DAVE) : la contre-pression suspend
+    // FFmpeg au lieu de sauter silencieusement des morceaux du flux.
+    if (frames.length >= MAX_BUFFERED_OPUS_FRAMES && !ffmpeg.stdout.isPaused()) ffmpeg.stdout.pause();
   }));
   if (media.stream) {
     media.stream.on('error', reportFfmpegError);
@@ -958,6 +966,16 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
         ? 'Le fournisseur refuse le flux audio (HTTP 403), même après extraction du lien. Vérifie l’accès au média depuis cet hébergeur ; trouver le titre ne garantit pas que son flux soit accessible.'
         : `FFmpeg s'est arrêté avec ${reason}.`);
       error.code = forbidden ? 'AUDIO_HTTP_FORBIDDEN' : 'FFMPEG_FAILED';
+      reportFfmpegError(error);
+      return;
+    }
+    const expectedDuration = Number(dependencies.expectedDuration);
+    const streamedDuration = totalAudioFrames * 0.02;
+    if (totalAudioFrames < 50 || (Number.isFinite(expectedDuration) && expectedDuration >= 45 && streamedDuration < expectedDuration * 0.65)) {
+      const error = new Error(totalAudioFrames < 50
+        ? 'Le fournisseur a fermé le flux avant que la musique ne commence réellement.'
+        : `Le flux audio s’est terminé prématurément (${Math.floor(streamedDuration)} s reçues sur environ ${Math.floor(expectedDuration)} s).`);
+      error.code = 'AUDIO_PREMATURE_END';
       reportFfmpegError(error);
       return;
     }

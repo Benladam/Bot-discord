@@ -65,6 +65,33 @@ test('un lien SoundCloud public est converti depuis ses métadonnées oEmbed', a
   assert.equal(metadata.searchQuery, 'Song by Artist');
 });
 
+test('les autres services musicaux fournissent un titre public sans suivre de redirection', async () => {
+  const { providerPresentation } = require('../shared/discord/providerPresentation');
+  for (const [link, provider] of [
+    ['https://music.apple.com/fr/album/album/123', 'apple_music'],
+    ['https://music.amazon.fr/albums/B0001', 'amazon_music'],
+    ['https://tidal.com/browse/track/123', 'tidal'],
+    ['https://artist.bandcamp.com/track/title', 'bandcamp'],
+    ['https://audiomack.com/artist/song', 'audiomack'],
+  ]) {
+    assert.equal(getMusicInputInfo(link).provider, provider);
+    let options;
+    const metadata = await resolveMusicLinkMetadata(link, {
+      fetchImpl: async (_url, requestOptions) => {
+        options = requestOptions;
+        return {
+          ok: true,
+          text: async () => '<meta property="og:title" content="Artiste - Chanson &amp; autre &#x110000;">',
+        };
+      },
+    });
+    assert.equal(options.redirect, 'manual');
+    assert.equal(metadata.provider, provider);
+    assert.match(metadata.searchQuery, /^Artiste - Chanson & autre/);
+    assert.ok(providerPresentation(provider, link).iconURL.startsWith('https://'));
+  }
+});
+
 test('les journaux montrent le nom ou la plateforme et masquent les paramètres privés', () => {
   assert.match(formatMusicAttempt('Niska - Chasse à l’homme'), /entrée=nom.*Niska - Chasse à l’homme/);
   const link = getMusicInputInfo('https://www.youtube.com/watch?v=epmR0g3udAk&si=SECRET_VALUE');

@@ -1,7 +1,7 @@
 # Bot Discord multifonction
 
-Bot Discord multi-serveur créé par **lefauxmaghrebin**, écrit en Node.js avec [discord.js v14](https://discord.js.org/).
-Il réunit musique, modération et outils serveur dans un seul projet.
+Bot Discord open source multi-serveur, écrit en Node.js avec [discord.js v14](https://discord.js.org/).
+Il réunit musique, modération et outils serveur dans un seul projet, sans présumer d’un propriétaire, d’un domaine ou d’un hébergeur précis.
 Il recherche dans les catalogues **YouTube, Spotify et Deezer** et lit l'audio
 correspondant depuis YouTube. Il prend aussi les liens **Spotify** (pistes,
 albums et playlists accessibles avec les droits du compte OAuth). Les commandes
@@ -92,9 +92,9 @@ cp .env.example .env
 | `MINECRAFT_GUILD_ID` | pont Minecraft | ID du serveur Discord associé au serveur Minecraft |
 | `MINECRAFT_BRIDGE_TOKEN` | pont Minecraft | Secret partagé d'au moins 32 caractères |
 | `MINECRAFT_CHANNEL_ID` | pont Minecraft | Salon réservé aux changelogs Minecraft publiés après un redémarrage réussi |
-| `PORT` | hébergement Kinetic | Port HTTP attribué au service; `/healthz`, le panneau web et le pont WebSocket Minecraft le partagent (`SERVER_PORT` est prioritaire) |
+| `PORT` | hébergement | Port HTTP attribué au service; `/healthz`, le panneau web et le pont WebSocket Minecraft le partagent (`SERVER_PORT` est prioritaire) |
 | `WEB_ADMIN_TOKEN` | oui pour le panneau | Jeton d’accès d’au moins 32 octets; génère-en un aléatoire et garde-le uniquement dans la configuration privée du serveur |
-| `WEB_PUBLIC_URL` | non | URL publique HTTPS du panneau, par exemple `https://BotHeuss.fr`; utilisée par `/controller` et `/link` |
+| `WEB_PUBLIC_URL` | non | URL HTTPS publique de ton panneau, par exemple `https://music.example.org`; utilisée par `controller` et `link` |
 | `WEB_BASE_PATH` | non | Préfixe de chemin facultatif si le reverse proxy publie le panneau sous un sous-chemin |
 | `WEB_COOKIE_SECURE` | non | Utilise des cookies HTTPS `Secure` (recommandé avec un proxy SSL) |
 | `ENABLE_TEST_HOOKS` | non | Active temporairement les scripts manuels de `Test/`; jeton local requis et pont limité à `127.0.0.1` |
@@ -189,19 +189,19 @@ mod. Garde `MINECRAFT_CHANNEL_ID` séparé du salon `/updatelog`.
 
 #### Panneau web derrière le reverse proxy
 
-Le site est servi directement par le processus du bot; il n’y a pas de machine locale à joindre. Le panneau réutilise le serveur HTTP déjà ouvert sur `SERVER_PORT` (sinon `PORT`), donc le reverse proxy Kinetic doit cibler l’allocation du bot. Dans la configuration montrée, cette allocation est `eu-lu-p5-a2-s.kineticpanel.net:25610`. `/healthz`, l’interface web et le pont Minecraft cohabitent sur ce port; aucun second port web n’est nécessaire.
+Le site est servi directement par le processus du bot; il n’y a pas de machine locale à joindre. Le panneau réutilise le serveur HTTP déjà ouvert sur `SERVER_PORT` (sinon `PORT`), donc le reverse proxy doit cibler le port attribué au processus du bot. `/healthz`, l’interface web et le pont Minecraft cohabitent sur ce port; aucun second port web n’est nécessaire.
 
 Dans l’environnement privé du split, configure au minimum :
 
 ```env
 WEB_ADMIN_TOKEN=<jeton-aléatoire-de-64-caractères-hexadécimaux>
-WEB_PUBLIC_URL=https://BotHeuss.fr
+WEB_PUBLIC_URL=https://music.example.org
 WEB_COOKIE_SECURE=true
 ```
 
 Génère le secret sur ta machine avec `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`, puis colle-le dans la configuration privée Kinetic — jamais dans Discord, un log, `.env.example` ou Git. Le propriétaire se connecte au site avec ce jeton. `/controller` et `/link` donneront l’URL publique configurée. Sans configuration, le panneau reste désactivé et les commandes expliquent quoi renseigner au lieu d’afficher une fausse adresse `localhost`.
 
-Dans Kinetic, associe `BotHeuss.fr` à l’allocation du bot ci-dessus, active SSL et règle le DNS du domaine comme le demande le panneau. Le navigateur accède en HTTPS; le proxy transmet les requêtes au service HTTP du bot. Le formulaire indique qu’il créera un certificat pour le proxy : utilise cette émission automatique si disponible plutôt qu’un certificat auto-signé. Un certificat public doit être émis après vérification du contrôle du domaine. Si Kinetic continue d’exiger des blocs certificat/clé malgré l’option d’émission automatique, ne colle pas un certificat inventé : il faudra que Kinetic fournisse ces valeurs ou documente le flux manuel avant que l’on puisse installer un certificat public valide.
+Dans le panneau de ton hébergeur, associe le domaine que tu contrôles au port attribué au bot, active SSL et configure le DNS comme demandé. Le navigateur accède en HTTPS; le proxy transmet les requêtes au service HTTP du bot. Privilégie l’émission automatique d’un certificat public après vérification du domaine. N’utilise pas de certificat auto-signé pour un panneau public et ne colle jamais de clé privée dans Git.
 
 Le site permet de voir et piloter la musique, la file et le réglage 24/7 de chaque serveur Discord. Les recherches et l’ajout de musique restent sur `/play` dans Discord. Les commandes `/pause`, `/skip`, `/stop`, `/leave` et `/24-7` restent aussi disponibles dans Discord.
 
@@ -324,13 +324,11 @@ celui du bot. Pour utiliser les commandes avec le préfixe, active l’intent
 
 ## Auteur et licence
 
-Le projet original est créé par **lefauxmaghrebin** (Discord). Le dépôt Git
-actuellement configuré indique **Benladam** comme compte GitHub du projet.
-Le dépôt utilise la licence
+Le projet est maintenu par ses contributeurs. Le dépôt utilise la licence
 [MIT](LICENSE) : chacun peut utiliser, modifier et redistribuer le bot, y
 compris dans un projet commercial. Les copies ou portions substantielles doivent
-conserver l’avis de copyright et le texte de la licence. La commande `/about`
-affiche également le crédit d’origine.
+conserver l’avis de copyright et le texte de la licence. La commande `about`
+présente les fonctionnalités et la licence.
 
 ## Structure
 

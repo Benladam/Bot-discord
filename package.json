@@ -2,7 +2,7 @@
   "name": "bot-discord-multifonction",
   "version": "2.0.0",
   "description": "Bot Discord multifonction : musique, modération et outils serveur",
-  "author": "lefauxmaghrebin (Discord) / Benladam (GitHub)",
+  "author": "Bot Discord contributors",
   "license": "MIT",
   "main": "bot.js",
   "engines": {

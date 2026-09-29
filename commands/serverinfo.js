@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { createThemedEmbed } = require('../shared/discord/embedTheme');
 const { isSlash, deferReply } = require('../shared/discord/commandHelpers');
 
 module.exports = {
@@ -9,7 +9,7 @@ module.exports = {
     await deferReply(ctx);
     const guild = ctx.guild;
     const owner = await guild.fetchOwner().catch(() => null);
-    const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(guild.name)
+    const embed = createThemedEmbed('primary').setTitle(`🏰 ${guild.name}`)
       .setDescription(`Serveur créé le ${guild.createdAt.toLocaleDateString('fr-FR')}.`)
       .addFields(
         { name: 'Membres', value: String(guild.memberCount), inline: true },

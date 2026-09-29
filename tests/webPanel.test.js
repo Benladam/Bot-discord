@@ -20,7 +20,10 @@ async function createTestPanel(overrides = {}) {
     connection: { connected: true, channelId: `voice-${guild.id}` },
     voiceChannelName: 'Général',
     current: { title: `Titre ${guild.name}`, url: 'https://secret.example/audio', duration: 180, source: 'youtube' },
-    queue: [{ title: `Suivant ${guild.name}`, url: 'https://secret.example/queued', duration: 120 }],
+    queue: [
+      { title: `Suivant ${guild.name}`, url: 'https://secret.example/queued', duration: 120 },
+      { title: `Encore ${guild.name}`, url: 'https://secret.example/queued-2', duration: 90 },
+    ],
     isPlaying: true,
     isPaused: false,
     volume: 1,
@@ -29,6 +32,8 @@ async function createTestPanel(overrides = {}) {
     resume: async function resume() { this.isPaused = false; },
     skip: async function skip() { this.current = null; this.isPlaying = false; },
     stop: async function stop() { this.current = null; this.queue = []; this.isPlaying = false; },
+    shuffleQueue() { this.queue.reverse(); this.shuffled = true; },
+    setVolume(value) { this.volume = Math.max(0, Math.min(1, Number(value) || 0)); },
     destroy() { this.connection = null; },
     _clearIdleTimer() { this.idleCleared = true; },
     _clearAloneTimer() { this.aloneCleared = true; },
@@ -157,6 +162,41 @@ test('le panneau authentifie les sessions, protège les actions CSRF et isole le
   assert.equal((await toggle.json()).state.alwaysOn, true);
   assert.equal(app.settings.get(`${GUILD_A}:music24_7`), true);
   assert.equal(app.settings.has(`${GUILD_B}:music24_7`), false);
+
+  const volume = await fetch(`${base}/api/guilds/${GUILD_A}/music/action`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json', cookie: sessionCookie, origin: app.publicOrigin,
+      'x-csrf-token': loginData.csrfToken,
+    },
+    body: JSON.stringify({ action: 'volume', value: 73 }),
+  });
+  assert.equal(volume.status, 200);
+  assert.equal((await volume.json()).state.volume, 73);
+  assert.equal(app.settings.get(`${GUILD_A}:defaultVolume`), 0.73);
+  assert.equal(app.players.get(GUILD_B).volume, 1, 'le volume du second serveur ne change pas');
+
+  const invalidVolume = await fetch(`${base}/api/guilds/${GUILD_A}/music/action`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json', cookie: sessionCookie, origin: app.publicOrigin,
+      'x-csrf-token': loginData.csrfToken,
+    },
+    body: JSON.stringify({ action: 'volume', value: 73.5 }),
+  });
+  assert.equal(invalidVolume.status, 400);
+
+  const shuffle = await fetch(`${base}/api/guilds/${GUILD_A}/music/action`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json', cookie: sessionCookie, origin: app.publicOrigin,
+      'x-csrf-token': loginData.csrfToken,
+    },
+    body: JSON.stringify({ action: 'shuffle' }),
+  });
+  assert.equal(shuffle.status, 200);
+  assert.equal(app.players.get(GUILD_A).shuffled, true);
+  assert.equal(app.players.get(GUILD_B).shuffled, undefined);
 
   const logout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',

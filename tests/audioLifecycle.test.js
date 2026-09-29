@@ -13,6 +13,16 @@ function child() {
   return process;
 }
 
+function opusPage(audioFrameCount) {
+  const packetCount = audioFrameCount + 2; // deux paquets Ogg d’en-tête Opus
+  const page = Buffer.alloc(27 + packetCount + packetCount);
+  page.write('OggS', 0, 'ascii');
+  page[26] = packetCount;
+  page.fill(1, 27, 27 + packetCount);
+  page.fill(0xf8, 27 + packetCount);
+  return page;
+}
+
 test('FFmpeg 403 never exposes a signed URL split across chunks and closes its source', async () => {
   const process = child();
   const stream = new PassThrough();
@@ -36,13 +46,42 @@ test('FFmpeg 403 never exposes a signed URL split across chunks and closes its s
 test('normal end cleans sender timers and calls onEnd only once', async () => {
   const process = child();
   let ended = 0;
-  const sender = await OpusSender.start({}, 'unused', null, () => ended++, assert.fail, '', {
+  const sender = await OpusSender.start({ connected: true, sendOpus: () => true }, 'unused', null, () => ended++, assert.fail, '', {
     prepareInput: async () => ({ url: 'https://example.invalid/audio' }), spawn: () => process,
   });
+  process.stdout.write(opusPage(50));
   process.emit('close', 0, null);
-  await new Promise(resolve => setTimeout(resolve, 150));
+  await new Promise(resolve => setTimeout(resolve, 2_000));
   assert.equal(ended, 1);
   assert.equal(process.killed, true);
+  sender.stop();
+});
+
+test('un flux FFmpeg vide ou nettement trop court est signalé comme interrompu', async () => {
+  const process = child();
+  const errors = [];
+  let ended = 0;
+  const sender = await OpusSender.start({}, 'unused', null, () => ended++, error => errors.push(error), '', {
+    prepareInput: async () => ({ url: 'https://example.invalid/audio' }), spawn: () => process,
+    expectedDuration: 120,
+  });
+  process.stdout.write(opusPage(50)); // environ une seconde d’audio pour un titre annoncé à deux minutes
+  process.emit('close', 0, null);
+  assert.equal(ended, 0);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, 'AUDIO_PREMATURE_END');
+  assert.match(errors[0].message, /terminé prématurément/);
+  sender.stop();
+});
+
+test('un flux Opus en attente applique la contre-pression au lieu de supprimer des trames', async () => {
+  const process = child();
+  const sender = await OpusSender.start({ connected: true, sendOpus: () => true }, 'unused', null, null, assert.fail, '', {
+    prepareInput: async () => ({ url: 'https://example.invalid/audio' }), spawn: () => process,
+  });
+  process.stdout.write(opusPage(252));
+  await new Promise(setImmediate);
+  assert.equal(process.stdout.isPaused(), true);
   sender.stop();
 });
 

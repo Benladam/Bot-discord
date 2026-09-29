@@ -39,6 +39,29 @@ test('les commandes play et playlist se sérialisent pour l’API Discord', () =
   }
 });
 
+test('les deux systèmes de commandes restent actifs et l’aide affiche les noms sans préfixe', async () => {
+  const { normalizeCommandPrefix, parsePrefixedCommand } = require('../core/commandConfig');
+  assert.equal(normalizeCommandPrefix('!'), '!');
+  assert.deepEqual(parsePrefixedCommand('!play Niska', '!'), { name: 'play', args: ['Niska'] });
+
+  const command = require('../commands/help');
+  const registered = new Map([['play', {
+    slash: true,
+    helpCategory: 'music',
+    data: { name: 'play', description: 'Jouer une musique', options: [{ type: 3, name: 'query', required: true }] },
+  }]]);
+  let response;
+  await command.execute({
+    user: { id: 'user-1' },
+    isChatInputCommand: () => true,
+    reply: async (payload) => { response = payload; },
+  }, [], { commands: registered, langFor: () => 'fr' });
+  const helpText = JSON.stringify(response.embeds[0].toJSON());
+  assert.match(helpText, /\*\*play\*\*.*query/);
+  assert.doesNotMatch(helpText, /[!/](?:play|pause|skip)/);
+  assert.equal(response.files[0].name, 'music-bot-emblem.png');
+});
+
 test('/24-7 est une commande serveur réservée à la permission Gérer le serveur et bascule son réglage', async () => {
   const { PermissionFlagsBits } = require('discord.js');
   const command = require('../commands/24-7');
@@ -110,7 +133,7 @@ test('/controller renvoie l’adresse publique hébergée et jamais localhost', 
   const command = require('../commands/controller');
   const previous = process.env.WEB_PUBLIC_URL;
   let response;
-  process.env.WEB_PUBLIC_URL = 'https://BotHeuss.fr';
+  process.env.WEB_PUBLIC_URL = 'https://music.example.org';
   try {
     await command.execute({
       guildId: '123456789012345678',
@@ -122,7 +145,7 @@ test('/controller renvoie l’adresse publique hébergée et jamais localhost', 
     else process.env.WEB_PUBLIC_URL = previous;
   }
   assert.equal(response.flags, require('discord.js').MessageFlags.Ephemeral);
-  assert.match(response.embeds[0].data.description, /https:\/\/botheuss\.fr\//i);
+  assert.match(response.embeds[0].data.description, /https:\/\/music\.example\.org\//i);
   assert.doesNotMatch(response.embeds[0].data.description, /localhost|127\.0\.0\.1/);
 });
 
@@ -209,7 +232,7 @@ test('/play affiche query immédiatement tout en gardant le Top 25 comme autocom
   });
 
   assert.equal(deferred, true);
-  assert.equal(response.embeds[0].data.title, '🌍 Top 25 mondial');
+  assert.equal(response.embeds[0].data.title, '🎵 🌍 Top 25 mondial');
   assert.equal(response.components.length, 2);
   assert.equal(response.components[0].components[0].toJSON().options.length, 25);
 
@@ -222,7 +245,7 @@ test('/play affiche query immédiatement tout en gardant le Top 25 comme autocom
     getWorldTopTracks: async () => items,
     logger: { info() {}, warn() {}, error() {} },
   });
-  assert.equal(response.embeds[0].data.title, '🌍 Top 25 mondial');
+  assert.equal(response.embeds[0].data.title, '🎵 🌍 Top 25 mondial');
 });
 
 test('l’autocomplétion répond avec un choix de secours si un fournisseur dépasse le délai', async () => {

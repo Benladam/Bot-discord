@@ -6,11 +6,11 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder,
   PermissionFlagsBits,
   WebhookClient,
 } = require('discord.js');
 const { WebSocket, WebSocketServer } = require('ws');
+const { createThemedEmbed } = require('../../shared/discord/embedTheme');
 const { resolveQuery } = require('../music/resolve');
 const { cleanMediaQuery } = require('../music/mediaQuery');
 
@@ -184,8 +184,7 @@ function createMinecraftBridge({ client, getPlayer, database, logger = console, 
       throw new Error('Le webhook des nouvelles Minecraft est mal configuré. Vérifie MINECRAFT_NEWS_WEBHOOK_URL.');
     }
 
-    const embed = new EmbedBuilder()
-      .setColor(0x2ecc71)
+    const embed = createThemedEmbed('success')
       .setTitle('Minecraft — redémarrage terminé')
       .setDescription('**Changements Minecraft**\n' + changes)
       .setFooter({ text: 'Journal Minecraft uniquement' })
@@ -227,7 +226,7 @@ function createMinecraftBridge({ client, getPlayer, database, logger = console, 
         .setStyle(ButtonStyle.Danger),
     );
     await member.send({
-      content: 'Heuss l’Enfoiré a reçu une demande pour relier le compte Minecraft **'
+      content: 'Le bot a reçu une demande pour relier le compte Minecraft **'
         + playerName + '** à ton compte Discord. Si tu as lancé cette demande, confirme ci-dessous. '
         + 'Sinon, refuse-la. La demande expire dans 10 minutes.',
       components: [buttons],
@@ -358,7 +357,7 @@ function createMinecraftBridge({ client, getPlayer, database, logger = console, 
       return { ok: true, message: 'Lecture arrêtée et file vidée.' };
     }
     if (action === 'leave') {
-      player.destroy();
+      player.leave();
       return { ok: true, message: 'Le bot a quitté le salon vocal.' };
     }
     return { ok: false, message: 'Commande musicale inconnue.' };

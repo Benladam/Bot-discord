@@ -1,6 +1,6 @@
 /** Recherche et lecture YouTube, Spotify, Deezer et playlists publiques. */
 const crypto = require('crypto');
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 const { resolveQuery } = require('../features/music/resolve');
 const { cleanMediaQuery } = require('../features/music/mediaQuery');
 const { searchCatalog, getArtistAlbums, getWorldTopTracks } = require('../features/music/musicCatalog');
@@ -8,6 +8,7 @@ const { selectAutocompleteItems, toAutocompleteChoice, toSearchFallbackChoice, W
 const { getMusicInputInfo, formatMusicAttempt, resolveMusicLinkMetadata, cleanLogText, sanitizeDiagnosticText } = require('../features/music/musicLinkMetadata');
 const embeds = require('../shared/discord/embeds');
 const { tr } = require('../shared/i18n/embedI18n');
+const { createThemedEmbed } = require('../shared/discord/embedTheme');
 
 const PAGE_SIZE = 25;
 // Répond tôt pour garder une marge sous le délai d’interaction Discord,
@@ -141,8 +142,8 @@ function renderSession(id, session) {
   } else if (session.items.some((item) => item.provider === 'spotify' && item.kind === 'playlist')) {
     description += ' Les titres des playlists Spotify peuvent être bloqués par leurs droits d’accès.';
   }
-  const embed = new EmbedBuilder().setColor('#5865F2').setTitle(session.title.slice(0, 256))
-    .setDescription(description);
+  const embed = createThemedEmbed('primary').setTitle(`🎵 ${session.title.slice(0, 250)}`)
+    .setDescription(description).setFooter({ text: 'Recherche musicale · résultats fournis par les catalogues' }).setTimestamp();
   const components = [];
   if (pageItems.length) {
     const menu = new StringSelectMenuBuilder().setCustomId(`playcat:${id}:select`).setPlaceholder('Sélectionner un résultat')
@@ -186,13 +187,17 @@ async function resolveCatalogItem(item) {
       duration: item.duration || 0,
       thumbnail: item.thumbnail || null,
       source: 'soundcloud',
+      provider: item.provider,
+      sourceUrl: item.url,
       fallbackQuery: [item.subtitle, item.title].filter(Boolean).join(' - '),
     }];
   }
   const songs = await resolveQuery(item.url);
-  for (const song of songs) {
+  for (let index = 0; index < songs.length; index += 1) {
+    const song = songs[index];
     const fallbackTitle = item.kind === 'track' ? item.title : song.title || item.title;
     song.fallbackQuery ||= [item.subtitle, fallbackTitle].filter(Boolean).join(' - ');
+    songs[index] = { ...song, provider: item.provider, sourceUrl: item.url };
   }
   if (item.provider === 'youtube' && songs[0]) {
     songs[0] = { ...songs[0], title: item.title || songs[0].title, duration: item.duration || songs[0].duration };
@@ -263,6 +268,7 @@ module.exports = {
     ],
   },
   slash: true,
+  helpCategory: 'music',
   handleCatalogInteraction,
   autocompleteFallback,
 
@@ -466,7 +472,12 @@ module.exports = {
         ? metadata.searchQuery
         : inputInfo.kind === 'link' ? query : searchTerm;
       const resolver = deps.resolveQuery || resolveQuery;
-      const songs = await resolver(resolveInput, { fetchImpl: deps.fetch || globalThis.fetch });
+      const resolvedSongs = await resolver(resolveInput, { fetchImpl: deps.fetch || globalThis.fetch });
+      const songs = resolvedSongs.map((song) => ({
+        ...song,
+        provider: inputInfo.kind === 'link' ? inputInfo.provider : song.provider || song.source || 'youtube',
+        sourceUrl: inputInfo.kind === 'link' ? query : song.sourceUrl || song.url,
+      }));
       const { queued, player } = await queueSongs(ctx, deps, songs);
       loggerCall(deps, 'info', `[play] lecture ${queued ? 'ajoutée à la file' : 'lancée'} titre=${JSON.stringify(cleanLogText(songs[0]?.title, 160))} pistes=${songs.length}`);
       if (isSlash(ctx)) return edit({ content: `${songs.length} titre${songs.length === 1 ? '' : 's'} ${queued ? 'ajouté(s) à la file' : 'ajouté(s) · lecture lancée'}.`, embeds: [], components: [] });

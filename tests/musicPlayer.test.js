@@ -303,19 +303,26 @@ test('la fin naturelle de la file notifie le demandeur et libère le lecteur', a
 test('le délai d’inactivité publie un embed puis quitte le vocal', async () => {
   const { MusicPlayer } = require('../features/music/musicPlayer');
   let destroyed = false;
+  let deleted = 0;
+  const leavePackets = [];
   const notifications = [];
-  const player = new MusicPlayer('guild-idle-notice', { user: { id: 'bot-user' } }, { inactivityTimeoutMs: 10 });
+  const guildId = 'guild-idle-notice';
+  const shard = { send: (packet) => leavePackets.push(packet) };
+  const client = { user: { id: 'bot-user' }, guilds: { cache: new Map([[guildId, { shard }]]) } };
+  const player = new MusicPlayer(guildId, client, { inactivityTimeoutMs: 10, noticeTtlMs: 10 });
   player.connection = { connected: true, channelId: 'voice-idle', destroy() { destroyed = true; } };
-  player.lastChannel = { send: async (payload) => { notifications.push(payload); } };
+  player.lastChannel = { send: async (payload) => { notifications.push(payload); return { delete: async () => { deleted += 1; } }; } };
 
   player._scheduleIdleLeave();
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  await new Promise((resolve) => setTimeout(resolve, 45));
 
   assert.equal(destroyed, true);
   assert.equal(player.connection, null);
   assert.equal(notifications.length, 1);
   assert.match(notifications[0].embeds[0].data.title, /inactivité/);
   assert.match(notifications[0].embeds[0].data.description, /\/24-7/);
+  assert.deepEqual(leavePackets[0], { op: 4, d: { guild_id: guildId, channel_id: null, self_mute: false, self_deaf: false } });
+  assert.equal(deleted, 1, 'l’avis temporaire est supprimé après son délai');
 });
 
 test('le mode 24/7 empêche les minuteurs d’inactivité, même s’il est activé avant leur échéance', async () => {
@@ -347,8 +354,11 @@ test('le mode 24/7 empêche les minuteurs d’inactivité, même s’il est acti
 test('l’absence de membres déclenche une notification distincte avant de quitter', async () => {
   const { MusicPlayer } = require('../features/music/musicPlayer');
   let destroyed = false;
+  const leavePackets = [];
   const notifications = [];
-  const player = new MusicPlayer('guild-alone-notice', { user: { id: 'bot-user' } }, { inactivityTimeoutMs: 10 });
+  const guildId = 'guild-alone-notice';
+  const client = { user: { id: 'bot-user' }, guilds: { cache: new Map([[guildId, { shard: { send: (packet) => leavePackets.push(packet) } }]]) } };
+  const player = new MusicPlayer(guildId, client, { inactivityTimeoutMs: 10 });
   player.connection = { connected: true, channelId: 'voice-empty', destroy() { destroyed = true; } };
   player._hasHumanMembers = () => false;
   player.lastChannel = { send: async (payload) => { notifications.push(payload); } };
@@ -360,4 +370,5 @@ test('l’absence de membres déclenche une notification distincte avant de quit
   assert.equal(notifications.length, 1);
   assert.match(notifications[0].embeds[0].data.title, /salon vocal/);
   assert.match(notifications[0].embeds[0].data.description, /\/24-7/);
+  assert.equal(leavePackets[0]?.d?.channel_id, null, 'le Gateway Discord reçoit bien la demande de départ');
 });

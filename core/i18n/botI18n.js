@@ -23,7 +23,7 @@ const STR = {
     modeAdminOnly: '🛡️ Mode : administration uniquement (musique désactivée).',
     modeAll: '🌟 Mode : tout (musique + administration).',
     discordOffline: 'Discord hors-ligne — fonctionnalités du bot limitées au panneau.',
-    promo: 'Bot créé avec le panneau Heuss. Rejoins le support : ',
+    promo: 'Bot Discord open source. Rejoins le serveur d’assistance : ',
   },
   en: {
     helpTitle: '📖 Bot commands',
@@ -43,7 +43,7 @@ const STR = {
     modeAdminOnly: '🛡️ Mode: admin only (music disabled).',
     modeAll: '🌟 Mode: all (music + admin).',
     discordOffline: 'Discord offline — bot features limited to the panel.',
-    promo: 'Bot built with the Heuss panel. Join support: ',
+    promo: 'Open-source Discord bot. Join the support server: ',
   },
   es: {
     helpTitle: '📖 Comandos del bot',
@@ -63,7 +63,7 @@ const STR = {
     modeAdminOnly: '🛡️ Modo: solo admin (música desactivada).',
     modeAll: '🌟 Modo: todo (música + admin).',
     discordOffline: 'Discord desconectado — funciones del bot limitadas al panel.',
-    promo: 'Bot creado con el panel Heuss. Únete al soporte: ',
+    promo: 'Bot de Discord de código abierto. Únete al servidor de soporte: ',
   },
   ar: {
     helpTitle: '📖 أوامر البوت',
@@ -83,7 +83,7 @@ const STR = {
     modeAdminOnly: '🛡️ الوضع: إدارة فقط (الموسيقى معطلة).',
     modeAll: '🌟 الوضع: الكل (موسيقى + إدارة).',
     discordOffline: 'ديسكورد غير متصل — ميزات البوت محدودة باللوحة.',
-    promo: 'تم إنشاء البوت عبر لوحة Heuss. انضم للدعم: ',
+    promo: 'بوت Discord مفتوح المصدر. انضم إلى خادم الدعم: ',
   },
 };
 
