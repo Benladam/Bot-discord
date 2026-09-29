@@ -13,7 +13,7 @@ const { createThemedEmbed } = require('../shared/discord/embedTheme');
 const PAGE_SIZE = 25;
 // Répond tôt pour garder une marge sous le délai d’interaction Discord,
 // surtout lorsque l’hôte distant a une forte latence réseau.
-const AUTOCOMPLETE_TIMEOUT_MS = 1_200;
+const AUTOCOMPLETE_TIMEOUT_MS = 2_000;
 const sessions = new Map();
 const SESSION_TTL = 10 * 60 * 1000;
 const AUTOCOMPLETE_TIMEOUT = Symbol('autocomplete timeout');

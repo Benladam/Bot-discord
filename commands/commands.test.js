@@ -423,6 +423,22 @@ test('l’autocomplétion répond avec un choix de secours si un fournisseur dé
   assert.deepEqual(response, [{ name: '🔎 Rechercher « niska »', value: 'niska' }]);
 });
 
+test('l’autocomplétion normale laisse près de deux secondes aux fournisseurs musicaux', async () => {
+  const playCommand = require('./play');
+  let sourceTimeoutMs;
+  await playCommand.autocomplete({
+    options: { getFocused: () => 'niska' },
+    respond: async (choices) => { assert.equal(choices.length, 1); },
+  }, {
+    searchCatalog: async (_query, options) => {
+      sourceTimeoutMs = options.sourceTimeoutMs;
+      return [{ provider: 'youtube', kind: 'track', title: 'Chasse à l’homme', url: 'https://youtube.com/watch?v=abc1234' }];
+    },
+  });
+  assert.ok(sourceTimeoutMs >= 1_700, `budget reçu: ${sourceTimeoutMs} ms`);
+  assert.ok(sourceTimeoutMs <= 1_900, `budget reçu: ${sourceTimeoutMs} ms`);
+});
+
 test('le Top mondial en retard renvoie un choix de secours au lieu de laisser expirer Discord', async () => {
   const playCommand = require('./play');
   let response;

@@ -14,10 +14,24 @@ const {
   getYouTubeCookiesPath,
   getYouTubeCookiesPaths,
   parseYtDlpSearch,
+  prepareInput,
   searchYouTubeCandidates,
+  soundCloudSearchStream,
   streamUrl,
 } = require('./audioSender');
 const { getSoundCloudClientId } = require('./providers/soundcloud');
+
+const originalBotDataDir = process.env.BOT_DATA_DIR;
+let testDataDirectory;
+test.before(async () => {
+  testDataDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-yt-dlp-tests-'));
+  process.env.BOT_DATA_DIR = testDataDirectory;
+});
+test.after(async () => {
+  if (originalBotDataDir === undefined) delete process.env.BOT_DATA_DIR;
+  else process.env.BOT_DATA_DIR = originalBotDataDir;
+  if (testDataDirectory) await fs.rm(testDataDirectory, { recursive: true, force: true });
+});
 
 test('sélectionne le binaire yt-dlp officiel pour les plateformes courantes', () => {
   assert.equal(releaseAsset('linux', 'x64'), 'yt-dlp_linux');
@@ -69,14 +83,16 @@ test('parse les résultats JSON yt-dlp en URLs YouTube jouables', () => {
 
 test('recherche YouTube installe le binaire géré après ENOENT et conserve le cookie', async () => {
   const calls = [];
+  const spawnOptions = [];
   const cookieCopies = [];
   let installs = 0;
   const cookieDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-search-cookie-'));
   const cookiePath = path.join(cookieDir, 'cookies.txt');
   const cookieContents = '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsource-cookie\n';
   await fs.writeFile(cookiePath, cookieContents);
-  const fakeSpawn = (command, args) => {
+  const fakeSpawn = (command, args, options) => {
     calls.push({ command, args });
+    spawnOptions.push(options);
     const cookieIndex = args.indexOf('--cookies');
     const workingPath = args[cookieIndex + 1];
     cookieCopies.push({ path: workingPath, contents: fsSync.readFileSync(workingPath, 'utf8') });
@@ -104,6 +120,7 @@ test('recherche YouTube installe le binaire géré après ENOENT et conserve le 
       candidates: [['yt-dlp', []]],
       cookiesPaths: [cookiePath],
       cookieTempDirectory: path.join(cookieDir, 'working-cookies'),
+      runtimeTempDirectory: path.join(cookieDir, 'runtime'),
       install: async () => { installs++; return 'managed-yt-dlp'; },
       spawnImpl: fakeSpawn,
       limit: 1,
@@ -116,10 +133,58 @@ test('recherche YouTube installe le binaire géré après ENOENT et conserve le 
     assert.ok(cookieCopies.every(copy => copy.path !== cookiePath && copy.contents === cookieContents));
     assert.ok(cookieCopies.every(copy => copy.path.startsWith(path.join(cookieDir, 'working-cookies'))));
     assert.notEqual(cookieCopies[0].path, cookieCopies[1].path);
+    assert.equal(spawnOptions.length, 2);
+    for (const options of spawnOptions) {
+      assert.equal(options.env.TMPDIR, path.join(cookieDir, 'runtime'));
+      assert.equal(options.env.TEMP, path.join(cookieDir, 'runtime'));
+      assert.equal(options.env.TMP, path.join(cookieDir, 'runtime'));
+      assert.ok(options.env.PATH);
+    }
+    assert.equal((await fs.stat(path.join(cookieDir, 'runtime'))).isDirectory(), true);
     assert.equal(await fs.readFile(cookiePath, 'utf8'), cookieContents);
   } finally {
     await fs.rm(cookieDir, { recursive: true, force: true });
   }
+});
+
+test('le repli SoundCloud refuse les extraits courts et essaie un résultat complet ensuite', async () => {
+  const opened = [];
+  const selected = await soundCloudSearchStream('Artiste - Titre', {
+    expectedDuration: 181,
+    searchCandidates: async () => [
+      { permalink: 'https://soundcloud.com/example/preview', durationInSec: 29 },
+      { permalink: 'https://soundcloud.com/example/full-track', durationInSec: 180 },
+    ],
+    openTrack: async (url) => { opened.push(url); return new PassThrough(); },
+  });
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0], 'https://soundcloud.com/example/full-track');
+  assert.equal(typeof selected.pipe, 'function');
+  selected.destroy();
+});
+
+test('le repli SoundCloud échoue clairement si seuls des extraits courts correspondent', async () => {
+  await assert.rejects(soundCloudSearchStream('Artiste - Titre', {
+    expectedDuration: 181,
+    searchCandidates: async () => [
+      { permalink: 'https://soundcloud.com/example/preview', durationInSec: 29 },
+    ],
+  }), /extraits trop courts/);
+});
+
+test('transmet la durée Spotify attendue au repli SoundCloud', async () => {
+  let expectedDuration;
+  const selected = await prepareInput('https://youtube.com/watch?v=abc1234', 'Artiste - Titre', {
+    expectedDuration: 181,
+    getYouTubeStream: async () => { throw new Error('YouTube indisponible'); },
+    searchSoundCloudStream: async (_query, options) => {
+      expectedDuration = options.expectedDuration;
+      return new PassThrough();
+    },
+  });
+  assert.equal(expectedDuration, 181);
+  assert.equal(selected.fallback, true);
+  selected.stream.destroy();
 });
 
 test('une erreur ENOSPC arrête immédiatement les essais yt-dlp et donne une indication utile', async () => {

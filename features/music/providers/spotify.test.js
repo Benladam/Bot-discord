@@ -2,6 +2,36 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const SpotifyWebApi = require('spotify-web-api-node');
 
+test('un échec de recherche yt-dlp retombe sur la recherche YouTube play-dl', async () => {
+  const { searchYouTube } = require('./spotify');
+  const result = await searchYouTube('Artiste - Titre', {
+    searchYtDlp: async () => { throw new Error('PyInstaller extraction failed'); },
+    searchPlayDl: async (query, options) => {
+      assert.equal(query, 'Artiste - Titre');
+      assert.deepEqual(options, { limit: 3, source: { youtube: 'video' } });
+      return [{
+        title: 'Titre officiel',
+        url: 'https://www.youtube.com/watch?v=abc1234',
+        durationInSec: 181,
+        thumbnails: [{ url: 'https://i.ytimg.com/vi/abc1234/default.jpg' }],
+      }];
+    },
+  });
+  assert.equal(result.title, 'Titre officiel');
+  assert.equal(result.url, 'https://www.youtube.com/watch?v=abc1234');
+  assert.equal(result.duration, 181);
+  assert.equal(result.fallbackQuery, 'Artiste - Titre');
+});
+
+test('la recherche Spotify ignore les URL vidéo retournées par des domaines inattendus', async () => {
+  const { searchYouTube } = require('./spotify');
+  const result = await searchYouTube('Artiste - Titre', {
+    searchYtDlp: async () => [],
+    searchPlayDl: async () => [{ title: 'Titre', url: 'https://example.com/audio' }],
+  });
+  assert.equal(result, null);
+});
+
 test('les playlists Spotify utilisent /items et expliquent les accès refusés', async () => {
   const oldFetch = global.fetch;
   const oldGrant = SpotifyWebApi.prototype.clientCredentialsGrant;

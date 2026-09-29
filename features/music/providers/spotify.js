@@ -145,10 +145,13 @@ function parseSpotifyUrl(url) {
   }
 }
 
-async function searchYouTube(query) {
-  const results = await searchYouTubeCandidates(query, { limit: 1 });
-  if (!results.length) return null;
-  const r = results[0];
+function normalizeYouTubeMatch(r, query) {
+  if (!r?.url) return null;
+  try {
+    const parsed = new URL(r.url);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    if (parsed.protocol !== 'https:' || !['youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'].includes(host)) return null;
+  } catch (_) { return null; }
   return {
     title: r.title,
     url: r.url,
@@ -157,6 +160,37 @@ async function searchYouTube(query) {
     source: 'spotify',
     fallbackQuery: query,
   };
+}
+
+async function searchYouTube(query, {
+  searchYtDlp = searchYouTubeCandidates,
+  searchPlayDl = (...args) => play.search(...args),
+} = {}) {
+  let ytDlpError = null;
+  try {
+    const results = await searchYtDlp(query, { limit: 1 });
+    const match = normalizeYouTubeMatch(results[0], query);
+    if (match) return match;
+  } catch (error) {
+    ytDlpError = error;
+  }
+
+  // Kinetic peut momentanément refuser l’extraction du binaire autonome.
+  // play-dl essaie un chemin distinct pour retrouver une URL vidéo directe.
+  try {
+    const results = await searchPlayDl(query, { limit: 3, source: { youtube: 'video' } });
+    const match = (Array.isArray(results) ? results : [])
+      .map((item) => normalizeYouTubeMatch(item, query))
+      .find(Boolean);
+    if (match) return match;
+  } catch (error) {
+    if (ytDlpError) {
+      console.warn(`[spotify] recherche yt-dlp/play-dl échouée pour « ${String(query).slice(0, 100)} »: ${error.message}`);
+    }
+  }
+
+  if (ytDlpError) throw ytDlpError;
+  return null;
 }
 
 async function resolveTrack(api, track) {
@@ -282,5 +316,5 @@ async function resolveTrackWithoutApi(url) {
 }
 
 module.exports = {
-  isSpotifyUrl, parseSpotifyUrl, resolveSpotifyLink, searchSpotify, searchSpotifyCatalog, getSpotifyArtistAlbums,
+  isSpotifyUrl, parseSpotifyUrl, resolveSpotifyLink, searchSpotify, searchSpotifyCatalog, getSpotifyArtistAlbums, searchYouTube,
 };

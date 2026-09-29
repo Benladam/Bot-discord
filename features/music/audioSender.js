@@ -10,6 +10,7 @@ const { configureSoundCloud } = require('./providers/soundcloud');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
+const MIN_FALLBACK_DURATION_RATIO = 0.65;
 const MAX_BUFFERED_OPUS_FRAMES = 250;
 const RESUME_OPUS_BUFFER_FRAMES = 125;
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -186,13 +187,58 @@ function configuredCookiesPath(options = {}) {
     : normalizeCookiesPath(options.cookiesPath, projectRoot);
 }
 
-async function soundCloudStream(url) {
+function ytDlpSpawnOptions(options = {}) {
+  const env = options.env || process.env;
+  const runtimeTempDirectory = options.runtimeTempDirectory || path.join(
+    getDataDirectory({ env }), '.cache', 'yt-dlp', 'runtime',
+  );
+  fs.mkdirSync(runtimeTempDirectory, { recursive: true, mode: 0o700 });
+  return {
+    windowsHide: true,
+    env: {
+      ...env,
+      // Le binaire Linux autonome yt-dlp est empaqueté avec PyInstaller et
+      // extrait ses bibliothèques dans TMPDIR avant de démarrer.
+      TMPDIR: runtimeTempDirectory,
+      TEMP: runtimeTempDirectory,
+      TMP: runtimeTempDirectory,
+    },
+  };
+}
+
+function isSoundCloudPreviewFormat(format) {
+  return format.snipped === true
+    || /(?:^|_)preview(?:_|$)/i.test(String(format.format_id || ''))
+    || /\/(?:preview(?:\/|$)|playlist\/0\/30(?:\/|$))/i.test(String(format.url || ''));
+}
+
+async function soundCloudStream(url, {
+  getYtDlpStream = streamYtDlp,
+  getTrack = (...args) => play.soundcloud(...args),
+  streamFromInfo = (...args) => play.stream_from_info(...args),
+  isConfigured = configureSoundCloud,
+} = {}) {
   try {
-    return await streamYtDlp(url);
+    return await getYtDlpStream(url);
   } catch (ytDlpError) {
-    if (!configureSoundCloud()) throw ytDlpError;
+    if (!isConfigured()) throw ytDlpError;
     try {
-      const result = await play.stream(url);
+      const track = await getTrack(url);
+      const minimumMs = Number(track?.durationInSec) * 1_000 * MIN_FALLBACK_DURATION_RATIO;
+      const formats = (Array.isArray(track?.formats) ? track.formats : []).filter((format) => (
+        format?.format?.protocol === 'hls'
+        && !isSoundCloudPreviewFormat(format)
+        && !(minimumMs > 0 && Number(format.duration) > 0 && Number(format.duration) < minimumMs)
+      ));
+      if (track?.type !== 'track' || !formats.length) {
+        const error = new Error('SoundCloud ne fournit aucun flux complet HLS pour cette piste; les extraits ont été refusés.');
+        error.code = 'SOUNDCLOUD_PREVIEW_ONLY';
+        throw error;
+      }
+      // Conserve l’instance SoundCloudTrack attendue par play-dl, mais ne lui
+      // laisse sélectionner que les transcodages complets de cette requête.
+      track.formats = formats;
+      const result = await streamFromInfo(track);
       if (!result?.stream || typeof result.stream.pipe !== 'function') {
         throw new Error('SoundCloud n’a pas fourni de flux audio lisible.');
       }
@@ -204,31 +250,52 @@ async function soundCloudStream(url) {
   }
 }
 
-async function soundCloudSearchStream(query) {
+async function soundCloudSearchStream(query, {
+  expectedDuration,
+  searchCandidates = searchSoundCloudCandidates,
+  searchFallback = (...args) => play.search(...args),
+  openTrack = soundCloudStream,
+  isConfigured = configureSoundCloud,
+} = {}) {
   const normalized = String(query || '').trim().slice(0, 200);
   if (normalized.length < 2) throw new Error('Recherche SoundCloud trop courte.');
   let tracks = [];
   let lastError = null;
   try {
-    tracks = await searchSoundCloudCandidates(normalized, { limit: 5 });
+    tracks = await searchCandidates(normalized, { limit: 5 });
   } catch (error) {
     lastError = error;
   }
-  if (!tracks.length && configureSoundCloud()) {
+  if (!tracks.length && isConfigured()) {
     try {
-      tracks = await play.search(normalized, { limit: 5, source: { soundcloud: 'tracks' } });
+      tracks = await searchFallback(normalized, { limit: 5, source: { soundcloud: 'tracks' } });
     } catch (error) {
       lastError = error;
     }
   }
+  const expected = Number(expectedDuration);
+  const minimumDuration = Number.isFinite(expected) && expected >= 45
+    ? expected * MIN_FALLBACK_DURATION_RATIO
+    : 0;
+  let rejectedShortTracks = 0;
+  let attemptedFullTracks = 0;
   for (const track of tracks) {
     const url = track.permalink || track.webpage_url || track.url;
     if (!url || !isSoundCloudUrl(url)) continue;
+    const duration = Number(track.durationInSec ?? track.duration);
+    if (minimumDuration && Number.isFinite(duration) && duration > 0 && duration < minimumDuration) {
+      rejectedShortTracks++;
+      continue;
+    }
+    attemptedFullTracks++;
     try {
-      return await soundCloudStream(url);
+      return await openTrack(url);
     } catch (error) {
       lastError = error;
     }
+  }
+  if (rejectedShortTracks && attemptedFullTracks === 0) {
+    throw new Error('SoundCloud ne propose que des extraits trop courts pour cette piste; ces résultats ont été refusés.');
   }
   throw lastError || new Error('Aucune piste SoundCloud publique et lisible trouvée.');
 }
@@ -293,7 +360,10 @@ function buildYtDlpArgs(preArgs, url, {
     : normalizeCookiesPath(cookiesPath, projectRoot);
   if (isYouTubeUrl(url) && resolvedCookiesPath) args.push('--cookies', resolvedCookiesPath);
   if (isYouTubeUrl(url) && playerClient) args.push('--extractor-args', `youtube:player_client=${playerClient}`);
-  args.push('--no-playlist', '-f', 'bestaudio/best');
+  const formatSelector = isSoundCloudUrl(url)
+    ? 'bestaudio[format_id!*=preview]/best[format_id!*=preview]'
+    : 'bestaudio/best';
+  args.push('--no-playlist', '-f', formatSelector);
   if (outputToStdout) args.push('-o', '-');
   else args.push('-g');
   args.push(url);
@@ -404,7 +474,7 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
       cookiesCopy = createTemporaryCookiesCopy(configuredCookiesPath(options), getYtDlpCookieTempDirectory(options));
       options = { ...options, cookiesPath: cookiesCopy?.path || '' };
       spawnAttempted = true;
-      child = spawnImpl(command, buildYtDlpSearchArgs(preArgs, query, options), { windowsHide: true });
+      child = spawnImpl(command, buildYtDlpSearchArgs(preArgs, query, options), ytDlpSpawnOptions(options));
     } catch (error) {
       childClosed = true;
       cleanupCookiesCopy();
@@ -458,6 +528,7 @@ async function searchYtDlpCandidates(query, {
   spawnImpl = spawn,
   cookiesPaths,
   cookieTempDirectory,
+  runtimeTempDirectory,
   projectRoot = PROJECT_ROOT,
   env = process.env,
 } = {}) {
@@ -479,6 +550,7 @@ async function searchYtDlpCandidates(query, {
       limit: safeLimit,
       cookiesPath: provider === 'youtube' ? cookiesPath : '',
       cookieTempDirectory,
+      runtimeTempDirectory,
       playerClient,
       provider,
       searchPrefix,
@@ -575,7 +647,7 @@ function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
       cookiesCopy = createTemporaryCookiesCopy(sourceCookiesPath, getYtDlpCookieTempDirectory(options));
       options = { ...options, cookiesPath: cookiesCopy?.path || '' };
       spawnAttempted = true;
-      child = spawnImpl(command, buildYtDlpArgs(preArgs, url, options), { windowsHide: true });
+      child = spawnImpl(command, buildYtDlpArgs(preArgs, url, options), ytDlpSpawnOptions(options));
     } catch (error) {
       childClosed = true;
       cleanupCookiesCopy();
@@ -625,6 +697,7 @@ async function streamUrl(url, {
   spawnImpl = spawn,
   cookiesPaths,
   cookieTempDirectory,
+  runtimeTempDirectory,
   projectRoot = PROJECT_ROOT,
   env = process.env,
 } = {}) {
@@ -642,7 +715,7 @@ async function streamUrl(url, {
     : [''];
   for (const [command, args] of candidates) {
     for (const cookiesPath of cookieAttempts) {
-      const result = await runYtDlp(command, args, url, spawnImpl, { cookiesPath, cookieTempDirectory, projectRoot, env });
+      const result = await runYtDlp(command, args, url, spawnImpl, { cookiesPath, cookieTempDirectory, runtimeTempDirectory, projectRoot, env });
       if (result.audioUrl) return result.audioUrl;
       if (result.resourceExhausted) throw ytDlpResourceError(result.error, result.code);
       errors.push(result.error);
@@ -658,7 +731,7 @@ async function streamUrl(url, {
     try {
       const managed = await install();
       for (const cookiesPath of cookieAttempts) {
-        const result = await runYtDlp(managed, [], url, spawnImpl, { cookiesPath, cookieTempDirectory, projectRoot, env });
+        const result = await runYtDlp(managed, [], url, spawnImpl, { cookiesPath, cookieTempDirectory, runtimeTempDirectory, projectRoot, env });
         if (result.audioUrl) return result.audioUrl;
         if (result.resourceExhausted) throw ytDlpResourceError(result.error, result.code);
         errors.push(result.error);
@@ -679,7 +752,7 @@ async function streamUrl(url, {
     // response when authenticated cookies trigger "page needs to be reloaded".
     if (rejectedCookiesPath && /page needs to be reloaded/i.test(cookieAttemptError)) {
       const alternateClient = await runYtDlp(command, args, url, spawnImpl, {
-        playerClient: 'default,web_embedded', cookiesPath: rejectedCookiesPath, cookieTempDirectory, projectRoot, env,
+        playerClient: 'default,web_embedded', cookiesPath: rejectedCookiesPath, cookieTempDirectory, runtimeTempDirectory, projectRoot, env,
       });
       if (alternateClient.audioUrl) return alternateClient.audioUrl;
       errors.push(alternateClient.error);
@@ -687,7 +760,7 @@ async function streamUrl(url, {
     // Après un rejet explicite des cookies, ne les renvoie pas au client
     // intégré : ils ne feront que répéter l'échec et peuvent être périmés.
     const embedded = await runYtDlp(command, args, url, spawnImpl, {
-      playerClient: 'web_embedded', cookiesPath: '', cookieTempDirectory, projectRoot, env,
+      playerClient: 'web_embedded', cookiesPath: '', cookieTempDirectory, runtimeTempDirectory, projectRoot, env,
     });
     if (embedded.audioUrl) return embedded.audioUrl;
     errors.push(embedded.error);
@@ -744,7 +817,7 @@ function runYtDlpPipe(command, preArgs, url, spawnImpl = spawn, options = {}) {
     try {
       cookiesCopy = createTemporaryCookiesCopy(configuredCookiesPath(options), getYtDlpCookieTempDirectory(options));
       options = { ...options, cookiesPath: cookiesCopy?.path || '', outputToStdout: true };
-      child = spawnImpl(command, buildYtDlpArgs(preArgs, url, options), { windowsHide: true });
+      child = spawnImpl(command, buildYtDlpArgs(preArgs, url, options), ytDlpSpawnOptions(options));
       child.stdout.pipe(audioStream);
     } catch (error) {
       childClosed = true;
@@ -801,6 +874,7 @@ async function streamYtDlp(url, {
   spawnImpl = spawn,
   cookiesPaths,
   cookieTempDirectory,
+  runtimeTempDirectory,
   projectRoot = PROJECT_ROOT,
   env = process.env,
 } = {}) {
@@ -819,6 +893,7 @@ async function streamYtDlp(url, {
     const result = await runYtDlpPipe(command, args, url, spawnImpl, {
       cookiesPath: youtubeUrl ? cookiesPath : '',
       cookieTempDirectory,
+      runtimeTempDirectory,
       playerClient,
       projectRoot,
       env,
@@ -923,7 +998,9 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
   } catch (youtubeError) {
     if (!normalizedQuery || !isYouTubeUrl(url)) throw youtubeError;
     try {
-      return asMedia(await searchSoundCloudStream(normalizedQuery), { fallback: true, fallbackProvider: 'SoundCloud' });
+      return asMedia(await searchSoundCloudStream(normalizedQuery, {
+        expectedDuration: providerOverrides.expectedDuration,
+      }), { fallback: true, fallbackProvider: 'SoundCloud' });
     } catch (soundCloudError) {
       throw providerFailure('YouTube', youtubeError, 'SoundCloud', soundCloudError);
     }
@@ -931,7 +1008,9 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
 }
 
 async function start(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies = {}) {
-  const media = await (dependencies.prepareInput || prepareInput)(url, fallbackQuery);
+  const media = await (dependencies.prepareInput || prepareInput)(url, fallbackQuery, {
+    expectedDuration: dependencies.expectedDuration,
+  });
   if (media.fallback) console.info(`[audio] Bascule vers ${media.fallbackProvider || 'un fournisseur alternatif'} après l’échec du flux principal.`);
   const requestedBitrate = Number(connection?.audioBitrate);
   const bitrate = Number.isFinite(requestedBitrate) && requestedBitrate > 0
@@ -1070,6 +1149,8 @@ module.exports = {
   prepareInput,
   searchYouTubeCandidates,
   searchSoundCloudCandidates,
+  soundCloudStream,
+  soundCloudSearchStream,
   resolveSoundCloudCandidates,
   youtubeSearchStream,
 };
