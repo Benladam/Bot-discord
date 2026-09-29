@@ -1,4 +1,4 @@
-const { PermissionFlagsBits } = require('discord.js');
+const { MessageFlags, PermissionFlagsBits } = require('discord.js');
 
 function isAdministrator(ctx) {
   const permissions = ctx.memberPermissions || ctx.member?.permissions;
@@ -7,7 +7,7 @@ function isAdministrator(ctx) {
 
 async function reply(ctx, content) {
   if (ctx.deferred || ctx.replied) return ctx.editReply({ content });
-  return ctx.reply({ content, ephemeral: true });
+  return ctx.reply({ content, flags: MessageFlags.Ephemeral });
 }
 
 module.exports = {
@@ -22,7 +22,7 @@ module.exports = {
     if (!ctx.guildId || !ctx.guild) return reply(ctx, 'Cette commande doit être utilisée dans un serveur.');
     if (!isAdministrator(ctx)) return reply(ctx, 'Seuls les administrateurs peuvent mettre à jour le bot.');
 
-    if (typeof ctx.deferReply === 'function') await ctx.deferReply({ ephemeral: true });
+    if (typeof ctx.deferReply === 'function') await ctx.deferReply({ flags: MessageFlags.Ephemeral });
     else await ctx.reply('Vérification de GitHub et installation de la mise à jour…');
 
     try {

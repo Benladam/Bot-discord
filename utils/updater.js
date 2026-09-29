@@ -237,7 +237,7 @@ function createUpdater({ client, database, log }) {
         logWith(log, 'warn', `Notification de mise à jour impossible sur ${guild.name}: ${error.message}`);
       }
     }
-    if (sent === 0) logWith(log, 'info', 'Mise à jour détectée; aucun salon /updatelog accessible n’est configuré.');
+    if (sent === 0) logWith(log, 'info', 'Annonce de mise à jour ignorée : aucun salon /updatelog accessible (cela ne bloque pas /update).');
     return sent;
   }
 
