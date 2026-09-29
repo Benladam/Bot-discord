@@ -28,7 +28,7 @@ const { sanitizeDiagnosticText } = require('./features/music/musicLinkMetadata')
 
 const { setupConsole } = require('./core/consoleCommands');
 const { normalizeCommandPrefix, getGatewayIntents, parsePrefixedCommand } = require('./core/commandConfig');
-const { buildSlashCommands } = require('./shared/discord/slashCommandBuilder');
+const { buildSlashCommands: buildSlashCommandsFromRegistry } = require('./shared/discord/slashCommandBuilder');
 const langStore = require('./core/i18n/langStore');
 const { t: botT } = require('./core/i18n/botI18n');
 // Les outils de Test ne sont jamais chargés par défaut. Leur activation exige
@@ -192,7 +192,7 @@ function loadCommands() {
 
 // --- Construction des slash commands pour l'API Discord ---
 function buildSlashCommands() {
-  return buildSlashCommands(client.commands);
+  return buildSlashCommandsFromRegistry(client.commands);
 }
 
 async function registerSlashCommands(clientId) {
@@ -283,6 +283,15 @@ client.once(Events.ClientReady, async (c) => {
 client.on(Events.InteractionCreate, async (interaction) => {
     if (await minecraftBridge.handleLinkButton(interaction)) return;
   if (interaction.isButton?.() || interaction.isStringSelectMenu?.()) {
+    if (interaction.customId?.startsWith('helpui:')) {
+      try { await client.commands.get('help')?.handleInteraction?.(interaction, deps); }
+      catch (e) {
+        Logger.error(`Erreur navigation aide: ${e.message}`);
+        if (interaction.deferred || interaction.replied) await interaction.followUp({ content: 'Impossible d’afficher cette page d’aide.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        else await interaction.reply({ content: 'Impossible d’afficher cette page d’aide.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      }
+      return;
+    }
     if (interaction.customId?.startsWith('musicctl:')) {
       try { await guildNowPlaying.handleControl(interaction, getPlayer); }
       catch (e) {

@@ -59,7 +59,108 @@ test('les deux systèmes de commandes restent actifs et l’aide affiche les nom
   const helpText = JSON.stringify(response.embeds[0].toJSON());
   assert.match(helpText, /\*\*play\*\*.*query/);
   assert.doesNotMatch(helpText, /[!/](?:play|pause|skip)/);
+  assert.equal(response.flags, require('discord.js').MessageFlags.Ephemeral);
+  assert.equal(response.components.length, 2, 'le menu privé contient un sélecteur de catégorie et une pagination');
   assert.equal(response.files[0].name, 'music-bot-emblem.png');
+});
+
+test('le menu d’aide privé sépare les catégories, pagine et refuse les interactions d’un autre utilisateur', async () => {
+  const command = require('../commands/help');
+  const registered = new Map();
+  for (let index = 0; index < 10; index += 1) {
+    registered.set(`track${index}`, {
+      slash: true,
+      helpCategory: 'music',
+      data: { name: `track${String(index).padStart(2, '0')}`, description: `Piste ${index}` },
+      execute() {},
+    });
+  }
+  registered.set('kick', {
+    slash: true,
+    helpCategory: 'moderation',
+    data: { name: 'kick', description: 'Expulse un membre', defaultMemberPermissions: '2' },
+    execute() {},
+  });
+  registered.set('owner-tool', {
+    slash: true,
+    ownerOnly: true,
+    helpCategory: 'setup',
+    data: { name: 'owner-tool', description: 'Outil privé' },
+    execute() {},
+  });
+  const deps = { commands: registered, langFor: () => 'fr', isOwner: (id) => id === 'owner-user' };
+
+  let firstPage;
+  await command.execute({
+    user: { id: 'user-1' },
+    isChatInputCommand: () => true,
+    reply: async (payload) => { firstPage = payload; },
+  }, [], deps);
+  const firstPageEmbed = firstPage.embeds[0].toJSON();
+  assert.match(firstPageEmbed.title, /Musique/);
+  assert.match(firstPageEmbed.footer.text, /Page 1\/2/);
+  assert.match(firstPageEmbed.description, /track07/);
+  assert.doesNotMatch(firstPageEmbed.description, /track08|owner-tool/);
+  assert.equal(firstPage.flags, require('discord.js').MessageFlags.Ephemeral);
+  const menu = firstPage.components[0].components[0].toJSON();
+  assert.equal(menu.custom_id, 'helpui:category:user-1');
+  assert.deepEqual(menu.options.map((option) => option.value), ['music', 'moderation']);
+
+  let denied;
+  await command.handleInteraction({
+    customId: 'helpui:category:user-1',
+    user: { id: 'other-user' },
+    reply: async (payload) => { denied = payload; },
+  }, deps);
+  assert.equal(denied.flags, require('discord.js').MessageFlags.Ephemeral);
+  assert.match(denied.content, /réservé/);
+
+  let selectedPage;
+  await command.handleInteraction({
+    customId: 'helpui:category:user-1',
+    user: { id: 'user-1' },
+    guildId: 'guild-1',
+    isStringSelectMenu: () => true,
+    values: ['moderation'],
+    message: { attachments: { values: () => [] } },
+    update: async (payload) => { selectedPage = payload; },
+  }, deps);
+  assert.match(selectedPage.embeds[0].toJSON().title, /Modération/);
+  assert.match(selectedPage.embeds[0].toJSON().description, /kick/);
+
+  let secondPage;
+  await command.handleInteraction({
+    customId: 'helpui:page:user-1:music:1',
+    user: { id: 'user-1' },
+    guildId: 'guild-1',
+    isButton: () => true,
+    message: { attachments: { values: () => [{ id: 'art-id', name: 'music-bot-emblem.png' }] } },
+    update: async (payload) => { secondPage = payload; },
+  }, deps);
+  assert.match(secondPage.embeds[0].toJSON().footer.text, /Page 2\/2/);
+  assert.match(secondPage.embeds[0].toJSON().description, /track08[\s\S]*track09/);
+  assert.deepEqual(secondPage.attachments, [{ id: 'art-id', filename: 'music-bot-emblem.png' }]);
+  assert.equal(secondPage.files, undefined, 'la pagination conserve l’illustration sans la renvoyer à chaque clic');
+});
+
+test('help par préfixe envoie le menu en DM sans publier la liste dans le salon', async () => {
+  const command = require('../commands/help');
+  let directMessage;
+  let channelReply = false;
+  await command.execute({
+    author: { id: 'user-1', send: async (payload) => { directMessage = payload; } },
+    guild: { id: 'guild-1' },
+    reply: async () => { channelReply = true; },
+  }, [], {
+    commands: new Map([['ping', {
+      data: { name: 'ping', description: 'Mesure la latence' },
+      execute() {},
+    }]]),
+    langFor: () => 'fr',
+  });
+  assert.ok(directMessage.embeds.length);
+  assert.ok(directMessage.components.length);
+  assert.equal(channelReply, false);
 });
 
 test('/24-7 est une commande serveur réservée à la permission Gérer le serveur et bascule son réglage', async () => {
