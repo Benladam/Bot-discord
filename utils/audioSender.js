@@ -1,8 +1,9 @@
-/** Envoi audio maison : yt-dlp -> FFmpeg Ogg/Opus -> RTP/UDP. */
+/** Envoi audio maison : yt-dlp stdout -> FFmpeg Ogg/Opus -> RTP/UDP. */
 const fs = require('fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('child_process');
+const { PassThrough } = require('node:stream');
 const ffmpegStatic = require('ffmpeg-static');
 const play = require('play-dl');
 const { ensureManagedYtDlp, getDataDirectory } = require('./ytDlp');
@@ -141,22 +142,42 @@ function configuredCookiesPath(options = {}) {
 }
 
 async function soundCloudStream(url) {
-  if (!configureSoundCloud()) throw new Error('Les liens SoundCloud nécessitent SOUNDCLOUD_CLIENT_ID dans le fichier .env.');
-  const result = await play.stream(url);
-  if (!result?.stream || typeof result.stream.pipe !== 'function') {
-    throw new Error('SoundCloud n’a pas fourni de flux audio lisible.');
+  try {
+    return await streamYtDlp(url);
+  } catch (ytDlpError) {
+    if (!configureSoundCloud()) throw ytDlpError;
+    try {
+      const result = await play.stream(url);
+      if (!result?.stream || typeof result.stream.pipe !== 'function') {
+        throw new Error('SoundCloud n’a pas fourni de flux audio lisible.');
+      }
+      return result.stream;
+    } catch (soundCloudError) {
+      soundCloudError.cause ||= ytDlpError;
+      throw soundCloudError;
+    }
   }
-  return result.stream;
 }
 
 async function soundCloudSearchStream(query) {
-  if (!configureSoundCloud()) throw new Error('La recherche SoundCloud nécessite SOUNDCLOUD_CLIENT_ID dans le fichier .env.');
   const normalized = String(query || '').trim().slice(0, 200);
   if (normalized.length < 2) throw new Error('Recherche SoundCloud trop courte.');
-  const tracks = await play.search(normalized, { limit: 5, source: { soundcloud: 'tracks' } });
+  let tracks = [];
   let lastError = null;
+  try {
+    tracks = await searchSoundCloudCandidates(normalized, { limit: 5 });
+  } catch (error) {
+    lastError = error;
+  }
+  if (!tracks.length && configureSoundCloud()) {
+    try {
+      tracks = await play.search(normalized, { limit: 5, source: { soundcloud: 'tracks' } });
+    } catch (error) {
+      lastError = error;
+    }
+  }
   for (const track of tracks) {
-    const url = track.permalink || track.url;
+    const url = track.permalink || track.webpage_url || track.url;
     if (!url || !isSoundCloudUrl(url)) continue;
     try {
       return await soundCloudStream(url);
@@ -177,7 +198,7 @@ async function youtubeSearchStream(query) {
     if (!video.url || !isYouTubeUrl(video.url)) continue;
     attempted++;
     try {
-      return await streamUrl(video.url);
+      return await streamYtDlp(video.url);
     } catch (error) {
       lastError = error;
     }
@@ -213,7 +234,13 @@ function ytDlpCandidates() {
   return candidates;
 }
 
-function buildYtDlpArgs(preArgs, url, { playerClient, cookiesPath, projectRoot = PROJECT_ROOT, env = process.env } = {}) {
+function buildYtDlpArgs(preArgs, url, {
+  playerClient,
+  cookiesPath,
+  projectRoot = PROJECT_ROOT,
+  env = process.env,
+  outputToStdout = false,
+} = {}) {
   const args = [...preArgs, '--js-runtimes', `node:${process.execPath}`];
   args.push('--remote-components', 'ejs:github');
   const resolvedCookiesPath = cookiesPath === undefined
@@ -221,7 +248,10 @@ function buildYtDlpArgs(preArgs, url, { playerClient, cookiesPath, projectRoot =
     : normalizeCookiesPath(cookiesPath, projectRoot);
   if (isYouTubeUrl(url) && resolvedCookiesPath) args.push('--cookies', resolvedCookiesPath);
   if (isYouTubeUrl(url) && playerClient) args.push('--extractor-args', `youtube:player_client=${playerClient}`);
-  args.push('--no-playlist', '-f', 'bestaudio/best', '-g', url);
+  args.push('--no-playlist', '-f', 'bestaudio/best');
+  if (outputToStdout) args.push('-o', '-');
+  else args.push('-g');
+  args.push(url);
   return args;
 }
 
@@ -231,9 +261,12 @@ function buildYtDlpSearchArgs(preArgs, query, {
   projectRoot = PROJECT_ROOT,
   env = process.env,
   limit = 5,
+  provider = 'youtube',
+  searchPrefix = provider === 'soundcloud' ? 'scsearch' : 'ytsearch',
+  inputMode = 'search',
 } = {}) {
-  const normalized = String(query || '').trim().slice(0, 200);
-  const safeLimit = Math.max(1, Math.min(10, Number(limit) || 5));
+  const normalized = String(query || '').trim().slice(0, inputMode === 'direct' ? 2_048 : 200);
+  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 5));
   const args = [
     ...preArgs,
     '--js-runtimes', `node:${process.execPath}`,
@@ -241,12 +274,14 @@ function buildYtDlpSearchArgs(preArgs, query, {
     '--no-warnings', '--flat-playlist', '--dump-single-json', '--skip-download',
     '--playlist-end', String(safeLimit),
   ];
-  const resolvedCookiesPath = cookiesPath === undefined
-    ? getYouTubeCookiesPath({ env, projectRoot })
-    : normalizeCookiesPath(cookiesPath, projectRoot);
-  if (resolvedCookiesPath) args.push('--cookies', resolvedCookiesPath);
-  if (playerClient) args.push('--extractor-args', `youtube:player_client=${playerClient}`);
-  args.push(`ytsearch${safeLimit}:${normalized}`);
+  if (provider === 'youtube') {
+    const resolvedCookiesPath = cookiesPath === undefined
+      ? getYouTubeCookiesPath({ env, projectRoot })
+      : normalizeCookiesPath(cookiesPath, projectRoot);
+    if (resolvedCookiesPath) args.push('--cookies', resolvedCookiesPath);
+    if (playerClient) args.push('--extractor-args', `youtube:player_client=${playerClient}`);
+  }
+  args.push(inputMode === 'direct' ? normalized : `${searchPrefix}${safeLimit}:${normalized}`);
   return args;
 }
 
@@ -259,8 +294,12 @@ function youtubeUrlFromSearchItem(item) {
   return '';
 }
 
-function normalizeYtDlpSearchItem(item) {
-  const url = youtubeUrlFromSearchItem(item);
+function soundCloudUrlFromSearchItem(item) {
+  return [item?.webpage_url, item?.original_url, item?.url].find(isSoundCloudUrl) || '';
+}
+
+function normalizeYtDlpSearchItem(item, provider = 'youtube') {
+  const url = provider === 'soundcloud' ? soundCloudUrlFromSearchItem(item) : youtubeUrlFromSearchItem(item);
   if (!url) return null;
   return {
     title: item.title || 'Musique inconnue',
@@ -272,7 +311,7 @@ function normalizeYtDlpSearchItem(item) {
   };
 }
 
-function parseYtDlpSearch(output) {
+function parseYtDlpSearch(output, provider = 'youtube') {
   const text = String(output || '').trim();
   if (!text) return [];
   const payloads = [];
@@ -286,7 +325,7 @@ function parseYtDlpSearch(output) {
   return payloads.flatMap((payload) => {
     if (Array.isArray(payload)) return payload;
     return Array.isArray(payload?.entries) ? payload.entries : [payload];
-  }).map(normalizeYtDlpSearchItem).filter(Boolean);
+  }).map((item) => normalizeYtDlpSearchItem(item, provider)).filter(Boolean);
 }
 
 function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}) {
@@ -348,7 +387,7 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
       childClosed = true;
       cleanupCookiesCopy();
       if (settled) return;
-      const items = code === 0 ? parseYtDlpSearch(stdout) : [];
+      const items = code === 0 ? parseYtDlpSearch(stdout, options.provider) : [];
       if (items.length) {
         finish({ items });
         return;
@@ -362,7 +401,10 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
   });
 }
 
-async function searchYouTubeCandidates(query, {
+async function searchYtDlpCandidates(query, {
+  provider = 'youtube',
+  inputMode = 'search',
+  searchPrefix = provider === 'soundcloud' ? 'scsearch' : 'ytsearch',
   limit = 5,
   candidates = ytDlpCandidates(),
   install = ensureManagedYtDlpOnce,
@@ -371,27 +413,34 @@ async function searchYouTubeCandidates(query, {
   projectRoot = PROJECT_ROOT,
   env = process.env,
 } = {}) {
-  const normalized = String(query || '').trim().slice(0, 200);
-  if (normalized.length < 2) throw new Error('Recherche YouTube trop courte.');
-  const safeLimit = Math.max(1, Math.min(10, Number(limit) || 5));
-  const configuredCookiesPaths = cookiesPaths === undefined
+  const normalized = String(query || '').trim().slice(0, inputMode === 'direct' ? 2_048 : 200);
+  if (inputMode === 'search' && normalized.length < 2) throw new Error(`Recherche ${provider === 'soundcloud' ? 'SoundCloud' : 'YouTube'} trop courte.`);
+  const safeLimit = Math.max(1, Math.min(inputMode === 'direct' ? 100 : 10, Number(limit) || 5));
+  const configuredCookiesPaths = provider !== 'youtube' ? [] : cookiesPaths === undefined
     ? getYouTubeCookiesPaths({ env, projectRoot })
     : (Array.isArray(cookiesPaths) ? cookiesPaths : [cookiesPaths])
       .flatMap((entry) => splitCookiesPaths(entry))
       .map((entry) => normalizeCookiesPath(entry, projectRoot));
-  const cookieAttempts = [...new Set(configuredCookiesPaths.filter(Boolean)), ''];
+  const cookieAttempts = provider === 'youtube' ? [...new Set(configuredCookiesPaths.filter(Boolean)), ''] : [''];
   const errors = [];
   let missingOnly = true;
   let authCandidate = null;
 
   const attempt = async (command, args, cookiesPath, playerClient) => {
     const result = await runYtDlpSearch(command, args, normalized, spawnImpl, {
-      limit: safeLimit, cookiesPath, playerClient, projectRoot, env,
+      limit: safeLimit,
+      cookiesPath: provider === 'youtube' ? cookiesPath : '',
+      playerClient,
+      provider,
+      searchPrefix,
+      inputMode,
+      projectRoot,
+      env,
     });
     if (result.items.length) return { items: result.items.slice(0, safeLimit), missing: false };
     errors.push(result.error);
     if (!result.missing && !result.skipped) missingOnly = false;
-    if (!authCandidate && needsYouTubeAuthentication(result.error)) {
+    if (provider === 'youtube' && !authCandidate && needsYouTubeAuthentication(result.error)) {
       authCandidate = [command, args, cookiesPath];
     }
     return { items: null, missing: result.missing };
@@ -419,9 +468,21 @@ async function searchYouTubeCandidates(query, {
   if (authCandidate) {
     const [command, args, cookiesPath] = authCandidate;
     const found = await attempt(command, args, cookiesPath, 'web_embedded');
-    if (found) return found;
+    if (found.items) return found.items;
   }
-  throw new Error(errors.filter(Boolean).at(-1) || 'Aucun résultat YouTube trouvé.');
+  throw new Error(errors.filter(Boolean).at(-1) || `Aucun résultat ${provider === 'soundcloud' ? 'SoundCloud' : 'YouTube'} trouvé.`);
+}
+
+function searchYouTubeCandidates(query, options = {}) {
+  return searchYtDlpCandidates(query, { ...options, provider: 'youtube', searchPrefix: 'ytsearch', inputMode: 'search' });
+}
+
+function searchSoundCloudCandidates(query, options = {}) {
+  return searchYtDlpCandidates(query, { ...options, provider: 'soundcloud', searchPrefix: 'scsearch', inputMode: 'search' });
+}
+
+function resolveSoundCloudCandidates(url, options = {}) {
+  return searchYtDlpCandidates(url, { ...options, provider: 'soundcloud', inputMode: 'direct', limit: options.limit || 100 });
 }
 
 function runYtDlp(command, preArgs, url, spawnImpl = spawn, options = {}) {
@@ -579,6 +640,168 @@ async function streamUrl(url, {
   throw new Error(detail || 'Aucun flux audio valide renvoyé par yt-dlp. Vérifie yt-dlp et YTDLP_PATH.');
 }
 
+function runYtDlpPipe(command, preArgs, url, spawnImpl = spawn, options = {}) {
+  return new Promise((resolve) => {
+    let child;
+    let stderr = '';
+    let settled = false;
+    let started = false;
+    let childClosed = false;
+    let timer;
+    let cleanupTimer;
+    let cookiesCopy = null;
+    const audioStream = new PassThrough();
+    // Keep a listener until the caller attaches its own handler after the
+    // promise resolves; otherwise a very fast extractor error could be fatal.
+    audioStream.on('error', () => {});
+    const cleanupCookiesCopy = () => {
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+      cookiesCopy?.cleanup();
+      cookiesCopy = null;
+    };
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!child || childClosed) cleanupCookiesCopy();
+      else {
+        cleanupTimer = setTimeout(cleanupCookiesCopy, 10_000);
+        cleanupTimer.unref?.();
+      }
+      resolve(result);
+    };
+    const stop = () => {
+      if (!childClosed) {
+        try { child?.kill(); } catch (_) { /* processus déjà terminé */ }
+        if (cleanupTimer) clearTimeout(cleanupTimer);
+        cleanupTimer = setTimeout(cleanupCookiesCopy, 10_000);
+        cleanupTimer.unref?.();
+      }
+      if (!audioStream.destroyed) audioStream.destroy();
+    };
+    try {
+      cookiesCopy = createTemporaryCookiesCopy(configuredCookiesPath(options));
+      options = { ...options, cookiesPath: cookiesCopy?.path || '', outputToStdout: true };
+      child = spawnImpl(command, buildYtDlpArgs(preArgs, url, options), { windowsHide: true });
+      child.stdout.pipe(audioStream);
+    } catch (error) {
+      childClosed = true;
+      cleanupCookiesCopy();
+      finish({ error: error.message, diagnostic: error.message, missing: error.code === 'ENOENT' });
+      return;
+    }
+    timer = setTimeout(() => {
+      try { child.kill(); } catch (_) { /* processus déjà terminé */ }
+      finish({ error: `yt-dlp n’a fourni aucun audio après ${YTDLP_TIMEOUT_MS / 1000} secondes.`, diagnostic: stderr });
+    }, YTDLP_TIMEOUT_MS);
+    child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-4_000); });
+    child.stdout.once('data', () => {
+      if (settled) return;
+      started = true;
+      audioStream.cleanup = stop;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ stream: audioStream, stop });
+    });
+    child.on('error', (error) => {
+      childClosed = true;
+      cleanupCookiesCopy();
+      if (!started) finish({ error: error.message, diagnostic: error.message, missing: error.code === 'ENOENT' });
+      else audioStream.destroy(error);
+    });
+    child.on('close', (code, signal) => {
+      childClosed = true;
+      cleanupCookiesCopy();
+      const diagnostic = stderr.trim() || `yt-dlp s’est arrêté avec ${signal ? `le signal ${signal}` : `le code ${code ?? 'inconnu'}`}.`;
+      if (!started) {
+        const missingModule = /No module named ['"]?yt_dlp['"]?/i.test(stderr);
+        finish({ error: sanitizeYtDlpDiagnostic(diagnostic), diagnostic, missing: missingModule });
+      } else if (code !== 0 && !audioStream.destroyed && !audioStream.readableEnded) {
+        const isForbidden = /HTTP(?: Error)?\s*403|403\s+Forbidden/i.test(diagnostic);
+        const error = new Error(isForbidden
+          ? 'Le fournisseur refuse le flux audio (HTTP 403) pendant le téléchargement.'
+          : sanitizeYtDlpDiagnostic(diagnostic));
+        if (needsYouTubeAuthentication(diagnostic)) error.code = 'YOUTUBE_AUTH_BLOCKED';
+        else if (isForbidden) error.code = 'AUDIO_HTTP_FORBIDDEN';
+        audioStream.destroy(error);
+      }
+    });
+  });
+}
+
+async function streamYtDlp(url, {
+  candidates = ytDlpCandidates(),
+  install = ensureManagedYtDlpOnce,
+  spawnImpl = spawn,
+  cookiesPaths,
+  projectRoot = PROJECT_ROOT,
+  env = process.env,
+} = {}) {
+  const youtubeUrl = isYouTubeUrl(url);
+  const configuredCookiesPaths = !youtubeUrl ? [] : cookiesPaths === undefined
+    ? getYouTubeCookiesPaths({ env, projectRoot })
+    : (Array.isArray(cookiesPaths) ? cookiesPaths : [cookiesPaths])
+      .flatMap((entry) => splitCookiesPaths(entry))
+      .map((entry) => normalizeCookiesPath(entry, projectRoot));
+  const cookieAttempts = youtubeUrl ? [...new Set(configuredCookiesPaths.filter(Boolean)), ''] : [''];
+  const errors = [];
+  let missingOnly = true;
+  let authCandidate = null;
+
+  const attempt = async (command, args, cookiesPath, playerClient) => {
+    const result = await runYtDlpPipe(command, args, url, spawnImpl, {
+      cookiesPath: youtubeUrl ? cookiesPath : '',
+      playerClient,
+      projectRoot,
+      env,
+    });
+    if (result.stream) return result.stream;
+    errors.push(result.error);
+    if (!result.missing) missingOnly = false;
+    if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.diagnostic || result.error)) {
+      authCandidate = [command, args, cookiesPath, result.diagnostic || result.error];
+    }
+    return null;
+  };
+
+  for (const [command, args] of candidates) {
+    for (const cookiesPath of cookieAttempts) {
+      const stream = await attempt(command, args, cookiesPath);
+      if (stream) return stream;
+      if (missingOnly && errors.length && /spawn .* ENOENT/i.test(String(errors.at(-1)))) break;
+    }
+  }
+  if (missingOnly) {
+    try {
+      const managed = await install();
+      for (const cookiesPath of cookieAttempts) {
+        const stream = await attempt(managed, [], cookiesPath);
+        if (stream) return stream;
+      }
+    } catch (error) {
+      errors.push(`installation automatique impossible : ${error.message}`);
+    }
+  }
+
+  if (authCandidate) {
+    const [command, args, rejectedCookiesPath, cookieAttemptError] = authCandidate;
+    if (rejectedCookiesPath && /page needs to be reloaded/i.test(cookieAttemptError)) {
+      const alternateClient = await attempt(command, args, rejectedCookiesPath, 'default,web_embedded');
+      if (alternateClient) return alternateClient;
+    }
+    const embedded = await attempt(command, args, '', 'web_embedded');
+    if (embedded) return embedded;
+    const error = new Error(rejectedCookiesPath
+      ? 'YouTube réclame toujours une authentification alors que le fichier de cookies est lisible. La session peut être expirée ou le compte ne pas avoir accès à cette vidéo; remplace le fichier par une nouvelle exportation Netscape.'
+      : 'YouTube réclame une authentification depuis cet hébergeur et aucun fichier de cookies utilisable n’a été fourni. Configure YOUTUBE_COOKIES_PATH avec une exportation Netscape récente ou choisis un autre titre.');
+    error.code = 'YOUTUBE_AUTH_BLOCKED';
+    error.cookiesConfigured = Boolean(rejectedCookiesPath);
+    throw error;
+  }
+
+  throw new Error(errors.filter(Boolean).at(-1) || 'yt-dlp n’a pas réussi à ouvrir un flux audio.');
+}
+
 function providerFailure(primaryProvider, primaryError, alternateProvider, alternateError) {
   const detail = (error) => String(error?.message || error || 'échec inconnu').replace(/[\r\n]+/g, ' ').slice(0, 300);
   const soundCloudNeedsClientId = /SOUNDCLOUD_CLIENT_ID/i.test(String(alternateError?.message || alternateError || ''));
@@ -600,19 +823,25 @@ function providerFailure(primaryProvider, primaryError, alternateProvider, alter
 }
 
 async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
-  const getYouTubeStream = providerOverrides.getYouTubeStream || streamUrl;
+  const getYouTubeStream = providerOverrides.getYouTubeStream || streamYtDlp;
   const searchYouTubeStream = providerOverrides.searchYouTubeStream || youtubeSearchStream;
   const getSoundCloudStream = providerOverrides.getSoundCloudStream || soundCloudStream;
   const searchSoundCloudStream = providerOverrides.searchSoundCloudStream || soundCloudSearchStream;
   const normalizedQuery = String(fallbackQuery || '').trim().slice(0, 200);
+  const asMedia = (source, options = {}) => {
+    if (source && typeof source.pipe === 'function') return { stream: source, ...options };
+    if (source && typeof source === 'object' && source.stream?.pipe) return { ...source, ...options };
+    if (typeof source === 'string' && isAudioUrl(source)) return { url: source, ...options };
+    throw new Error('Le fournisseur n’a pas retourné de flux audio exploitable.');
+  };
 
   if (isSoundCloudUrl(url)) {
     try {
-      return { stream: await getSoundCloudStream(url), fallback: false };
+      return asMedia(await getSoundCloudStream(url), { fallback: false });
     } catch (soundCloudError) {
       if (!normalizedQuery) throw soundCloudError;
       try {
-        return { url: await searchYouTubeStream(normalizedQuery), fallback: true, fallbackProvider: 'YouTube' };
+        return asMedia(await searchYouTubeStream(normalizedQuery), { fallback: true, fallbackProvider: 'YouTube' });
       } catch (youtubeError) {
         throw providerFailure('SoundCloud', soundCloudError, 'YouTube', youtubeError);
       }
@@ -620,11 +849,11 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
   }
 
   try {
-    return { url: await getYouTubeStream(url), fallback: false };
+    return asMedia(await getYouTubeStream(url), { fallback: false });
   } catch (youtubeError) {
     if (!normalizedQuery || !isYouTubeUrl(url)) throw youtubeError;
     try {
-      return { stream: await searchSoundCloudStream(normalizedQuery), fallback: true, fallbackProvider: 'SoundCloud' };
+      return asMedia(await searchSoundCloudStream(normalizedQuery), { fallback: true, fallbackProvider: 'SoundCloud' });
     } catch (soundCloudError) {
       throw providerFailure('YouTube', youtubeError, 'SoundCloud', soundCloudError);
     }
@@ -634,13 +863,20 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
 async function start(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies = {}) {
   const media = await (dependencies.prepareInput || prepareInput)(url, fallbackQuery);
   if (media.fallback) console.info(`[audio] Bascule vers ${media.fallbackProvider || 'un fournisseur alternatif'} après l’échec du flux principal.`);
-  const ffmpeg = (dependencies.spawn || spawn)(bin('ffmpeg', 'FFMPEG_PATH'), [
-    '-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-i', media.stream ? 'pipe:0' : media.url, '-vn',
-    '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
-    '-c:a', 'libopus', '-application', 'audio', '-vbr', 'on', '-compression_level', '10',
-    '-frame_duration', '20', '-ar', '48000', '-ac', '2', '-b:a', '160k',
-    '-f', 'opus', 'pipe:1',
-  ], { windowsHide: true });
+  let ffmpeg;
+  try {
+    ffmpeg = (dependencies.spawn || spawn)(bin('ffmpeg', 'FFMPEG_PATH'), [
+      '-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-i', media.stream ? 'pipe:0' : media.url, '-vn',
+      '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+      '-c:a', 'libopus', '-application', 'audio', '-vbr', 'on', '-compression_level', '10',
+      '-frame_duration', '20', '-ar', '48000', '-ac', '2', '-b:a', '160k',
+      '-f', 'opus', 'pipe:1',
+    ], { windowsHide: true });
+  } catch (error) {
+    try { media.stream?.cleanup?.(); } catch (_) {}
+    try { media.stream?.destroy(); } catch (_) {}
+    throw error;
+  }
   const parser = new OggParser(); let frames = []; let paused = false; let started = false; let stopped = false;
   let ffmpegError = ''; let errorReported = false;
   let readinessTimer = null;
@@ -649,6 +885,7 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
     clearInterval(tick);
     clearInterval(drainTimer);
     clearTimeout(readinessTimer);
+    try { media.stream?.cleanup?.(); } catch (_) {}
     try { media.stream?.destroy(); } catch (_) {}
     try { ffmpeg.kill(); } catch (_) {}
   };
@@ -734,6 +971,7 @@ class OggParser {
 module.exports = {
   OpusSender: { start },
   streamUrl,
+  streamYtDlp,
   buildYtDlpArgs,
   buildYtDlpSearchArgs,
   getYouTubeCookiesPath,
@@ -741,5 +979,7 @@ module.exports = {
   parseYtDlpSearch,
   prepareInput,
   searchYouTubeCandidates,
+  searchSoundCloudCandidates,
+  resolveSoundCloudCandidates,
   youtubeSearchStream,
 };

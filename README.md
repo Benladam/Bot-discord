@@ -80,7 +80,7 @@ cp .env.example .env
 | `COMMAND_PREFIX` | non | Préfixe des commandes texte (défaut `!`) |
 | `SPOTIFY_CLIENT_ID` | recherche Spotify, discographies et playlists publiques | ID d'application Spotify |
 | `SPOTIFY_CLIENT_SECRET` | recherche Spotify, discographies et playlists publiques | Secret d'application Spotify |
-| `SOUNDCLOUD_CLIENT_ID` | non | Active les recherches/liens SoundCloud et le repli de lecture dans les deux sens avec YouTube |
+| `SOUNDCLOUD_CLIENT_ID` | non | Active des recherches et replis API SoundCloud supplémentaires; yt-dlp permet déjà la recherche et la lecture sans cette clé |
 | `MUSIC_MARKET` | non | Marché Spotify, ex. `FR` |
 | `BOT_DATA_DIR` | non | Dossier de la base SQLite persistante |
 | `UPDATE_CHECK_ENABLED` | non | Active la vérification GitHub (défaut `true`) |
@@ -101,13 +101,17 @@ cp .env.example .env
 | `BOT_PRESENCE_INTERVAL_SECONDS` | non | Délai initial entre deux textes (30 à 86400 secondes, défaut `60`) |
 | `BOT_PRESENCE_TEXTS` | non | Textes d’activité séparés par `|`; `{prefix}` est remplacé par le préfixe du bot |
 
-Pour le repli audio dans les deux sens, renseigne `SOUNDCLOUD_CLIENT_ID` dans
-l’environnement du bot (local ou Kinetic). Dépose un vrai fichier de cookies
-YouTube au format Netscape sous `data/youtube-cookies.txt`, ou définis
+L’audio est transmis directement de yt-dlp à FFmpeg pour éviter de réutiliser
+une URL temporaire qui peut expirer ou être refusée par le serveur média.
+SoundCloud fonctionne aussi sans `SOUNDCLOUD_CLIENT_ID` via les extracteurs
+yt-dlp; la clé est facultative et ajoute le repli API `play-dl`. Dépose un vrai
+fichier de cookies YouTube au format Netscape sous `data/youtube-cookies.txt`, ou définis
 `YOUTUBE_COOKIES_PATH` vers un ou plusieurs emplacements séparés par `;`. Le bot
 essaie les fichiers dans l’ordre. Quand une piste SoundCloud échoue,
 le bot cherche son titre sur YouTube; quand YouTube échoue, il essaie SoundCloud.
-Sans identifiant SoundCloud, ce deuxième fournisseur ne peut pas être utilisé.
+YouTube peut toutefois refuser un cookie expiré ou ne pas autoriser l’accès à
+une vidéo; dans ce cas, le code ne contourne pas la vérification et tente le
+repli SoundCloud.
 
 ### Présence du bot
 

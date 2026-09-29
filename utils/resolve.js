@@ -6,7 +6,7 @@
 const play = require('play-dl');
 const { isSpotifyUrl, resolveSpotifyLink } = require('./spotify');
 const { configureSoundCloud } = require('./soundcloud');
-const { searchYouTubeCandidates } = require('./audioSender');
+const { searchYouTubeCandidates, searchSoundCloudCandidates, resolveSoundCloudCandidates } = require('./audioSender');
 
 function youtubeVideoId(value) {
   try {
@@ -23,25 +23,34 @@ function youtubeVideoId(value) {
 }
 
 function normalizeSoundCloudTrack(track) {
-  const title = track.name || 'Musique inconnue';
-  const artist = track.user?.username || track.publisher?.name || '';
+  const title = track.name || track.title || 'Musique inconnue';
+  const artist = track.user?.username || track.publisher?.name || track.channel?.name || track.uploader || '';
   return {
-    title,
-    url: track.permalink || track.url,
-    duration: track.durationInSec || 0,
-    thumbnail: track.thumbnail || null,
+    title: artist && !title.toLowerCase().includes(artist.toLowerCase()) ? `${artist} - ${title}` : title,
+    url: track.permalink || track.webpage_url || track.url,
+    duration: track.durationInSec || track.duration || 0,
+    thumbnail: track.thumbnail || track.thumbnails?.[0]?.url || null,
     source: 'soundcloud',
     fallbackQuery: [artist, title].filter(Boolean).join(' - '),
   };
 }
 
 async function resolveSoundCloudLink(url) {
-  if (!configureSoundCloud()) throw new Error('Les liens SoundCloud nécessitent SOUNDCLOUD_CLIENT_ID dans le fichier .env.');
-  const entry = await play.soundcloud(url);
-  const tracks = entry.type === 'track' ? [entry]
-    : entry.type === 'playlist' ? await entry.all_tracks()
-      : [];
-  const songs = tracks.slice(0, 100).map(normalizeSoundCloudTrack).filter((track) => track.url);
+  if (configureSoundCloud()) {
+    try {
+      const entry = await play.soundcloud(url);
+      const tracks = entry.type === 'track' ? [entry]
+        : entry.type === 'playlist' ? await entry.all_tracks()
+          : [];
+      const songs = tracks.slice(0, 100).map(normalizeSoundCloudTrack).filter((track) => track.url);
+      if (songs.length) return songs;
+    } catch (_) { /* repli sur l'extracteur yt-dlp */ }
+  }
+  let extracted = [];
+  try {
+    extracted = await resolveSoundCloudCandidates(url, { limit: 100 });
+  } catch (_) { /* le message final ne révèle aucun détail sensible du fournisseur */ }
+  const songs = extracted.slice(0, 100).map(normalizeSoundCloudTrack).filter((track) => track.url);
   if (!songs.length) throw new Error('Aucun morceau SoundCloud public et lisible trouvé dans ce lien.');
   return songs;
 }
@@ -118,10 +127,7 @@ async function resolveQuery(query) {
 
 async function resolveDeezerTracks(tracks, {
   search = searchYouTubeCandidates,
-  searchSoundCloud = async (query) => {
-    if (!configureSoundCloud()) return [];
-    return play.search(query, { limit: 5, source: { soundcloud: 'tracks' } });
-  },
+  searchSoundCloud = searchSoundCloudCandidates,
   onSearchError = (trackName, error) => {
     console.warn(`[catalogue] Recherche musicale échouée pour « ${trackName} »: ${error.message}`);
   },
@@ -172,7 +178,7 @@ async function resolveDeezerTracks(tracks, {
     resolved.forEach((song, index) => { songs[offset + index] = song; });
   }
   const ready = songs.filter(Boolean);
-  if (!ready.length) throw new Error('Aucun équivalent YouTube ou SoundCloud trouvé pour ce lien Deezer. Le repli SoundCloud nécessite SOUNDCLOUD_CLIENT_ID.');
+  if (!ready.length) throw new Error('Aucun équivalent audio public trouvé sur YouTube ou SoundCloud pour ce lien Deezer. Vérifie la disponibilité du titre sur ces plateformes.');
   if (tracks.length > candidates.length) console.info('[catalogue] liste Deezer limitée aux 100 premiers titres.');
   return ready;
 }
