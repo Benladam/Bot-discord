@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { PresenceManager } = require('../utils/presenceManager');
+const { PresenceManager } = require('../features/presence/manager');
 
 test('la présence globale reste indépendante de la musique de chaque serveur', () => {
   const sent = [];

@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { resolveQuery, youtubeVideoId, normalizeSoundCloudTrack, resolveDeezerTracks } = require('../utils/resolve');
+const { resolveQuery, youtubeVideoId, normalizeSoundCloudTrack, resolveDeezerTracks } = require('../features/music/resolve');
 
 test('un lien YouTube direct récupère un titre public pour permettre le repli audio', async () => {
   const url = 'https://www.youtube.com/watch?v=abc123';

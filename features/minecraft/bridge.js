@@ -11,8 +11,8 @@ const {
   WebhookClient,
 } = require('discord.js');
 const { WebSocket, WebSocketServer } = require('ws');
-const { resolveQuery } = require('./resolve');
-const { cleanMediaQuery } = require('./mediaQuery');
+const { resolveQuery } = require('../music/resolve');
+const { cleanMediaQuery } = require('../music/mediaQuery');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DISCORD_ID_PATTERN = /^[0-9]{17,20}$/;

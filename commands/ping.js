@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { isSlash } = require('../utils/commandHelpers');
+const { isSlash } = require('../shared/discord/commandHelpers');
 
 module.exports = {
   data: { name: 'ping', description: 'Affiche la latence du bot et de Discord' },

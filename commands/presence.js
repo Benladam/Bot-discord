@@ -1,5 +1,5 @@
-const { isSlash, sendReply, getStringOption, getIntegerOption } = require('../utils/commandHelpers');
-const { MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS, MAX_MESSAGES } = require('../utils/presenceManager');
+const { isSlash, sendReply, getStringOption, getIntegerOption } = require('../shared/discord/commandHelpers');
+const { MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS, MAX_MESSAGES } = require('../features/presence/manager');
 
 const STATUSES = new Set(['online', 'dnd', 'idle', 'invisible']);
 const ACTIVITY_TYPES = new Set(['playing', 'listening', 'watching', 'competing']);

@@ -17,21 +17,28 @@ const {
 } = require('discord.js');
 require('dotenv').config();
 require('dotenv').config({ path: path.join(__dirname, '.env.minecraft'), quiet: true });
-const { MusicPlayer } = require('./utils/musicPlayer');
-const guildDatabase = require('./utils/database');
-const { createUpdater } = require('./utils/updater');
-const { createMinecraftBridge } = require('./utils/minecraftBridge');
-const { createWebPanel } = require('./utils/webPanel');
-const { PresenceManager } = require('./utils/presenceManager');
-const { GuildNowPlayingManager } = require('./utils/guildNowPlaying');
-const { sanitizeDiagnosticText } = require('./utils/musicLinkMetadata');
+const { MusicPlayer } = require('./features/music/musicPlayer');
+const guildDatabase = require('./core/database');
+const { createUpdater } = require('./core/updater');
+const { createMinecraftBridge } = require('./features/minecraft/bridge');
+const { createWebPanel } = require('./features/web/server');
+const { PresenceManager } = require('./features/presence/manager');
+const { GuildNowPlayingManager } = require('./features/music/guildNowPlaying');
+const { sanitizeDiagnosticText } = require('./features/music/musicLinkMetadata');
 
-const { setupConsole } = require('./console-commands');
-const langStore = require('./langStore');
-const { t: botT } = require('./botI18n');
-// Les ponts de Test exposent une commande distante sans authentification.
-// Ils restent désactivés par défaut, en particulier sur l'hébergement public.
-const ENABLE_TEST_MODULES = /^(1|true|yes)$/i.test(String(process.env.ENABLE_TEST_MODULES || 'false'));
+const { setupConsole } = require('./core/consoleCommands');
+const langStore = require('./core/i18n/langStore');
+const { t: botT } = require('./core/i18n/botI18n');
+// Les outils de Test ne sont jamais chargés par défaut. Leur activation exige
+// un jeton fort; le pont WebSocket reste limité à localhost dans Test/wsBridge.js.
+const TEST_MODULES_REQUESTED = /^(1|true|yes)$/i.test(String(
+  process.env.ENABLE_TEST_HOOKS ?? process.env.ENABLE_TEST_MODULES ?? 'false',
+));
+const TEST_BRIDGE_TOKEN = String(process.env.TEST_BRIDGE_TOKEN || '');
+const ENABLE_TEST_MODULES = TEST_MODULES_REQUESTED && Buffer.byteLength(TEST_BRIDGE_TOKEN, 'utf8') >= 32;
+if (TEST_MODULES_REQUESTED && !ENABLE_TEST_MODULES) {
+  console.error('[Test] Hooks désactivés : TEST_BRIDGE_TOKEN doit contenir au moins 32 octets.');
+}
 if (ENABLE_TEST_MODULES) {
   try { require('./Test/wsBridge'); } catch (e) { console.error('[wsBridge] ' + e.message); }
 }

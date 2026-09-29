@@ -1,4 +1,4 @@
-const store = require('./database');
+const store = require('../../core/database');
 const MAX_WARNINGS_PER_USER = 50;
 
 function listWarnings(guildId, userId) {

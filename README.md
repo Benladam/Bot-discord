@@ -97,6 +97,8 @@ cp .env.example .env
 | `WEB_PUBLIC_URL` | non | URL publique HTTPS du panneau, par exemple `https://BotHeuss.fr`; utilisée par `/controller` et `/link` |
 | `WEB_BASE_PATH` | non | Préfixe de chemin facultatif si le reverse proxy publie le panneau sous un sous-chemin |
 | `WEB_COOKIE_SECURE` | non | Utilise des cookies HTTPS `Secure` (recommandé avec un proxy SSL) |
+| `ENABLE_TEST_HOOKS` | non | Active temporairement les scripts manuels de `Test/`; jeton local requis et pont limité à `127.0.0.1` |
+| `TEST_BRIDGE_TOKEN` | requis si hooks activés | Jeton aléatoire d’au moins 32 octets, à garder uniquement dans l’environnement privé |
 | `WEB_TRUST_PROXY` | non | Active la lecture des en-têtes transmis par le proxy; à activer seulement si le proxy remplace ces en-têtes |
 | `YTDLP_PATH` | non | Chemin vers `yt-dlp` si absent du PATH |
 | `YOUTUBE_COOKIES_PATH` | non | Un ou plusieurs chemins relatifs à la racine du bot ou absolus vers des fichiers cookies YouTube Netscape, séparés par `;`. Le premier est prioritaire, les suivants servent de secours. Si vide, `data/youtube-cookies.txt` est détecté automatiquement. Le dossier `data/` est ignoré par Git; ne publie jamais ces fichiers : l’usage de cookies de compte peut entraîner des restrictions du compte. |
@@ -333,29 +335,45 @@ affiche également le crédit d’origine.
 ## Structure
 
 ```
-bot.js                  Point d'entrée (slash + préfixe)
-supervisor.js           Relance bot.js après une mise à jour
-gui-app/                Interface native locale optionnelle
-commands/               Une commande par fichier
-utils/
-  presenceManager.js    Statut, activité et rotation persistants
-  commandHelpers.js     Aides communes aux commandes slash et préfixées
-  moderationStore.js    Avertissements persistants par serveur
-  musicPlayer.js        Logique de lecture (connexion vocale, file, boucle)
-  musicCatalog.js       Recherche unifiée YouTube/Spotify/Deezer
-  database.js           SQLite multi-serveur pour les playlists personnelles
-  updater.js            Vérifie GitHub, installe les commits et demande le redémarrage
-  spotify.js            Résolution et recherche Spotify -> YouTube
-  resolve.js            Résolution des liens YouTube/Spotify/Deezer
-  embeds.js             Embeds (messages enrichis)
-  respond.js            Helpers de réponse unifiés
-package.json            Dépendances JavaScript
-.env.example            Modèle de configuration (sans secret)
-launch.sh               Lanceur Linux/macOS
-Heuss-GUI.bat           Lanceur GUI Windows
+bot.js                         Entrée Discord (événements, commandes, démarrage)
+supervisor.js                  Superviseur et redémarrage après mise à jour
+commands/                      Adaptateurs Discord : une commande par fichier
+core/                          Base SQLite, mise à jour et orchestration console
+core/i18n/                     Langues générales et préférences
+features/                      Fonctionnalités métier, indépendantes des commandes
+  music/                       File, audio, voix, recherche et fournisseurs
+  moderation/                  Persistance des avertissements
+  presence/                    Statut et activité
+  minecraft/                   Pont Minecraft/Discord
+  web/                         Serveur du panneau et actifs dans public/
+shared/                        Helpers réutilisés par plusieurs fonctions
+  discord/                     Permissions, réponses et embeds Discord
+  i18n/                        Traductions des embeds
+tests/                         Tests automatisés exécutés par npm test
+Test/                          Zone manuelle d’essai, jamais chargée par défaut
+gui-app/                       Interface native Windows optionnelle
+launch.sh, *.bat               Lanceurs locaux Linux/Windows
+Dockerfile, .dockerignore      Image portable; secrets et données locales exclus
+package.json                   Dépendances et scripts du projet
+.env.example                   Modèle de configuration sans secret
 ```
 
-Les modules de contrôle de `Test/` sont désactivés par défaut. Ils ouvrent un pont
-de commande local sans authentification et ne doivent pas être activés sur Kinetic.
+`commands/` ne contient que les adaptateurs Discord. La logique réelle vit dans
+`features/<domaine>/`; les fonctions utilisées par plusieurs domaines vont dans
+`shared/` ou `core/`. Une commande réussie en essai est donc réécrite proprement
+dans son module métier, puis reliée depuis `commands/` — on ne copie pas un prototype
+entier tel quel dans la production.
+
+`Test/` est conservé dans Git et dans l’image serveur pour les essais manuels, mais
+ses hooks ne sont jamais chargés par défaut. Pour un test ponctuel seulement, règle
+`ENABLE_TEST_HOOKS=true` et un `TEST_BRIDGE_TOKEN` aléatoire (au moins 32 octets),
+puis redémarre le bot. Le pont écoute exclusivement sur `127.0.0.1:7777`; ne le
+publie pas avec un reverse proxy. `Test/cmd.txt` reste ignoré par Git et exclu de
+l’image Docker. Les tests automatisés reproductibles restent dans `tests/` et se
+lancent avec `npm test`.
+
+Pour générer un jeton d’essai, exécute localement
+`node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`
+et stocke le résultat uniquement dans `.env` ou les variables privées de Kinetic.
 Le bot ignore aussi ses vérifications Git internes quand le dossier déployé n'a pas
 de dépôt `.git`; dans ce cas, utilise le déploiement GitHub de Kinetic.

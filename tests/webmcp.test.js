@@ -60,11 +60,11 @@ test('WebMCP expose uniquement un état musical en lecture seule après authenti
     confirm: () => false,
   };
 
-  const source = fs.readFileSync(path.join(__dirname, '..', 'web', 'app.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'features', 'web', 'public', 'app.js'), 'utf8');
   vm.runInNewContext(source, {
     document, window, fetch, Headers, Response, URL,
     setTimeout, clearTimeout, console,
-  }, { filename: 'web/app.js' });
+  }, { filename: 'features/web/public/app.js' });
   await registered;
 
   assert.equal(tool.name, 'get_music_status');

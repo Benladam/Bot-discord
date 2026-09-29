@@ -1,6 +1,6 @@
 const { PermissionFlagsBits } = require('discord.js');
-const { isSlash, sendReply, deferReply, requirePermission, resolveMember, getIntegerOption } = require('../utils/commandHelpers');
-const { removeWarning } = require('../utils/moderationStore');
+const { isSlash, sendReply, deferReply, requirePermission, resolveMember, getIntegerOption } = require('../shared/discord/commandHelpers');
+const { removeWarning } = require('../features/moderation/warningStore');
 
 module.exports = {
   data: {

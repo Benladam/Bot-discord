@@ -3,9 +3,9 @@
  * Réservée AU PROPRIÉTAIRE du bot (voir bot.js qui bloque déjà les non-propriétaires).
  * Donne le lien public du panneau web hébergé avec le bot.
  */
-const { t: botT } = require('../botI18n');
+const { t: botT } = require('../core/i18n/botI18n');
 const { MessageFlags } = require('discord.js');
-const { getWebPanelPublicUrl } = require('../utils/webPanel');
+const { getWebPanelPublicUrl } = require('../features/web/server');
 
 module.exports = {
   data: { name: 'link', description: 'Lien vers le panneau de configuration (propriétaire)' },

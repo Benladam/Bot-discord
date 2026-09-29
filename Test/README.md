@@ -1,22 +1,41 @@
-# Dossier Test/
+# Dossier `Test/` — essais manuels
 
-Ce dossier sert à isoler le travail de diagnostic/experimentation **non validé à 100%**
-avant de le pousser sur GitHub ou d'écraser les fichiers de production.
+Ce dossier reste présent en local et dans le déploiement serveur. Il contient des
+prototypes et diagnostics temporaires; il ne constitue pas le code de production.
 
-## Règle d'or
-- Tout ce qui est **incertain** (nouveau module vocal, correctif de connexion,
-  test de flux audio, etc.) va d'abord ici.
-- On ne pousse sur GitHub / on ne modifie les fichiers de prod (`utils/`, `bot.js`,
-  `commands/`) QUE quand le comportement est validé à 100% (le bot rejoint le salon,
-  `secretKey=oui`, et le son sort dans Discord).
-- Quand c'est validé, on copie le fichier validé depuis `Test/` vers la racine du repo
-  (via PowerShell `Copy-Item` car le dossier racine est protégé CFA), puis `git commit` + `git push`.
+## Frontières du projet
 
-## Contenu typique
-- `Test/voice_test.js` — petit script qui ouvre le WS vocal et loggue les opcodes.
-- `Test/test_mode_normal.js` — reproduit le scénario `!play` en mode normal (bot déjà
-  dans le salon) pour valider le leave gateway.
-- `Test/README.md` — ce fichier.
+- `Test/` : essais manuels et scripts de diagnostic, non chargés au démarrage par défaut.
+- `tests/` : tests automatisés reproductibles, exécutés avec `npm test`.
+- `commands/` : adaptateurs Discord minces, un fichier par commande.
+- `features/<domaine>/` : logique réellement validée (musique, web, modération, etc.).
+- `core/` et `shared/` : infrastructure et fonctions communes.
+
+Quand une expérimentation fonctionne, ne copie pas le prototype entier en production.
+Réécris la logique utile dans le bon module `features/` (ou `core/` si c’est de
+l’infrastructure), ajoute un test sous `tests/`, puis relie-la depuis `commands/` si
+elle doit devenir une commande Discord. Une fonctionnalité sans commande reste dans
+son domaine `features/`.
+
+## Utilisation sur le serveur
+
+Les scripts suivis de `Test/` sont livrés avec le dépôt et l’image Docker. Les hooks
+qui pilotent le bot restent éteints sauf activation volontaire :
+
+1. Configure `ENABLE_TEST_HOOKS=true` et un `TEST_BRIDGE_TOKEN` aléatoire d’au moins
+   32 octets dans l’environnement privé du bot.
+2. Redémarre le bot uniquement pour la durée de l’essai.
+3. Le pont WebSocket écoute uniquement sur `127.0.0.1:7777`; il ne faut pas le publier
+   derrière Kinetic ni le lier à une interface publique.
+4. `Test/cmd.txt` sert de fichier de passage local, mais est exclu de Git et des images.
+5. Remets `ENABLE_TEST_HOOKS=false` après les essais.
+
+Le client d’essai charge `.env` puis s’authentifie avec le jeton configuré :
+`node Test/test_ws_client.js`.
+
+Les tests vocaux et prototypes peuvent viser un serveur réel : vérifie toujours les
+IDs de serveur/salon et évite de laisser tourner une lecture ou un hook de diagnostic
+après la fin du test.
 
 ## Historique des correctifs vocaux (pour mémoire)
 1. 4003 "Not authenticated" -> heartbeat envoyé AVANT l'IDENTIFY (corrigé : 1er heartbeat

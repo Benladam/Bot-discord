@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { getMusicInputInfo, formatMusicAttempt, resolveMusicLinkMetadata, sanitizeDiagnosticText } = require('../utils/musicLinkMetadata');
-const { parseSpotifyUrl } = require('../utils/spotify');
+const { getMusicInputInfo, formatMusicAttempt, resolveMusicLinkMetadata, sanitizeDiagnosticText } = require('../features/music/musicLinkMetadata');
+const { parseSpotifyUrl } = require('../features/music/providers/spotify');
 
 test('Spotify reconnaît les liens localisés et les URI spotify:', () => {
   assert.deepEqual(parseSpotifyUrl('https://open.spotify.com/intl-fr/track/518c5Dr5EmpzACX268Aeqs?si=private'), {

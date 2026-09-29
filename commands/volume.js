@@ -3,8 +3,8 @@
  */
 
 const { EmbedBuilder } = require('discord.js');
-const { tr } = require('../utils/embedI18n');
-const guildDatabase = require('../utils/database');
+const { tr } = require('../shared/i18n/embedI18n');
+const guildDatabase = require('../core/database');
 
 module.exports = {
   data: { name: 'volume', description: 'Règle le volume (0-100)' },

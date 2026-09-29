@@ -33,7 +33,7 @@ function getDataDirectory({ env = process.env, platform = process.platform, home
   if (platform === 'win32') {
     return path.join(env.APPDATA || env.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Roaming'), 'bot-discord');
   }
-  return path.resolve(__dirname, '..', 'data');
+  return path.resolve(__dirname, '..', '..', 'data');
 }
 
 function parseChecksum(manifest, asset) {

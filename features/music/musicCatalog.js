@@ -1,7 +1,7 @@
 /** Agrégateur de métadonnées publics. L'audio est résolu séparément par fournisseur. */
 const play = require('play-dl');
-const { searchSpotifyCatalog, getSpotifyArtistAlbums } = require('./spotify');
-const { configureSoundCloud } = require('./soundcloud');
+const { searchSpotifyCatalog, getSpotifyArtistAlbums } = require('./providers/spotify');
+const { configureSoundCloud } = require('./providers/soundcloud');
 const { searchYouTubeCandidates } = require('./audioSender');
 
 const cache = new Map();

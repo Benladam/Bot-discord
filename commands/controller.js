@@ -4,7 +4,7 @@
  */
 
 const { EmbedBuilder, MessageFlags } = require('discord.js');
-const { getWebPanelPublicUrl } = require('../utils/webPanel');
+const { getWebPanelPublicUrl } = require('../features/web/server');
 
 module.exports = {
   data: {

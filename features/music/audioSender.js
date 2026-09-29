@@ -7,11 +7,11 @@ const { PassThrough } = require('node:stream');
 const ffmpegStatic = require('ffmpeg-static');
 const play = require('play-dl');
 const { ensureManagedYtDlp, getDataDirectory } = require('./ytDlp');
-const { configureSoundCloud } = require('./soundcloud');
+const { configureSoundCloud } = require('./providers/soundcloud');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
-const PROJECT_ROOT = path.resolve(__dirname, '..');
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 let managedInstallPromise = null;
 
 function ensureManagedYtDlpOnce() {

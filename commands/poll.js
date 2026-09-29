@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { isSlash, getStringOption } = require('../utils/commandHelpers');
+const { isSlash, getStringOption } = require('../shared/discord/commandHelpers');
 
 module.exports = {
   data: {

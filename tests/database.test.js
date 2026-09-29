@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const testDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-discord-db-'));
 process.env.BOT_DB_PATH = path.join(testDirectory, 'nested', 'bot.sqlite3');
-const store = require('../utils/database');
+const store = require('../core/database');
 
 after(() => {
   store.closeDatabase();

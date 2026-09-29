@@ -2,7 +2,7 @@
  * Commande: now (!now / /now)
  */
 
-const embeds = require('../utils/embeds');
+const embeds = require('../shared/discord/embeds');
 
 module.exports = {
   data: { name: 'now', description: 'Affiche la musique en cours' },

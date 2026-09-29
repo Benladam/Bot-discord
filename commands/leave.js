@@ -4,7 +4,7 @@
  */
 
 const { EmbedBuilder } = require('discord.js');
-const { tr } = require('../utils/embedI18n');
+const { tr } = require('../shared/i18n/embedI18n');
 
 module.exports = {
   data: { name: 'leave', description: 'Le bot quitte le canal vocal' },

@@ -127,7 +127,7 @@ test('/controller renvoie l’adresse publique hébergée et jamais localhost', 
 });
 
 test('les suggestions /play ont un format lisible et gardent morceaux et playlists', () => {
-  const { formatDuration, formatChoiceName, toAutocompleteChoice, selectAutocompleteItems } = require('../utils/catalogAutocomplete');
+  const { formatDuration, formatChoiceName, toAutocompleteChoice, selectAutocompleteItems } = require('../features/music/catalogAutocomplete');
   assert.equal(formatDuration(164), '02:44');
   const items = [
     ...Array.from({ length: 20 }, (_, i) => ({
@@ -148,8 +148,8 @@ test('les suggestions /play ont un format lisible et gardent morceaux et playlis
 });
 
 test('le champ /play vide propose les 25 morceaux du classement mondial Deezer', async () => {
-  const { getWorldTopTracks } = require('../utils/musicCatalog');
-  const { formatChoiceName, selectAutocompleteItems, toAutocompleteChoice } = require('../utils/catalogAutocomplete');
+  const { getWorldTopTracks } = require('../features/music/musicCatalog');
+  const { formatChoiceName, selectAutocompleteItems, toAutocompleteChoice } = require('../features/music/catalogAutocomplete');
   const payload = {
     data: Array.from({ length: 30 }, (_, index) => ({
       id: index + 1,
@@ -213,7 +213,7 @@ test('/play affiche query immédiatement tout en gardant le Top 25 comme autocom
   assert.equal(response.components.length, 2);
   assert.equal(response.components[0].components[0].toJSON().options.length, 25);
 
-  const { WORLD_CHART_FALLBACK_VALUE, toSearchFallbackChoice } = require('../utils/catalogAutocomplete');
+  const { WORLD_CHART_FALLBACK_VALUE, toSearchFallbackChoice } = require('../features/music/catalogAutocomplete');
   const fallback = toSearchFallbackChoice('', { worldChart: true });
   assert.equal(fallback.value, WORLD_CHART_FALLBACK_VALUE);
   assert.deepEqual(playCommand.autocompleteFallback({ options: { getFocused: () => '' } }), [fallback]);

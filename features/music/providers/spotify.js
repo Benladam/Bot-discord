@@ -11,7 +11,7 @@
  */
 
 const play = require('play-dl');
-const { searchYouTubeCandidates } = require('./audioSender');
+const { searchYouTubeCandidates } = require('../audioSender');
 const MAX_SPOTIFY_TRACKS = 100;
 
 let spotifySearchApi = null;

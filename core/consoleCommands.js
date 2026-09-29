@@ -1,5 +1,5 @@
 /**
- * console-commands.js — Piloter le bot depuis le terminal (sans passer par Discord).
+ * core/consoleCommands.js — Piloter le bot depuis le terminal (sans passer par Discord).
  *
  * On tape des commandes dans la fenêtre noire (ou dans la ligne de commande de
  * la GUI, qui les envoie ici) et le bot les exécute sur Discord.
@@ -17,7 +17,7 @@
  */
 
 const { ChannelType, PermissionsBitField } = require('discord.js');
-const { getWebPanelPublicUrl } = require('./utils/webPanel');
+const { getWebPanelPublicUrl } = require('../features/web/server');
 
 // Pour lancer les commandes musique depuis le terminal, on simule un
 // « contexte » comme si la commande venait de Discord, en s'appuyant sur

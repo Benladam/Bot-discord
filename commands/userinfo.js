@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { resolveUser, isSlash, deferReply } = require('../utils/commandHelpers');
+const { resolveUser, isSlash, deferReply } = require('../shared/discord/commandHelpers');
 
 module.exports = {
   data: {

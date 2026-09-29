@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
-const { prepareInput } = require('../utils/audioSender');
+const { prepareInput } = require('../features/music/audioSender');
 
 test('bascule de YouTube vers SoundCloud si l’extraction YouTube échoue', async () => {
   const soundCloudStream = new PassThrough();

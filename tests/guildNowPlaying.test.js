@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { GuildNowPlayingManager, SETTING_KEY, controlComponents } = require('../utils/guildNowPlaying');
+const { GuildNowPlayingManager, SETTING_KEY, controlComponents } = require('../features/music/guildNowPlaying');
 
 function makeGuild(guildId, guildName, channelId) {
   const messages = new Map();

@@ -1,13 +1,13 @@
 /** Recherche et lecture YouTube, Spotify, Deezer et playlists publiques. */
 const crypto = require('crypto');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
-const { resolveQuery } = require('../utils/resolve');
-const { cleanMediaQuery } = require('../utils/mediaQuery');
-const { searchCatalog, getArtistAlbums, getWorldTopTracks } = require('../utils/musicCatalog');
-const { selectAutocompleteItems, toAutocompleteChoice, toSearchFallbackChoice, WORLD_CHART_FALLBACK_VALUE } = require('../utils/catalogAutocomplete');
-const { getMusicInputInfo, formatMusicAttempt, resolveMusicLinkMetadata, cleanLogText, sanitizeDiagnosticText } = require('../utils/musicLinkMetadata');
-const embeds = require('../utils/embeds');
-const { tr } = require('../utils/embedI18n');
+const { resolveQuery } = require('../features/music/resolve');
+const { cleanMediaQuery } = require('../features/music/mediaQuery');
+const { searchCatalog, getArtistAlbums, getWorldTopTracks } = require('../features/music/musicCatalog');
+const { selectAutocompleteItems, toAutocompleteChoice, toSearchFallbackChoice, WORLD_CHART_FALLBACK_VALUE } = require('../features/music/catalogAutocomplete');
+const { getMusicInputInfo, formatMusicAttempt, resolveMusicLinkMetadata, cleanLogText, sanitizeDiagnosticText } = require('../features/music/musicLinkMetadata');
+const embeds = require('../shared/discord/embeds');
+const { tr } = require('../shared/i18n/embedI18n');
 
 const PAGE_SIZE = 25;
 // Répond tôt pour garder une marge sous le délai d’interaction Discord,

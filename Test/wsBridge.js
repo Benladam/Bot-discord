@@ -1,6 +1,7 @@
 /**
  * wsBridge.js — Pont WebSocket local pour piloter/observer le bot depuis l'app C# (HeussGUI).
- * - Ecoute sur 0.0.0.0:7777 (accessible en local + depuis le tel sur le meme WiFi via IP du PC).
+ * - Ecoute uniquement sur 127.0.0.1:7777; aucune connexion depuis le reseau n'est acceptee.
+ * - Exige TEST_BRIDGE_TOKEN avant d'authentifier un client ou de recevoir des commandes.
  * - Envoie aux clients : {"type":"log","line":"..."} a chaque console.log du bot.
  * - Recoit des clients : {"cmd":"play","query":"..."} -> ecrit dans Test/cmd.txt (lu par bot.js).
  *
@@ -9,11 +10,25 @@
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('node:crypto');
 
 const PORT = 7777;
+const HOST = '127.0.0.1';
+const AUTH_TIMEOUT_MS = 5000;
 const CMD_FILE = path.join(__dirname, 'cmd.txt'); // le bot lit ce fichier pour executer les commandes
+const BRIDGE_TOKEN = String(process.env.TEST_BRIDGE_TOKEN || '');
 
-const wss = new WebSocket.Server({ host: '0.0.0.0', port: PORT });
+if (Buffer.byteLength(BRIDGE_TOKEN, 'utf8') < 32) {
+  throw new Error('TEST_BRIDGE_TOKEN doit contenir au moins 32 octets.');
+}
+
+function validToken(candidate) {
+  const provided = Buffer.from(String(candidate || ''), 'utf8');
+  const expected = Buffer.from(BRIDGE_TOKEN, 'utf8');
+  return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+}
+
+const wss = new WebSocket.Server({ host: HOST, port: PORT, maxPayload: 16 * 1024, perMessageDeflate: false });
 const clients = new Set();
 
 // Capture des logs du bot
@@ -27,22 +42,35 @@ console.log = (...args) => { origLog(...args); broadcast(args.map(String).join('
 console.error = (...args) => { origErr(...args); broadcast('[err] ' + args.map(String).join(' ')); };
 
 wss.on('connection', (ws) => {
-  clients.add(ws);
-  ws.send(JSON.stringify({ type: 'log', line: '[bridge] connecte au bot' }));
+  let authenticated = false;
+  const authTimer = setTimeout(() => ws.close(1008, 'Authentification requise'), AUTH_TIMEOUT_MS);
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString());
-      if (msg.cmd) {
+      if (!authenticated) {
+        if (msg?.type !== 'auth' || !validToken(msg.token)) {
+          ws.close(1008, 'Jeton invalide');
+          return;
+        }
+        authenticated = true;
+        clearTimeout(authTimer);
+        clients.add(ws);
+        ws.send(JSON.stringify({ type: 'log', line: '[bridge] authentifie sur localhost' }));
+        return;
+      }
+      if (typeof msg.cmd === 'string' && /^[a-z0-9_-]{1,32}$/i.test(msg.cmd)) {
         // Ecrit la commande pour que bot.js l'execute (format: cmd args)
-        const line = msg.cmd + (msg.query ? ' ' + msg.query : '') + (msg.value !== undefined ? ' ' + msg.value : '');
+        const query = typeof msg.query === 'string' ? msg.query.slice(0, 500) : '';
+        const value = msg.value === undefined ? '' : String(msg.value).slice(0, 100);
+        const line = msg.cmd + (query ? ' ' + query : '') + (value ? ' ' + value : '');
         fs.writeFileSync(CMD_FILE, line + '\n');
         broadcast('[bridge] commande recue: ' + line);
       }
     } catch (e) { /* ignore */ }
   });
-  ws.on('close', () => clients.delete(ws));
+  ws.on('close', () => { clearTimeout(authTimer); clients.delete(ws); });
 });
 
-console.log(`[bridge] WebSocket en ecoute sur ws://0.0.0.0:${PORT}`);
+console.log(`[bridge] WebSocket de test en ecoute sur ws://${HOST}:${PORT} (jeton requis)`);
 
 module.exports = { wss };

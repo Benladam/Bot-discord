@@ -4,8 +4,8 @@
  */
 
 const play = require('play-dl');
-const { isSpotifyUrl, resolveSpotifyLink } = require('./spotify');
-const { configureSoundCloud } = require('./soundcloud');
+const { isSpotifyUrl, resolveSpotifyLink } = require('./providers/spotify');
+const { configureSoundCloud } = require('./providers/soundcloud');
 const { searchYouTubeCandidates, searchSoundCloudCandidates, resolveSoundCloudCandidates } = require('./audioSender');
 
 function youtubeVideoId(value) {

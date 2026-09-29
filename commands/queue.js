@@ -2,7 +2,7 @@
  * Commande: queue (!queue / /queue)
  */
 
-const embeds = require('../utils/embeds');
+const embeds = require('../shared/discord/embeds');
 
 module.exports = {
   data: { name: 'queue', description: 'Affiche la file d\'attente' },

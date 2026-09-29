@@ -8,8 +8,8 @@
  *
  * Langues supportées : fr, en, es, ar
  */
-const { t: botT } = require('../botI18n');
-const { LANGS } = require('../botI18n');
+const { t: botT } = require('../core/i18n/botI18n');
+const { LANGS } = require('../core/i18n/botI18n');
 
 function replyMessage(ctx, text) {
   if (typeof ctx.reply === 'function') return ctx.reply({ content: text, ephemeral: true });

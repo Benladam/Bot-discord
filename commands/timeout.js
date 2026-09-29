@@ -1,5 +1,5 @@
 const { PermissionFlagsBits } = require('discord.js');
-const { isSlash, sendReply, deferReply, requirePermission, resolveMember, getStringOption } = require('../utils/commandHelpers');
+const { isSlash, sendReply, deferReply, requirePermission, resolveMember, getStringOption } = require('../shared/discord/commandHelpers');
 
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 function parseDuration(value) {

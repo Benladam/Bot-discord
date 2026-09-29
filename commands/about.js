@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { isSlash } = require('../utils/commandHelpers');
+const { isSlash } = require('../shared/discord/commandHelpers');
 
 module.exports = {
   data: { name: 'about', description: 'Affiche les crédits et la licence du bot' },

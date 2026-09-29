@@ -1,6 +1,6 @@
 /** Playlists personnalisées persistantes et isolées par serveur Discord. */
-const { resolveQuery } = require('../utils/resolve');
-const store = require('../utils/database');
+const { resolveQuery } = require('../features/music/resolve');
+const store = require('../core/database');
 const playCommand = require('./play');
 
 const ACTIONS = [

@@ -4,7 +4,7 @@
  */
 
 const { EmbedBuilder } = require('discord.js');
-const { tr } = require('./embedI18n');
+const { tr } = require('../i18n/embedI18n');
 
 function formatDuration(seconds) {
   if (!seconds) return tr('fr').durLabel === 'Durée' ? 'Inconnue' : 'Unknown';

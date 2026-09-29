@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { isSlash, deferReply } = require('../utils/commandHelpers');
+const { isSlash, deferReply } = require('../shared/discord/commandHelpers');
 
 module.exports = {
   data: { name: 'serverinfo', description: 'Affiche les informations de ce serveur' },

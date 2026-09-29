@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const WEB_DIR = path.join(__dirname, '..', 'web');
+const WEB_DIR = path.join(__dirname, 'public');
 const SESSION_COOKIE = 'heusspanel_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
