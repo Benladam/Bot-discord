@@ -177,18 +177,57 @@ function keepExistingArtwork(payload, interaction) {
   return payload;
 }
 
-function replyPrivately(ctx, payload) {
+async function replyPrivately(ctx, payload) {
   if (isSlash(ctx)) return ctx.reply({ ...payload, flags: MessageFlags.Ephemeral });
 
   const recipient = ctx.author;
-  if (typeof recipient?.send !== 'function') return ctx.reply('Je ne peux pas ouvrir tes messages privés pour afficher le menu d’aide.');
-  return recipient.send(payload).catch(async () => {
-    if (ctx.deletable && typeof ctx.delete === 'function') await ctx.delete().catch(() => {});
-    return ctx.reply({
-      content: 'Je ne peux pas t’envoyer le menu d’aide en privé. Active tes messages privés pour ce serveur et réessaie.',
-      allowedMentions: { repliedUser: false },
-    });
-  });
+  if (typeof recipient?.send === 'function') {
+    try {
+      return await recipient.send(payload);
+    } catch (_) {
+      // Les MP peuvent être fermés. Ne réponds pas au message de commande
+      // après l’avoir supprimé : Discord rejette alors sa référence.
+    }
+  }
+
+  let commandMessageDeleted = false;
+  if (ctx.deletable && typeof ctx.delete === 'function') {
+    try {
+      await ctx.delete();
+      commandMessageDeleted = true;
+    } catch (_) {
+      // La permission de suppression est facultative.
+    }
+  }
+
+  const notice = {
+    content: 'Je ne peux pas t’envoyer le menu d’aide en privé. Active tes messages privés pour ce serveur et réessaie.',
+    allowedMentions: { repliedUser: false },
+  };
+
+  if (typeof ctx.channel?.send === 'function') {
+    try {
+      const sent = await ctx.channel.send(notice);
+      const timer = setTimeout(() => {
+        if (typeof sent?.delete !== 'function') return;
+        Promise.resolve().then(() => sent.delete()).catch(() => {});
+      }, 30_000);
+      timer.unref?.();
+      return sent;
+    } catch (_) {
+      // Si le bot ne peut pas écrire dans le salon, essaie le reply ci-dessous
+      // uniquement si le message source existe encore.
+    }
+  }
+
+  if (!commandMessageDeleted && typeof ctx.reply === 'function') {
+    try {
+      return await ctx.reply(notice);
+    } catch (_) {
+      // Le message d’origine a pu être supprimé entre-temps.
+    }
+  }
+  return null;
 }
 
 module.exports = {

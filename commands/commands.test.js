@@ -163,6 +163,40 @@ test('help par préfixe envoie le menu en DM sans publier la liste dans le salon
   assert.equal(channelReply, false);
 });
 
+test('help par préfixe gère les MP fermés sans répondre à la commande supprimée', async () => {
+  const command = require('./help');
+  let deleteCalls = 0;
+  let replyCalls = 0;
+  let channelNotice;
+  let noticeDeleted = false;
+
+  await command.execute({
+    author: { id: 'user-1', send: async () => { throw new Error('DM fermé'); } },
+    guild: { id: 'guild-1' },
+    deletable: true,
+    delete: async () => { deleteCalls += 1; },
+    channel: {
+      send: async (payload) => {
+        channelNotice = payload;
+        return { delete: async () => { noticeDeleted = true; } };
+      },
+    },
+    reply: async () => { replyCalls += 1; throw new Error('MESSAGE_REFERENCE_UNKNOWN_MESSAGE'); },
+  }, [], {
+    commands: new Map([['ping', {
+      data: { name: 'ping', description: 'Mesure la latence' },
+      execute() {},
+    }]]),
+    langFor: () => 'fr',
+  });
+
+  assert.equal(deleteCalls, 1);
+  assert.equal(replyCalls, 0, 'ne répond jamais avec une référence au message supprimé');
+  assert.match(channelNotice.content, /messages privés/);
+  assert.deepEqual(channelNotice.allowedMentions, { repliedUser: false });
+  assert.equal(noticeDeleted, false, 'l’avis reste affiché jusqu’au délai de 30 secondes');
+});
+
 test('/24-7 est une commande serveur réservée à la permission Gérer le serveur et bascule son réglage', async () => {
   const { PermissionFlagsBits } = require('discord.js');
   const command = require('./24-7');
