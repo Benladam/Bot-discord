@@ -46,7 +46,6 @@ class PresenceManager {
     this.log = log;
     this.defaults = envDefaults();
     this.config = { ...this.defaults, messages: [...this.defaults.messages] };
-    this.musicActivities = new Map();
     this.messageIndex = 0;
     this.timer = null;
     this.ready = false;
@@ -108,10 +107,9 @@ class PresenceManager {
   }
 
   setMusicActivity(key, info) {
-    const activityKey = String(key);
-    this.musicActivities.delete(activityKey);
-    if (info) this.musicActivities.set(activityKey, true);
-    this.apply();
+    // Gardé pour compatibilité avec la console; l'activité Discord est
+    // globale, donc elle ne doit jamais refléter la musique d'une seule guilde.
+    return false;
   }
 
   resetTimer() {
@@ -119,7 +117,6 @@ class PresenceManager {
     this.timer = null;
     if (!this.ready || this.config.messages.length < 2) return;
     this.timer = setInterval(() => {
-      if (this.musicActivities.size) return;
       this.messageIndex = (this.messageIndex + 1) % this.config.messages.length;
       this.apply();
     }, this.config.intervalSeconds * 1000);
@@ -128,12 +125,11 @@ class PresenceManager {
 
   apply() {
     if (!this.ready || !this.client.user) return;
-    // Discord exposes one shared presence for the bot account, not one per guild.
-    // Keep the track title inside that guild's player/now-playing response only.
-    const currentMusic = this.musicActivities.size > 0;
-    const template = currentMusic ? '🎵 lecture en cours' : this.config.messages[this.messageIndex] || '';
+    // La présence visible dans les membres est globale au compte; le titre
+    // de chaque musique reste dans le message de statut propre à son serveur.
+    const template = this.config.messages[this.messageIndex] || '';
     const name = String(template).replaceAll('{prefix}', process.env.COMMAND_PREFIX || '!').slice(0, 128);
-    const type = currentMusic ? ACTIVITY_TYPES.listening : ACTIVITY_TYPES[this.config.activityType];
+    const type = ACTIVITY_TYPES[this.config.activityType];
     const activities = name ? [{ name, type }] : [];
     try {
       this.client.user.setPresence({ status: this.config.status, activities });

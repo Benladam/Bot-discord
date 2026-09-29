@@ -89,6 +89,21 @@ test('chaque serveur garde sa propre chanson et sa propre file', () => {
   assert.equal(playerB.getState().current.title, 'Titre B');
 });
 
+test('le lecteur publie un état local au serveur et ne change jamais la présence globale', () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  const globalActivities = [];
+  const states = [];
+  const player = new MusicPlayer('guild-a', { user: { id: 'bot-user', setActivity: (...args) => globalActivities.push(args) } });
+  player.onActivityChange = (state) => states.push(state);
+  player.current = { title: 'Titre privé A', url: 'https://private.test/stream?token=secret' };
+  player.isPlaying = true;
+  player._activity();
+
+  assert.equal(states[0].current.title, 'Titre privé A');
+  assert.equal(Object.hasOwn(states[0].current, 'url'), false);
+  assert.deepEqual(globalActivities, []);
+});
+
 test('chaque lecteur transmet au encodeur le débit de son propre salon vocal', async () => {
   const { MusicPlayer } = require('../utils/musicPlayer');
   const { VoiceConnection } = require('../utils/voice');

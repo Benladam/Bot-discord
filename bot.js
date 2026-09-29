@@ -22,6 +22,7 @@ const guildDatabase = require('./utils/database');
 const { createUpdater } = require('./utils/updater');
 const { createMinecraftBridge } = require('./utils/minecraftBridge');
 const { PresenceManager } = require('./utils/presenceManager');
+const { GuildNowPlayingManager } = require('./utils/guildNowPlaying');
 
 const { setupConsole } = require('./console-commands');
 const langStore = require('./langStore');
@@ -78,6 +79,11 @@ const presence = new PresenceManager({
     else Logger.info(message);
   },
 });
+const guildNowPlaying = new GuildNowPlayingManager({
+  client,
+  database: guildDatabase,
+  log: (level, message) => level === 'warn' ? Logger.warn(message) : Logger.info(message),
+});
 
 client.commands = new Collection(); // nom -> module de commande
 client.musicPlayers = new Collection(); // guildId -> MusicPlayer
@@ -94,8 +100,8 @@ function getPlayer(guildId) {
       const savedVolume = Number(guildDatabase.getGuildSetting(guildId, 'defaultVolume', 1));
       p.volume = Number.isFinite(savedVolume) ? Math.max(0, Math.min(1, savedVolume)) : 1;
     }
-    // Une lecture active peut remplacer temporairement le texte cyclique.
-    p.onActivityChange = (info) => presence.setMusicActivity(`guild:${guildId}`, info);
+    // Le statut de lecture est publié dans un message propre à cette guilde.
+    p.onActivityChange = (state) => guildNowPlaying.update(p, state);
     client.musicPlayers.set(guildId, p);
   }
   return client.musicPlayers.get(guildId);
@@ -116,7 +122,7 @@ function isOwner(userId) { return !!ownerId && userId === ownerId; }
 // Langue effective pour un utilisateur/serveur donné.
 function langFor(userId, guildId) { return langStore.resolve(userId, guildId); }
 
-const deps = { getPlayer, prefix: PREFIX, isOwner, langFor, langStore, botT, updater, database: guildDatabase, presence, commands: client.commands };
+const deps = { getPlayer, prefix: PREFIX, isOwner, langFor, langStore, botT, updater, database: guildDatabase, presence, logger: Logger, commands: client.commands };
 const minecraftBridge = createMinecraftBridge({
   client,
   getPlayer,
@@ -380,7 +386,9 @@ client.on(Events.MessageCreate, async (message) => {
 
   try {
     const fullCmd = `${PREFIX}${name} ${args.join(' ')}`.trim();
-    Logger.info(`${message.author.tag} ❯ ${fullCmd}`);
+    Logger.info(name === 'play'
+      ? `${message.author.tag} ❯ ${PREFIX}play [requête musicale — détails sécurisés ci-dessous]`
+      : `${message.author.tag} ❯ ${fullCmd}`);
     await cmd.execute(message, args, deps);
   } catch (e) {
     Logger.error(`Erreur ${PREFIX}${name}: ${e.message}`);

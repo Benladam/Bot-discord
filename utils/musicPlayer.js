@@ -174,6 +174,7 @@ class MusicPlayer {
     if (!this.connection?.connected) throw new Error("Le bot n'est connecté à aucun canal vocal.");
     if (this.sender) this.sender.stop();
     this.current = song; this.isPlaying = true; this.isPaused = false;
+    this._activity();
     const generation = ++this._generation;
     try {
       this.sender = await OpusSender.start(this.connection, song.url, () => console.log('🔊 SON ÉMIS — lecture maison active.'), async () => {
@@ -212,8 +213,8 @@ class MusicPlayer {
     if (onEmbed) await onEmbed(song);
     this._activity(); return song;
   }
-  pause() { this.sender?.pause?.(); this.isPaused = true; }
-  resume() { this.sender?.resume?.(); this.isPaused = false; }
+  pause() { this.sender?.pause?.(); this.isPaused = true; this._activity(); }
+  resume() { this.sender?.resume?.(); this.isPaused = false; this._activity(); }
   skip() {
     if (!this.isPlaying) return Promise.resolve(null);
     ++this._generation;
@@ -237,10 +238,26 @@ class MusicPlayer {
   }
   setVolume(value) { this.volume = Math.max(0, Math.min(1, Number(value) || 0)); this.sender?.setVolume?.(this.volume); return Math.round(this.volume * 100); }
   _activity() {
-    const info = this.isPlaying && this.current ? { title: this.current.title } : null;
+    const state = {
+      current: this.isPlaying && this.current ? {
+        title: this.current.title,
+        thumbnail: this.current.thumbnail || null,
+        source: this.current.source || 'youtube',
+        duration: Number(this.current.duration) || 0,
+      } : null,
+      isPlaying: this.isPlaying,
+      isPaused: this.isPaused,
+      queueLength: this.queue.length,
+      volume: Math.round(this.volume * 100),
+      addedBy: this.addedBy,
+      voiceChannelName: this.voiceChannelName,
+      lang: this.nowPlayingLang || 'fr',
+    };
     try {
-      if (typeof this.onActivityChange === 'function') this.onActivityChange(info);
-      else this.client.user.setActivity(info ? '🎵 Lecture en cours' : '🎵 En attente', { type: 2 });
+      // Une présence Discord est commune à tous les serveurs. Le titre est
+      // uniquement publié par le callback dans le salon de ce serveur.
+      const update = this.onActivityChange?.(state);
+      update?.catch?.((error) => console.warn(`[now-playing] ${error.message}`));
     } catch (_) { /* ignore */ }
   }
   getState() { const f = (s) => s && ({ title: s.title, url: s.url, thumbnail: s.thumbnail || null, source: s.source || 'youtube', duration: s.duration || 0 }); return { current: f(this.current), queue: this.queue.map(f), isPlaying: this.isPlaying, isPaused: this.isPaused, loopMode: this.loopMode, volume: this.volume }; }

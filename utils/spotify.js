@@ -129,10 +129,20 @@ function isSpotifyUrl(query) {
 }
 
 function parseSpotifyUrl(url) {
-  const m = url.match(/(?:open\.)?spotify\.com\/(track|playlist|album|artist)\/([A-Za-z0-9]+)/i)
-    || url.match(/^spotify:(track|playlist|album|artist):([A-Za-z0-9]+)/i);
-  if (!m) return { type: 'unknown', id: null };
-  return { type: m[1].toLowerCase(), id: m[2] };
+  const value = String(url || '').trim();
+  const uri = value.match(/^spotify:(track|playlist|album|artist):([A-Za-z0-9]+)/i);
+  if (uri) return { type: uri[1].toLowerCase(), id: uri[2] };
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    if (host !== 'spotify.com' && !host.endsWith('.spotify.com')) return { type: 'unknown', id: null };
+    // Spotify shares links with locale prefixes (for example /intl-fr/track/<id>).
+    const match = parsed.pathname.match(/\/(?:intl-[a-z]{2,3}(?:-[a-z]{2})?\/)?(track|playlist|album|artist)\/([A-Za-z0-9]+)/i);
+    if (!match) return { type: 'unknown', id: null };
+    return { type: match[1].toLowerCase(), id: match[2] };
+  } catch (_) {
+    return { type: 'unknown', id: null };
+  }
 }
 
 async function searchYouTube(query) {
@@ -272,5 +282,5 @@ async function resolveTrackWithoutApi(url) {
 }
 
 module.exports = {
-  isSpotifyUrl, resolveSpotifyLink, searchSpotify, searchSpotifyCatalog, getSpotifyArtistAlbums,
+  isSpotifyUrl, parseSpotifyUrl, resolveSpotifyLink, searchSpotify, searchSpotifyCatalog, getSpotifyArtistAlbums,
 };

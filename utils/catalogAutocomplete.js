@@ -10,11 +10,14 @@ function formatDuration(value) {
 }
 
 function cleanArtist(value) {
-  return String(value || '').split('·')[0].replace(/\s+-\s+Topic$/i, '').trim();
+  const artist = String(value || '').split('·')[0].replace(/https?:\/\/\S+/gi, '').replace(/\s+-\s+Topic$/i, '').trim();
+  return artist;
 }
 
 function formatChoiceName(item) {
-  const title = String(item.title || 'Sans titre').trim();
+  const rawTitle = String(item.title || 'Sans titre').trim();
+  const title = rawTitle.replace(/https?:\/\/\S+/gi, '').trim() || 'Morceau sans titre';
+  const subtitle = String(item.subtitle || '').replace(/https?:\/\/\S+/gi, '').trim();
   if (item.kind === 'track') {
     const artist = cleanArtist(item.subtitle);
     const hasArtist = artist && title.toLocaleLowerCase().includes(artist.toLocaleLowerCase());
@@ -24,10 +27,10 @@ function formatChoiceName(item) {
     return `${chartRank}🎵 ${track}${duration ? ` - ${duration}` : ''}`;
   }
   if (item.kind === 'playlist') {
-    return `📁 ${title}${item.subtitle ? ` · ${item.subtitle}` : ''}`;
+    return `📁 ${title}${subtitle ? ` · ${subtitle}` : ''}`;
   }
   if (item.kind === 'album') {
-    return `💿 ${title}${item.subtitle ? ` · ${item.subtitle}` : ''}`;
+    return `💿 ${title}${subtitle ? ` · ${subtitle}` : ''}`;
   }
   if (item.kind === 'artist') return `👤 ${title} · discographie`;
   return `🎶 ${title}`;
@@ -74,7 +77,8 @@ function toAutocompleteChoice(item) {
 }
 
 function toSearchFallbackChoice(query, { worldChart = false } = {}) {
-  const value = String(worldChart ? 'top mondial' : query).trim().slice(0, 100) || 'top mondial';
+  const rawValue = String(worldChart ? 'top mondial' : query).trim();
+  const value = (/^https?:\/\//i.test(rawValue) ? 'lien musical' : rawValue).slice(0, 100) || 'top mondial';
   const name = worldChart
     ? '🌍 Rechercher « Top mondial »'
     : `🔎 Rechercher « ${value} »`;
