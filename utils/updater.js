@@ -94,7 +94,22 @@ function githubRepoFromRemote(remoteUrl) {
 }
 
 function sanitizeSubject(value) {
-  return String(value || '(sans titre)').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').slice(0, 160);
+  return String(value || '(sans titre)')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/@/g, '@\u200b')
+    .slice(0, 160);
+}
+
+async function readCommitSummary(sha) {
+  const output = await runGit(['show', '-s', '--format=%H%x1f%s%x1f%an%x1f%cI', sha]);
+  const [fullSha, subject, author, committedAt] = output.split('\x1f');
+  return {
+    sha: fullSha,
+    subject: sanitizeSubject(subject),
+    author: sanitizeSubject(author),
+    committedAt: String(committedAt || '').trim(),
+  };
 }
 
 function createUpdater({ client, database, log }) {
@@ -130,6 +145,10 @@ function createUpdater({ client, database, log }) {
 
     const localSha = await runGit(['rev-parse', 'HEAD']);
     const remoteSha = await runGit(['rev-parse', remoteRef]);
+    const [localCommit, remoteCommit] = await Promise.all([
+      readCommitSummary(localSha),
+      readCommitSummary(remoteSha),
+    ]);
     const porcelain = await runGit(['status', '--porcelain']);
     const changedFiles = porcelain ? porcelain.split(/\r?\n/).filter(Boolean) : [];
 
@@ -170,6 +189,8 @@ function createUpdater({ client, database, log }) {
       remoteRef,
       localSha,
       remoteSha,
+      localCommit,
+      remoteCommit,
       hasUpdate,
       diverged: hasUpdate && !canFastForward,
       localAhead: localSha !== remoteSha && remoteIsAncestor,
@@ -224,7 +245,10 @@ function createUpdater({ client, database, log }) {
       return false;
     }
 
-    await channel.send({ content: customContent || formatNotice(status), allowedMentions: { parse: [] } });
+    const payload = customContent && typeof customContent === 'object'
+      ? { ...customContent, allowedMentions: { parse: [] } }
+      : { content: customContent || formatNotice(status), allowedMentions: { parse: [] } };
+    await channel.send(payload);
     return true;
   }
 
@@ -365,16 +389,17 @@ function createUpdater({ client, database, log }) {
       if (status.diverged) return { updated: false, status, reason: 'diverged' };
       if (!status.workingTreeClean) return { updated: false, status, reason: 'local-changes' };
 
-      await runGit(['merge', '--ff-only', status.remoteRef]);
+      await runGit(['merge', '--ff-only', status.remoteSha]);
       const newSha = await runGit(['rev-parse', 'HEAD']);
+      const installedCommit = await readCommitSummary(newSha);
       try {
         await installDependencies();
       } catch (error) {
         logWith(log, 'error', `Code mis à jour (${newSha.slice(0, 7)}), mais npm install a échoué: ${error.message}`);
-        return { updated: false, codeUpdated: true, status, newSha, error };
+        return { updated: false, codeUpdated: true, status, newSha, installedCommit, error };
       }
 
-      return { updated: true, status, newSha };
+      return { updated: true, status, newSha, installedCommit };
     })();
     try {
       return await applyPromise;
