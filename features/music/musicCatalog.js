@@ -2,7 +2,7 @@
 const play = require('play-dl');
 const { searchSpotifyCatalog, getSpotifyArtistAlbums } = require('./providers/spotify');
 const { configureSoundCloud } = require('./providers/soundcloud');
-const { searchYouTubeCandidates } = require('./audioSender');
+const { searchYouTubeCandidates, searchYouTubePlaylists } = require('./audioSender');
 const { collectCatalogResults } = require('./catalogSearch');
 
 const cache = new Map();
@@ -62,7 +62,7 @@ async function getWorldTopTracks({ fetchImpl = globalThis.fetch, fresh = false, 
 }
 
 function describe(item) {
-  const provider = item.provider === 'youtube' ? 'YouTube' : item.provider === 'spotify' ? 'Spotify' : 'Deezer';
+  const provider = { youtube: 'YouTube', spotify: 'Spotify', soundcloud: 'SoundCloud', deezer: 'Deezer' }[item.provider] || item.provider;
   const kind = { track: 'morceau', playlist: 'playlist', album: 'album', artist: 'artiste' }[item.kind] || 'résultat';
   return `${provider} · ${kind}${item.subtitle ? ` · ${item.subtitle}` : ''}`.slice(0, 100);
 }
@@ -128,15 +128,18 @@ async function searchCatalog(query, { limit = 10, fresh = false, sourceTimeoutMs
   if (!fresh && pendingSearches.has(cacheKey)) return pendingSearches.get(cacheKey);
 
   const searchRequest = (async () => {
+    // Le client Discord reçoit une réponse rapide, mais la première extraction
+    // peut continuer et enrichir le cache sans être relancée à chaque saisie.
+    const workerWaitMs = Math.max(6000, sourceWaitMs);
     const perType = Math.min(10, Math.max(1, limit));
     const tasks = [
       safeSearch('YouTube vidéos', async () => (await searchYouTubeCandidates(normalized, {
         limit: perType,
-        timeoutMs: sourceWaitMs,
-      })).map((item) => normalizeYoutube(item, 'track')), sourceWaitMs),
-      safeSearch('YouTube playlists', async () => (await play.search(normalized, {
-        limit: Math.min(5, perType), source: { youtube: 'playlist' },
-      })).map((item) => normalizeYoutube(item, 'playlist')), sourceWaitMs),
+        timeoutMs: workerWaitMs,
+      })).map((item) => normalizeYoutube(item, 'track')), workerWaitMs + 100),
+      safeSearch('YouTube playlists', async () => (await searchYouTubePlaylists(normalized, {
+        limit: Math.min(5, perType), timeoutMs: workerWaitMs,
+      })).map((item) => normalizeYoutube(item, 'playlist')), workerWaitMs + 100),
       safeSearch('Spotify', () => searchSpotifyCatalog(normalized, Math.min(5, perType)), sourceWaitMs),
       safeSearch('Deezer morceaux', async () => (await play.search(normalized, {
         limit: perType, source: { deezer: 'track' },
@@ -154,13 +157,17 @@ async function searchCatalog(query, { limit = 10, fresh = false, sourceTimeoutMs
       })).map(normalizeSoundCloud), sourceWaitMs));
     }
     const storeResults = (results) => {
-      if (!results.length || (cache.get(cacheKey)?.items.length || 0) > results.length) return;
+      const previous = cache.get(cacheKey);
+      if (!results.length || (previous?.expiresAt > Date.now() && previous.items.length > results.length)) return;
       results.forEach(item => { item.description = describe(item); });
       cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL, items: results });
       if (cache.size > 100) cache.delete(cache.keys().next().value);
     };
     const items = await collectCatalogResults(tasks, {
-      timeoutMs: Math.min(1500, sourceWaitMs), onComplete: storeResults,
+      timeoutMs: Math.min(1500, sourceWaitMs), onComplete: results => {
+        storeResults(results);
+        if (pendingSearches.get(cacheKey) === searchRequest) pendingSearches.delete(cacheKey);
+      },
     });
     storeResults(items);
     return items;
@@ -168,8 +175,9 @@ async function searchCatalog(query, { limit = 10, fresh = false, sourceTimeoutMs
 
   if (!fresh) pendingSearches.set(cacheKey, searchRequest);
   try { return await searchRequest; }
-  finally {
+  catch (error) {
     if (pendingSearches.get(cacheKey) === searchRequest) pendingSearches.delete(cacheKey);
+    throw error;
   }
 }
 

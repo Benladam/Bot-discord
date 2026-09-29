@@ -120,6 +120,34 @@ YouTube peut toutefois refuser un cookie expiré ou ne pas autoriser l’accès 
 une vidéo; dans ce cas, le code ne contourne pas la vérification et tente le
 repli SoundCloud.
 
+Le fichier source de cookies n'est jamais modifié par yt-dlp : chaque essai
+utilise une copie privée normalisée (UTF-8 sans BOM, fins de ligne LF). Le bot
+vérifie le format Netscape et la présence de cookies YouTube non expirés avant
+de lancer l'extracteur. Cela ne garantit pas que Google accepte la session.
+Les recherches de catalogue publiques s'effectuent sans cookies de compte.
+
+Pour vérifier directement l'hébergement, tape dans sa console :
+
+```text
+musiccheck
+musiccheck https://www.youtube.com/watch?v=v2o3in-Aud0
+```
+
+Ou depuis un terminal local au projet :
+
+```sh
+node tools/diagnostics/musicCheck.js https://www.youtube.com/watch?v=v2o3in-Aud0
+```
+
+Le diagnostic ne rejoint aucun vocal, ne modifie pas la file et ne révèle ni
+valeur de cookie ni jeton. Il distingue la validation locale du fichier,
+l'acceptation de l'extraction par YouTube et l'écoute réelle dans Discord.
+Si YouTube refuse toujours un fichier correctement formé, renouvelle
+l'exportation du seul compte choisi en suivant le
+[guide officiel yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies).
+N'ajoute jamais les cookies ou le fichier `.env` à GitHub. Les refus d'accès ne
+sont pas contournés et les remixes ne remplacent pas un titre demandé.
+
 ### Recherche et contrôles musicaux
 
 Les catalogues sont interrogés en parallèle : les premiers résultats sont
@@ -127,6 +155,10 @@ affichés après une courte fenêtre de regroupement (180 ms), avec un budget
 de réponse de 1,5 seconde. Les résultats tardifs enrichissent un cache de deux
 minutes, partagé entre recherche et autocomplétion. Ce budget concerne le
 catalogue, pas le téléchargement audio ni le handshake Discord.
+Les extracteurs YouTube disposent d'au moins six secondes en arrière-plan,
+avec arrêt du processus au délai maximal. Une recherche identique reste
+mutualisée jusqu'à la fin de ce travail, même après la réponse à Discord.
+La recherche de playlists utilise yt-dlp, sans le parseur HTML de play-dl.
 
 Pour un lecteur déconnecté, le flux audio est préparé **avant** de rejoindre
 le vocal. Le bouton **Dashboard** ouvre un embed privé dans Discord : volume

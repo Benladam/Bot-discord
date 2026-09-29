@@ -9,6 +9,7 @@ const { ensureManagedYtDlp, getDataDirectory } = require('./ytDlp');
 const { configureSoundCloud } = require('./providers/soundcloud');
 const { matchesRequestedTrack, candidateTitle, candidateArtist, fallbackSearchQuery } = require('./trackMatching');
 const { PcmVolume } = require('./pcmVolume');
+const { readCookieFile } = require('./youtubeCookies');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
@@ -124,7 +125,8 @@ function describeCookiesFile(cookiesPath) {
     const stat = fs.statSync(cookiesPath);
     if (!stat.isFile()) return 'cookies=not-a-file';
     fs.accessSync(cookiesPath, fs.constants.R_OK);
-    return `cookies=readable,${stat.size}B`;
+    const { summary } = readCookieFile(cookiesPath);
+    return `cookies=readable,${stat.size}B,actifs=${summary.activeEntries},auth=${summary.activeAuthEntries},expires=${summary.expiredEntries}`;
   } catch (error) {
     return `cookies=unreadable(${error.code || 'error'})`;
   }
@@ -134,13 +136,14 @@ function createTemporaryCookiesCopy(sourcePath, temporaryRoot = path.join(
   getDataDirectory(), '.cache', 'yt-dlp', 'cookies',
 )) {
   if (!sourcePath) return null;
+  const { content } = readCookieFile(sourcePath);
   fs.mkdirSync(temporaryRoot, { recursive: true, mode: 0o700 });
   if (process.platform !== 'win32') fs.chmodSync(temporaryRoot, 0o700);
   const directory = fs.mkdtempSync(path.join(temporaryRoot, 'session-'));
   try {
     if (process.platform !== 'win32') fs.chmodSync(directory, 0o700);
     const workingPath = path.join(directory, 'cookies.txt');
-    fs.copyFileSync(sourcePath, workingPath, fs.constants.COPYFILE_EXCL);
+    fs.writeFileSync(workingPath, content, { flag: 'wx', mode: 0o600 });
     if (process.platform !== 'win32') fs.chmodSync(workingPath, 0o600);
     let cleaned = false;
     return {
@@ -436,6 +439,7 @@ function youtubeUrlFromSearchItem(item) {
   if (isYouTubeUrl(directUrl)) return directUrl;
   if (isYouTubeUrl(item?.url)) return item.url;
   const id = String(item?.id || item?.video_id || '').trim();
+  if (item?._type === 'playlist' && /^[A-Za-z0-9_-]{6,}$/.test(id)) return `https://www.youtube.com/playlist?list=${id}`;
   if (/^[A-Za-z0-9_-]{6,}$/.test(id)) return `https://www.youtube.com/watch?v=${id}`;
   return '';
 }
@@ -445,10 +449,12 @@ function soundCloudUrlFromSearchItem(item) {
 }
 
 function normalizeYtDlpSearchItem(item, provider = 'youtube') {
+  if (!item || typeof item !== 'object') return null;
   const url = provider === 'soundcloud' ? soundCloudUrlFromSearchItem(item) : youtubeUrlFromSearchItem(item);
   if (!url) return null;
   return {
     title: item.title || 'Musique inconnue',
+    kind: provider === 'youtube' && new URL(url).pathname === '/playlist' ? 'playlist' : 'track',
     url,
     durationInSec: Number(item.duration) || 0,
     duration: Number(item.duration) || 0,
@@ -510,7 +516,7 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
       childClosed = true;
       cleanupCookiesCopy();
       const failure = ytDlpSetupFailure(error, 'la recherche');
-      finish({ items: [], error: failure.code === 'ENOENT' ? failure.message : failure.resourceExhausted ? failure.message : `Impossible de préparer la recherche yt-dlp (${failure.code || 'erreur'}).`, code: failure.code, resourceExhausted: failure.resourceExhausted, missing: spawnAttempted && failure.code === 'ENOENT', skipped: !spawnAttempted });
+      finish({ items: [], error: failure.code === 'ENOENT' || /^YOUTUBE_COOKIES_/.test(failure.code) ? failure.message : failure.resourceExhausted ? failure.message : `Impossible de préparer la recherche yt-dlp (${failure.code || 'erreur'}).`, code: failure.code, resourceExhausted: failure.resourceExhausted, missing: spawnAttempted && failure.code === 'ENOENT', skipped: !spawnAttempted });
       return;
     }
     timer = setTimeout(() => {
@@ -639,7 +645,16 @@ async function searchYtDlpCandidates(query, {
 }
 
 function searchYouTubeCandidates(query, options = {}) {
-  return searchYtDlpCandidates(query, { ...options, provider: 'youtube', searchPrefix: 'ytsearch', inputMode: 'search' });
+  // Les recherches publiques n'ont pas besoin des cookies d'un compte.
+  return searchYtDlpCandidates(query, { cookiesPaths: [], ...options, provider: 'youtube', searchPrefix: 'ytsearch', inputMode: 'search' });
+}
+
+function searchYouTubePlaylists(query, options = {}) {
+  const url = new URL('https://www.youtube.com/results');
+  url.searchParams.set('search_query', String(query || '').trim().slice(0, 200));
+  url.searchParams.set('sp', 'EgIQAw==');
+  return searchYtDlpCandidates(url.href, { cookiesPaths: [], ...options, provider: 'youtube', inputMode: 'direct' })
+    .then(items => items.filter(item => item.kind === 'playlist'));
 }
 
 function searchSoundCloudCandidates(query, options = {}) {
@@ -1227,6 +1242,7 @@ module.exports = {
   parseYtDlpSearch,
   prepareInput,
   searchYouTubeCandidates,
+  searchYouTubePlaylists,
   searchSoundCloudCandidates,
   soundCloudStream,
   soundCloudSearchStream,

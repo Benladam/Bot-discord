@@ -16,6 +16,7 @@ const {
   parseYtDlpSearch,
   prepareInput,
   searchYouTubeCandidates,
+  searchYouTubePlaylists,
   soundCloudSearchStream,
   streamUrl,
 } = require('./audioSender');
@@ -79,6 +80,46 @@ test('parse les résultats JSON yt-dlp en URLs YouTube jouables', () => {
   assert.equal(results[0].durationInSec, 164);
   assert.equal(results[0].channel.name, 'Artiste');
   assert.equal(results[1].url, 'https://www.youtube.com/watch?v=xyz9876');
+});
+
+test('recherche playlists via yt-dlp sans parser play-dl ni envoyer de cookies de compte', async () => {
+  let captured;
+  const results = await searchYouTubePlaylists('Niska & Dinaz', {
+    candidates: [['fake-yt-dlp', []]],
+    spawnImpl: (command, args) => {
+      captured = args;
+      const child = new EventEmitter();
+      child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => true;
+      setImmediate(() => {
+        child.stdout.end(JSON.stringify({ entries: [null,
+          { _type: 'playlist', id: 'PLabcdef123456', title: 'Playlist Niska', uploader: 'Créateur' },
+          { id: 'abc12345678', title: 'Vidéo ignorée' },
+        ] }));
+        setImmediate(() => child.emit('close', 0));
+      });
+      return child;
+    },
+  });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].url, 'https://www.youtube.com/playlist?list=PLabcdef123456');
+  const searchUrl = new URL(captured.at(-1));
+  assert.equal(searchUrl.searchParams.get('search_query'), 'Niska & Dinaz');
+  assert.equal(searchUrl.searchParams.get('sp'), 'EgIQAw==');
+  assert.ok(!captured.includes('--cookies'));
+});
+
+test('le délai de recherche tue le processus et ne relance pas un deuxième binaire', async () => {
+  let spawns = 0; let kills = 0;
+  await assert.rejects(searchYouTubeCandidates('Niska', {
+    timeoutMs: 100, candidates: [['fake-one', []], ['fake-two', []]],
+    spawnImpl: () => {
+      spawns++;
+      const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+      child.kill = () => { kills++; setImmediate(() => child.emit('close', null)); return true; };
+      return child;
+    },
+  }), /délai/);
+  assert.equal(spawns, 1); assert.equal(kills, 1);
 });
 
 test('recherche YouTube installe le binaire géré après ENOENT et conserve le cookie', async () => {
@@ -377,7 +418,7 @@ test('ne tente pas de réinstaller yt-dlp si YouTube bloque une version déjà p
 test('journalise la cause du repli YouTube en masquant cookies, jetons et URLs', async () => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-yt-dlp-diagnostic-'));
   const cookiesPath = path.join(dataDir, 'cookies.txt');
-  await fs.writeFile(cookiesPath, '# Netscape HTTP Cookie File\n');
+  await fs.writeFile(cookiesPath, '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tfake-test-cookie\n');
   const warnings = [];
   const originalWarn = console.warn;
   let attempt = 0;
