@@ -274,7 +274,7 @@ class VoiceConnection extends require('events').EventEmitter {
           console.log('[dave] membres vocaux connus=' + this.dave.recognizedUserIds.length);
         } else if (op === 13 && this.dave && d?.user_id) {
           this.dave.removeRecognizedUser(d.user_id);
-        } else if (![5, 11, 13, 15, 18, 20].includes(op)) console.log('[voice] WS op=' + op + ' recu');
+        } else if (![5, 6, 11, 13, 15, 18, 20].includes(op)) console.log('[voice] WS op=' + op + ' recu');
         break;
     }
   }

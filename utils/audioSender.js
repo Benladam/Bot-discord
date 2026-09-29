@@ -610,10 +610,10 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
   }
 }
 
-async function start(connection, url, onStart, onEnd, onError, fallbackQuery) {
-  const media = await prepareInput(url, fallbackQuery);
+async function start(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies = {}) {
+  const media = await (dependencies.prepareInput || prepareInput)(url, fallbackQuery);
   if (media.fallback) console.info(`[audio] Bascule vers ${media.fallbackProvider || 'un fournisseur alternatif'} après l’échec du flux principal.`);
-  const ffmpeg = spawn(bin('ffmpeg', 'FFMPEG_PATH'), [
+  const ffmpeg = (dependencies.spawn || spawn)(bin('ffmpeg', 'FFMPEG_PATH'), [
     '-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-i', media.stream ? 'pipe:0' : media.url, '-vn',
     '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
     '-c:a', 'libopus', '-application', 'audio', '-vbr', 'on', '-compression_level', '10',
@@ -623,13 +623,19 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery) {
   const parser = new OggParser(); let frames = []; let paused = false; let started = false; let stopped = false;
   let ffmpegError = ''; let errorReported = false;
   let readinessTimer = null;
+  let drainTimer = null;
+  const cleanup = () => {
+    clearInterval(tick);
+    clearInterval(drainTimer);
+    clearTimeout(readinessTimer);
+    try { media.stream?.destroy(); } catch (_) {}
+    try { ffmpeg.kill(); } catch (_) {}
+  };
   const reportFfmpegError = (error) => {
     if (stopped || errorReported) return;
     errorReported = true;
     stopped = true;
-    clearInterval(tick);
-    if (readinessTimer) clearTimeout(readinessTimer);
-    try { ffmpeg.kill(); } catch (_) {}
+    cleanup();
     onError?.(error);
   };
   const tick = setInterval(() => {
@@ -657,7 +663,13 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery) {
     ffmpeg.stdin.on('error', reportFfmpegError);
     media.stream.pipe(ffmpeg.stdin);
   }
-  ffmpeg.stderr.on('data', d => { ffmpegError = (ffmpegError + d.toString()).slice(-1000); });
+  // Never retain arbitrary stderr: signed URLs can span chunks and truncation
+  // can remove their scheme, defeating URL-based redaction.
+  ffmpeg.stderr.on('data', d => {
+    const diagnostic = ffmpegError + d.toString();
+    if (/HTTP 403 Forbidden|(?:HTTP(?: error)?|Server returned)\s*:?\s*403|403\s+Forbidden/i.test(diagnostic)) ffmpegError = 'HTTP 403 Forbidden';
+    else if (ffmpegError !== 'HTTP 403 Forbidden') ffmpegError = diagnostic.slice(-80);
+  });
   ffmpeg.on('error', e => {
     console.error('[ffmpeg] démarrage impossible:', e.message);
     reportFfmpegError(e);
@@ -666,13 +678,22 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery) {
     if (stopped) return;
     if (code !== 0) {
       const reason = signal ? `le signal ${signal}` : `le code ${code ?? 'inconnu'}`;
-      const message = ffmpegError.trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' ').replace(/https?:\/\/\S+/g, '[URL audio]').slice(-300);
-      reportFfmpegError(new Error(message || `FFmpeg s'est arrêté avec ${reason}.`));
+      const forbidden = ffmpegError === 'HTTP 403 Forbidden';
+      const error = new Error(forbidden
+        ? 'Le fournisseur refuse le flux audio (HTTP 403), même après extraction du lien. Vérifie l’accès au média depuis cet hébergeur ; trouver le titre ne garantit pas que son flux soit accessible.'
+        : `FFmpeg s'est arrêté avec ${reason}.`);
+      error.code = forbidden ? 'AUDIO_HTTP_FORBIDDEN' : 'FFMPEG_FAILED';
+      reportFfmpegError(error);
       return;
     }
-    const wait = setInterval(() => { if (!frames.length) { clearInterval(wait); if (!stopped) { if (readinessTimer) clearTimeout(readinessTimer); onEnd?.(); } } }, 100);
+    drainTimer = setInterval(() => {
+      if (stopped || frames.length) return;
+      stopped = true;
+      cleanup();
+      onEnd?.();
+    }, 100);
   });
-  return { pause() { paused = true; }, resume() { paused = false; }, setVolume() {}, stop() { stopped = true; clearInterval(tick); if (readinessTimer) clearTimeout(readinessTimer); try { media.stream?.destroy(); } catch (_) {} try { ffmpeg.kill(); } catch (_) {} } };
+  return { pause() { paused = true; }, resume() { paused = false; }, setVolume() {}, stop() { stopped = true; cleanup(); } };
 }
 
 class OggParser {
