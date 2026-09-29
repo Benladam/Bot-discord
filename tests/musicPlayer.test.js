@@ -72,6 +72,51 @@ test('les handshakes vocaux restent isolés par serveur et utilisent le bon shar
   assert.equal(client.listenerCount('raw'), 0);
 });
 
+test('chaque serveur garde sa propre chanson et sa propre file', () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  const client = { user: { id: 'bot-user', setActivity() {} } };
+  const playerA = new MusicPlayer('guild-a', client);
+  const playerB = new MusicPlayer('guild-b', client);
+  playerA.addToQueue({ title: 'Titre A', url: 'https://example.test/a' });
+  playerB.addToQueue({ title: 'Titre B', url: 'https://example.test/b' });
+  playerA.current = playerA.getNextSong();
+  playerB.current = playerB.getNextSong();
+
+  assert.equal(playerA.getState().current.title, 'Titre A');
+  assert.equal(playerB.getState().current.title, 'Titre B');
+  playerA.stop();
+  assert.equal(playerA.getState().current, null);
+  assert.equal(playerB.getState().current.title, 'Titre B');
+});
+
+test('chaque lecteur transmet au encodeur le débit de son propre salon vocal', async () => {
+  const { MusicPlayer } = require('../utils/musicPlayer');
+  const { VoiceConnection } = require('../utils/voice');
+  const originalConnect = VoiceConnection.prototype.connect;
+  VoiceConnection.prototype.connect = async function connectForTest() {
+    this.connected = true;
+    return this;
+  };
+  try {
+    const client = { user: { id: 'bot-user', setActivity() {} } };
+    const playerA = new MusicPlayer('guild-a', client);
+    const playerB = new MusicPlayer('guild-b', client);
+    playerA._requestVoice = async () => ({ endpoint: 'voice-a', token: 'token-a', sessionId: 'session-a' });
+    playerB._requestVoice = async () => ({ endpoint: 'voice-b', token: 'token-b', sessionId: 'session-b' });
+
+    const connectionA = await playerA.ensureConnection({ id: 'channel-a', bitrate: 96_000 });
+    const connectionB = await playerB.ensureConnection({ id: 'channel-b', bitrate: 192_000 });
+    assert.equal(connectionA.audioBitrate, 96_000);
+    assert.equal(connectionB.audioBitrate, 192_000);
+    await playerA.ensureConnection({ id: 'channel-a', bitrate: 128_000 });
+    assert.equal(connectionA.audioBitrate, 128_000, 'le débit est mis à jour si la configuration du vocal change');
+    playerA.destroy();
+    playerB.destroy();
+  } finally {
+    VoiceConnection.prototype.connect = originalConnect;
+  }
+});
+
 test('un envoi Gateway vocal échoué nettoie le listener au lieu de le laisser expirer', async () => {
   const { MusicPlayer } = require('../utils/musicPlayer');
   const guildId = '123456789012345678';

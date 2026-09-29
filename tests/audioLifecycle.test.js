@@ -45,3 +45,28 @@ test('normal end cleans sender timers and calls onEnd only once', async () => {
   assert.equal(process.killed, true);
   sender.stop();
 });
+
+test('encode la musique en Opus stéréo haute qualité', async () => {
+  const process = child();
+  let args;
+  const sender = await OpusSender.start({ audioBitrate: 256_000 }, 'unused', null, null, assert.fail, '', {
+    prepareInput: async () => ({ url: 'https://example.invalid/audio' }),
+    spawn: (_command, ffmpegArgs) => { args = ffmpegArgs; return process; },
+  });
+  assert.ok(args.includes('192k'));
+  assert.ok(args.includes('48000'));
+  assert.ok(args.includes('2'));
+  assert.ok(args.includes('loudnorm=I=-16:TP=-1.5:LRA=11'));
+  sender.stop();
+});
+
+test('adapte le débit Opus au plafond du salon vocal', async () => {
+  const process = child();
+  let args;
+  const sender = await OpusSender.start({ audioBitrate: 96_000 }, 'unused', null, null, assert.fail, '', {
+    prepareInput: async () => ({ url: 'https://example.invalid/audio' }),
+    spawn: (_command, ffmpegArgs) => { args = ffmpegArgs; return process; },
+  });
+  assert.ok(args.includes('96k'));
+  sender.stop();
+});

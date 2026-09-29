@@ -89,7 +89,11 @@ class MusicPlayer {
   }
 
   async ensureConnection(channel) {
-    if (this.connection?.connected && this.connection.channelId === channel.id) return this.connection;
+    if (this.connection?.connected && this.connection.channelId === channel.id) {
+      const channelBitrate = Number(channel.bitrate);
+      if (Number.isFinite(channelBitrate) && channelBitrate > 0) this.connection.audioBitrate = channelBitrate;
+      return this.connection;
+    }
     if (this.connecting) return this.connecting;
     this._clearIdleTimer();
     this._clearAloneTimer();
@@ -98,6 +102,8 @@ class MusicPlayer {
       const info = await this._requestVoice(channel.id);
       const conn = new VoiceConnection({ ...info, serverId: this.guildId, userId: this.client.user.id });
       conn.channelId = channel.id;
+      const channelBitrate = Number(channel.bitrate);
+      conn.audioBitrate = Number.isFinite(channelBitrate) && channelBitrate > 0 ? channelBitrate : 160_000;
       conn.on('error', (e) => console.error('[voice] Erreur:', e.message));
       await conn.connect(); this.connection = conn;
       console.log('✅ Connexion vocale maison prête.');
@@ -234,7 +240,7 @@ class MusicPlayer {
     const info = this.isPlaying && this.current ? { title: this.current.title } : null;
     try {
       if (typeof this.onActivityChange === 'function') this.onActivityChange(info);
-      else this.client.user.setActivity(info?.title || '🎵 En attente', { type: 2 });
+      else this.client.user.setActivity(info ? '🎵 Lecture en cours' : '🎵 En attente', { type: 2 });
     } catch (_) { /* ignore */ }
   }
   getState() { const f = (s) => s && ({ title: s.title, url: s.url, thumbnail: s.thumbnail || null, source: s.source || 'youtube', duration: s.duration || 0 }); return { current: f(this.current), queue: this.queue.map(f), isPlaying: this.isPlaying, isPaused: this.isPaused, loopMode: this.loopMode, volume: this.volume }; }

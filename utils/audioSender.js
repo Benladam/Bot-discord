@@ -62,6 +62,20 @@ function needsYouTubeAuthentication(error) {
     .test(String(error || ''));
 }
 
+function isMissingYtDlp(error) {
+  return /spawn .* ENOENT|No module named ['"]?yt_dlp['"]?/i.test(String(error || ''));
+}
+
+function bestYtDlpError(errors, fallback) {
+  const available = errors.map((error) => String(error || '').trim()).filter(Boolean);
+  const actionable = available.filter((error) => !isMissingYtDlp(error));
+  if (actionable.length) return actionable.at(-1);
+  if (available.length) {
+    return 'yt-dlp est introuvable sur cet hôte. Autorise son installation automatique ou configure YTDLP_PATH vers un binaire yt-dlp exécutable.';
+  }
+  return fallback;
+}
+
 function sanitizeYtDlpDiagnostic(value) {
   return String(value || '')
     .replace(/\b(set-cookie|cookie|authorization|proxy-authorization)\s*:\s*[^\r\n]*/gi, '$1: [redacted]')
@@ -470,7 +484,7 @@ async function searchYtDlpCandidates(query, {
     const found = await attempt(command, args, cookiesPath, 'web_embedded');
     if (found.items) return found.items;
   }
-  throw new Error(errors.filter(Boolean).at(-1) || `Aucun résultat ${provider === 'soundcloud' ? 'SoundCloud' : 'YouTube'} trouvé.`);
+  throw new Error(bestYtDlpError(errors, `Aucun résultat ${provider === 'soundcloud' ? 'SoundCloud' : 'YouTube'} trouvé.`));
 }
 
 function searchYouTubeCandidates(query, options = {}) {
@@ -636,8 +650,7 @@ async function streamUrl(url, {
     error.cookiesConfigured = Boolean(rejectedCookiesPath);
     throw error;
   }
-  const detail = errors.filter(Boolean).at(-1);
-  throw new Error(detail || 'Aucun flux audio valide renvoyé par yt-dlp. Vérifie yt-dlp et YTDLP_PATH.');
+  throw new Error(bestYtDlpError(errors, 'Aucun flux audio valide renvoyé par yt-dlp. Vérifie yt-dlp et YTDLP_PATH.'));
 }
 
 function runYtDlpPipe(command, preArgs, url, spawnImpl = spawn, options = {}) {
@@ -799,7 +812,7 @@ async function streamYtDlp(url, {
     throw error;
   }
 
-  throw new Error(errors.filter(Boolean).at(-1) || 'yt-dlp n’a pas réussi à ouvrir un flux audio.');
+  throw new Error(bestYtDlpError(errors, 'yt-dlp n’a pas réussi à ouvrir un flux audio.'));
 }
 
 function providerFailure(primaryProvider, primaryError, alternateProvider, alternateError) {
@@ -863,13 +876,17 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
 async function start(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies = {}) {
   const media = await (dependencies.prepareInput || prepareInput)(url, fallbackQuery);
   if (media.fallback) console.info(`[audio] Bascule vers ${media.fallbackProvider || 'un fournisseur alternatif'} après l’échec du flux principal.`);
+  const requestedBitrate = Number(connection?.audioBitrate);
+  const bitrate = Number.isFinite(requestedBitrate) && requestedBitrate > 0
+    ? Math.min(192_000, Math.max(64_000, Math.round(requestedBitrate / 1_000) * 1_000))
+    : 160_000;
   let ffmpeg;
   try {
     ffmpeg = (dependencies.spawn || spawn)(bin('ffmpeg', 'FFMPEG_PATH'), [
       '-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-i', media.stream ? 'pipe:0' : media.url, '-vn',
       '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
       '-c:a', 'libopus', '-application', 'audio', '-vbr', 'on', '-compression_level', '10',
-      '-frame_duration', '20', '-ar', '48000', '-ac', '2', '-b:a', '160k',
+      '-frame_duration', '20', '-ar', '48000', '-ac', '2', '-b:a', `${bitrate / 1_000}k`,
       '-f', 'opus', 'pipe:1',
     ], { windowsHide: true });
   } catch (error) {

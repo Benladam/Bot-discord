@@ -109,9 +109,8 @@ class PresenceManager {
 
   setMusicActivity(key, info) {
     const activityKey = String(key);
-    const text = info && String(info.details || info.title || info.state || '').trim().slice(0, 128);
     this.musicActivities.delete(activityKey);
-    if (text) this.musicActivities.set(activityKey, text);
+    if (info) this.musicActivities.set(activityKey, true);
     this.apply();
   }
 
@@ -129,8 +128,10 @@ class PresenceManager {
 
   apply() {
     if (!this.ready || !this.client.user) return;
-    const currentMusic = Array.from(this.musicActivities.values()).at(-1);
-    const template = currentMusic || this.config.messages[this.messageIndex] || '';
+    // Discord exposes one shared presence for the bot account, not one per guild.
+    // Keep the track title inside that guild's player/now-playing response only.
+    const currentMusic = this.musicActivities.size > 0;
+    const template = currentMusic ? '🎵 lecture en cours' : this.config.messages[this.messageIndex] || '';
     const name = String(template).replaceAll('{prefix}', process.env.COMMAND_PREFIX || '!').slice(0, 128);
     const type = currentMusic ? ACTIVITY_TYPES.listening : ACTIVITY_TYPES[this.config.activityType];
     const activities = name ? [{ name, type }] : [];

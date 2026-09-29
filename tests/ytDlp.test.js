@@ -120,6 +120,34 @@ test('recherche YouTube installe le binaire géré après ENOENT et conserve le 
   }
 });
 
+test('une erreur YouTube utile n’est pas masquée par un binaire yt-dlp absent', async () => {
+  const fakeSpawn = (command) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    setImmediate(() => {
+      if (command === 'broken-extractor') {
+        child.stdout.end();
+        child.stderr.end('HTTP 403 Forbidden');
+        setImmediate(() => child.emit('close', 1));
+        return;
+      }
+      const error = new Error(`spawn ${command} ENOENT`);
+      error.code = 'ENOENT';
+      child.emit('error', error);
+    });
+    return child;
+  };
+
+  await assert.rejects(searchYouTubeCandidates('Artiste - Titre', {
+    candidates: [['broken-extractor', []], ['yt-dlp', []]],
+    install: async () => { throw new Error('ne doit pas installer après une vraie erreur'); },
+    spawnImpl: fakeSpawn,
+    cookiesPaths: [],
+  }), /HTTP 403 Forbidden/);
+});
+
 test('n’ajoute les cookies YouTube que si un chemin local est configuré', () => {
   const projectRoot = path.resolve(os.tmpdir(), 'bot-discord-cookie-test');
   const args = buildYtDlpArgs([], 'https://youtube.com/watch?v=test', {
@@ -219,7 +247,7 @@ test('ne tente pas de réinstaller yt-dlp si YouTube bloque une version déjà p
     candidates: [['yt-dlp', []]],
     install: async () => { installs++; return 'managed-yt-dlp'; },
     spawnImpl: fakeSpawn,
-  }), error => error.code === 'YOUTUBE_AUTH_BLOCKED' && /YouTube demande une vérification/.test(error.message));
+  }), error => error.code === 'YOUTUBE_AUTH_BLOCKED' && /YouTube réclame une authentification/.test(error.message));
   assert.equal(installs, 0);
 });
 

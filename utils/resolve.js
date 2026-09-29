@@ -11,6 +11,7 @@ const { searchYouTubeCandidates, searchSoundCloudCandidates, resolveSoundCloudCa
 function youtubeVideoId(value) {
   try {
     const parsed = new URL(value);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
     const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
     if (host === 'youtu.be') return parsed.pathname.split('/').filter(Boolean)[0] || null;
     if (!['youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtube-nocookie.com'].includes(host)) return null;
@@ -59,7 +60,7 @@ async function resolveSoundCloudLink(url) {
  * Résout une requête utilisateur en une ou plusieurs chansons jouables.
  * @returns {Promise<Array<{title,url,duration,thumbnail,source}>>}
  */
-async function resolveQuery(query) {
+async function resolveQuery(query, { fetchImpl = globalThis.fetch } = {}) {
   if (/(?:soundcloud\.com|snd\.sc)\//i.test(query)) {
     return resolveSoundCloudLink(query);
   }
@@ -75,14 +76,50 @@ async function resolveQuery(query) {
   }
 
   // 2) Lien YouTube
-  if (query.includes('youtube.com') || query.includes('youtu.be')) {
-    const videoId = youtubeVideoId(query);
+  const videoId = youtubeVideoId(query);
+  if (videoId) {
     // Ne pas demander les métadonnées par play-dl avant la lecture : YouTube
     // bloque souvent ces requêtes d'hébergeur avec "Sign in to confirm...".
     // yt-dlp récupère le flux audio dans audioSender.js au démarrage de la lecture.
-    if (videoId) {
-      return [{ title: `YouTube · ${videoId}`, url: query, duration: 0, thumbnail: null, source: 'youtube' }];
+    let metadata = null;
+    if (typeof fetchImpl === 'function') {
+      try {
+        const canonicalUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+        const oembedUrl = new URL('https://www.youtube.com/oembed');
+        oembedUrl.searchParams.set('url', canonicalUrl);
+        oembedUrl.searchParams.set('format', 'json');
+        const response = await fetchImpl(oembedUrl, {
+          headers: { accept: 'application/json' },
+          signal: AbortSignal.timeout(2_500),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const title = String(data?.title || '').trim().slice(0, 200);
+          const artist = String(data?.author_name || '').trim().slice(0, 100);
+          let thumbnail = null;
+          try {
+            const parsedThumbnail = new URL(data?.thumbnail_url);
+            if (parsedThumbnail.protocol === 'https:' && /(^|\.)ytimg\.com$/i.test(parsedThumbnail.hostname)) {
+              thumbnail = parsedThumbnail.toString();
+            }
+          } catch (_) { /* métadonnées optionnelles et non fiables */ }
+          if (title) metadata = { title, artist, thumbnail };
+        }
+      } catch (_) { /* la lecture directe reste possible si le catalogue public est indisponible */ }
     }
+    const title = metadata?.title || `YouTube · ${videoId}`;
+    const fallbackQuery = [metadata?.artist, metadata?.title].filter(Boolean).join(' - ');
+    return [{
+      title,
+      url: query,
+      duration: 0,
+      thumbnail: metadata?.thumbnail || null,
+      source: 'youtube',
+      ...(fallbackQuery ? { fallbackQuery } : {}),
+    }];
+  }
+
+  if (/(?:youtube\.com|youtu\.be)/i.test(query)) {
     const valid = await play.validate(query);
     if (!valid) {
       throw new Error('Lien YouTube invalide.');
