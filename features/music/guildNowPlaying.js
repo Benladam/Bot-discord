@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const { createThemedEmbed } = require('../../shared/discord/embedTheme');
 const { providerPresentation } = require('../../shared/discord/providerPresentation');
+const { withProviderIcons } = require('../../shared/discord/providerIcons');
 const { getWebPanelPublicUrl } = require('../web/server');
 
 const SETTING_KEY = 'musicNowPlayingMessage';
@@ -192,10 +193,10 @@ class GuildNowPlayingManager {
       }
       return false;
     }
-    const payload = {
+    const payload = withProviderIcons({
       embeds: [statusEmbed(state, channel.guild?.name)],
       components: controlComponents(guildId, state),
-    };
+    });
     if (message) {
       await message.edit(payload);
       return true;

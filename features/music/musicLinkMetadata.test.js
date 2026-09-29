@@ -88,7 +88,7 @@ test('les autres services musicaux fournissent un titre public sans suivre de re
     assert.equal(options.redirect, 'manual');
     assert.equal(metadata.provider, provider);
     assert.match(metadata.searchQuery, /^Artiste - Chanson & autre/);
-    assert.ok(providerPresentation(provider, link).iconURL.startsWith('https://'));
+    assert.equal(providerPresentation(provider, link).iconURL, `attachment://provider-${provider}.png`);
   }
 });
 

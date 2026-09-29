@@ -65,6 +65,30 @@ test('une extraction annulée par Stop ne relance rien et ne remet pas à zéro 
   }
 });
 
+test('un skip remonte l’échec du titre suivant au lieu de signaler un faux succès', async () => {
+  const { MusicPlayer } = require('./musicPlayer');
+  const originalStart = OpusSender.start;
+  const failure = Object.assign(new Error('Aucun résultat correspondant à Réseaux'), { code: 'MUSIC_TRACK_MISMATCH' });
+  OpusSender.start = async () => { throw failure; };
+  const player = new MusicPlayer('guild-skip-failure', { user: { id: 'bot-user' } });
+  player.connection = { connected: true };
+  player.current = { title: 'Love d’un voyou' };
+  player.isPlaying = true;
+  let ended = 0;
+  player.onQueueEnd = () => ended++;
+  player.addToQueue({ title: 'Niska - Réseaux', url: 'next' });
+  try {
+    await assert.rejects(player.skip(), error => error === failure);
+    assert.equal(player.current, null);
+    assert.equal(player.isPlaying, false);
+    assert.equal(ended, 0, 'un échec de lecture ne doit pas être présenté comme une fin normale de file');
+  } finally {
+    player.stop();
+    player._clearIdleTimer();
+    OpusSender.start = originalStart;
+  }
+});
+
 test('les handshakes vocaux restent isolés par serveur et utilisent le bon shard', async () => {
   const { MusicPlayer } = require('./musicPlayer');
   const writes = new Map([[0, []], [1, []]]);

@@ -3,6 +3,7 @@
  */
 
 const embeds = require('../shared/discord/embeds');
+const { withProviderIcons } = require('../shared/discord/providerIcons');
 const { requireGuildContext } = require('../shared/discord/commandHelpers');
 
 module.exports = {
@@ -15,6 +16,6 @@ module.exports = {
     const lang = deps.langFor ? deps.langFor(ctx.user?.id || ctx.author?.id, ctx.guild?.id) : 'fr';
     const { getPlayer } = deps;
     const player = getPlayer(ctx.guildId);
-    return ctx.reply({ embeds: [embeds.nowEmbed(player, lang)] });
+    return ctx.reply(withProviderIcons({ embeds: [embeds.nowEmbed(player, lang)] }));
   },
 };

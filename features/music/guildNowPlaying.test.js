@@ -49,6 +49,11 @@ test('chaque serveur possède et modifie son propre message en cours de lecture'
   assert.doesNotMatch(JSON.stringify(messageA.payload.embeds[0].toJSON()), /Titre serveur fipfap/);
   assert.match(JSON.stringify(messageB.payload.embeds[0].toJSON()), /Titre serveur fipfap/);
   assert.doesNotMatch(JSON.stringify(messageB.payload.embeds[0].toJSON()), /Titre serveur Test/);
+  assert.equal(messageA.payload.files[0].name, 'provider-youtube.png');
+  await manager.update(playerA, { isPlaying: true, current: { title: 'Spotify', provider: 'spotify' }, queueLength: 0, volume: 100 });
+  assert.equal(messageA.payload.files.length, 1);
+  assert.equal(messageA.payload.files[0].name, 'provider-spotify.png');
+  assert.deepEqual(messageA.payload.attachments, []);
 
   await manager.update(playerA, { isPlaying: false, current: null, queueLength: 0, volume: 100 });
   assert.equal(a.messages.has(messageA.id), false, 'la carte en cours est retirée dès que le lecteur est inactif');

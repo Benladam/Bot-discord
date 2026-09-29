@@ -17,6 +17,15 @@ function tokens(value) {
   return normalizedText(value).split(' ').filter((token) => token && !STOP_WORDS.has(token));
 }
 
+function fallbackSearchQuery(query, expectedTitle) {
+  const title = normalizedText(expectedTitle || query);
+  const parts = String(query || '').split(/\s+[-–—]\s+/u);
+  const artist = parts.length > 1 ? normalizedText(parts[0]) : '';
+  const available = new Set(title.split(' '));
+  const needsArtist = artist && tokens(artist).some(token => !available.has(token));
+  return [...new Set(`${needsArtist ? artist : ''} ${title}`.split(' ').filter(Boolean))].join(' ').slice(0, 200);
+}
+
 function candidateTitle(track) {
   return String(track?.title || track?.name || '').trim();
 }
@@ -48,4 +57,4 @@ function matchesRequestedTrack(track, { query, expectedTitle, expectedDuration }
   return true;
 }
 
-module.exports = { matchesRequestedTrack, candidateTitle, candidateArtist };
+module.exports = { matchesRequestedTrack, candidateTitle, candidateArtist, fallbackSearchQuery };

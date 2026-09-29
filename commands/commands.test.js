@@ -30,6 +30,30 @@ function serializeCommand(command) {
   return builder.toJSON();
 }
 
+test('skip diffère la réponse slash et attend le démarrage réel du suivant', async () => {
+  const command = require('./skip');
+  const events = [];
+  const ctx = {
+    guildId: 'guild-skip', guild: { id: 'guild-skip' },
+    isChatInputCommand: () => true,
+    async deferReply(options) { events.push('defer'); this.deferred = true; assert.equal(options.flags, 64); },
+    async editReply() { events.push('success'); },
+    reply: assert.fail,
+  };
+  await command.execute(ctx, [], { getPlayer: () => ({ isPlaying: true, async skip() { events.push('skip'); } }) });
+  assert.deepEqual(events, ['defer', 'skip', 'success']);
+});
+
+test('skip ne confirme pas le suivant quand son extraction échoue', async () => {
+  const command = require('./skip');
+  let replied = false;
+  await assert.rejects(command.execute({
+    guildId: 'guild-skip', guild: { id: 'guild-skip' },
+    reply: async () => { replied = true; },
+  }, [], { getPlayer: () => ({ isPlaying: true, async skip() { throw new Error('Source refusée'); } }) }), /Source refusée/);
+  assert.equal(replied, false);
+});
+
 test('les commandes play et playlist se sérialisent pour l’API Discord', () => {
   for (const name of ['play', 'playlist']) {
     const command = require(`./${name}`);

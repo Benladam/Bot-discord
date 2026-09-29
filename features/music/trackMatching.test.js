@@ -1,12 +1,19 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { matchesRequestedTrack } = require('./trackMatching');
+const { matchesRequestedTrack, fallbackSearchQuery } = require('./trackMatching');
 
 const requested = {
   query: "Niska Officiel - Niska - Chasse à l'homme #KeDuSal 2",
   expectedTitle: "Niska - Chasse à l'homme #KeDuSal 2",
   expectedDuration: 164,
 };
+
+test('la recherche de repli enlève le bruit de chaîne et de clip, sans retirer une version demandée', () => {
+  assert.equal(fallbackSearchQuery('Niska Officiel - Niska - Réseaux (Clip Officiel)', 'Niska - Réseaux (Clip Officiel)'), 'niska reseaux');
+  assert.equal(fallbackSearchQuery('Niska Officiel - Niska - Chasse à l’homme #KeDuSal 2'), 'niska chasse a l homme');
+  assert.equal(fallbackSearchQuery('Devon Hendryx - Topic - Neon Kitchen', 'Neon Kitchen'), 'devon hendryx neon kitchen');
+  assert.equal(fallbackSearchQuery('Niska - Réseaux remix'), 'niska reseaux remix');
+});
 
 test('Niska : accepte les métadonnées équivalentes sans exiger le hashtag du clip', () => {
   assert.equal(matchesRequestedTrack({

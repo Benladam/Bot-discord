@@ -7,7 +7,7 @@ const ffmpegStatic = require('ffmpeg-static');
 const play = require('play-dl');
 const { ensureManagedYtDlp, getDataDirectory } = require('./ytDlp');
 const { configureSoundCloud } = require('./providers/soundcloud');
-const { matchesRequestedTrack, candidateTitle, candidateArtist } = require('./trackMatching');
+const { matchesRequestedTrack, candidateTitle, candidateArtist, fallbackSearchQuery } = require('./trackMatching');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
@@ -260,18 +260,18 @@ async function soundCloudSearchStream(query, {
   openTrack = soundCloudStream,
   isConfigured = configureSoundCloud,
 } = {}) {
-  const normalized = String(query || '').trim().slice(0, 200);
+  const normalized = fallbackSearchQuery(query, expectedTitle);
   if (normalized.length < 2) throw new Error('Recherche SoundCloud trop courte.');
   let tracks = [];
   let lastError = null;
   try {
-    tracks = await searchCandidates(normalized, { limit: 5 });
+    tracks = await searchCandidates(normalized, { limit: 10 });
   } catch (error) {
     lastError = error;
   }
   if (!tracks.length && isConfigured()) {
     try {
-      tracks = await searchFallback(normalized, { limit: 5, source: { soundcloud: 'tracks' } });
+      tracks = await searchFallback(normalized, { limit: 10, source: { soundcloud: 'tracks' } });
     } catch (error) {
       lastError = error;
     }
@@ -291,7 +291,7 @@ async function soundCloudSearchStream(query, {
       rejectedShortTracks++;
       continue;
     }
-    if (!matchesRequestedTrack(track, { query: normalized, expectedTitle, expectedDuration })) {
+    if (!matchesRequestedTrack(track, { query, expectedTitle, expectedDuration })) {
       rejectedDifferentTracks++;
       console.info(`[audio] résultat SoundCloud refusé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))}`);
       continue;
@@ -323,14 +323,14 @@ async function youtubeSearchStream(query, {
   searchCandidates = searchYouTubeCandidates,
   openTrack = streamYtDlp,
 } = {}) {
-  const normalized = String(query || '').trim().slice(0, 200);
+  const normalized = fallbackSearchQuery(query, expectedTitle);
   if (normalized.length < 2) throw new Error('Recherche YouTube trop courte.');
-  const videos = await searchCandidates(normalized, { limit: 5 });
+  const videos = await searchCandidates(normalized, { limit: 10 });
   let lastError = null;
   let attempted = 0;
-  for (const video of videos.slice(0, 5)) {
+  for (const video of videos.slice(0, 10)) {
     if (!video.url || !isYouTubeUrl(video.url)) continue;
-    if (!matchesRequestedTrack(video, { query: normalized, expectedTitle, expectedDuration })) {
+    if (!matchesRequestedTrack(video, { query, expectedTitle, expectedDuration })) {
       console.info(`[audio] résultat YouTube refusé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(video)))}`);
       continue;
     }

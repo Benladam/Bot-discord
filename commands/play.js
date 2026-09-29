@@ -7,6 +7,7 @@ const { searchCatalog, getArtistAlbums, getWorldTopTracks } = require('../featur
 const { selectAutocompleteItems, toAutocompleteChoice, toSearchFallbackChoice, WORLD_CHART_FALLBACK_VALUE } = require('../features/music/catalogAutocomplete');
 const { getMusicInputInfo, formatMusicAttempt, resolveMusicLinkMetadata, cleanLogText, sanitizeDiagnosticText } = require('../features/music/musicLinkMetadata');
 const embeds = require('../shared/discord/embeds');
+const { withProviderIcons } = require('../shared/discord/providerIcons');
 const { tr } = require('../shared/i18n/embedI18n');
 const { createThemedEmbed } = require('../shared/discord/embedTheme');
 
@@ -481,8 +482,8 @@ module.exports = {
       const { queued, player } = await queueSongs(ctx, deps, songs);
       loggerCall(deps, 'info', `[play] lecture ${queued ? 'ajoutée à la file' : 'lancée'} titre=${JSON.stringify(cleanLogText(songs[0]?.title, 160))} pistes=${songs.length}`);
       if (isSlash(ctx)) return edit({ content: `${songs.length} titre${songs.length === 1 ? '' : 's'} ${queued ? 'ajouté(s) à la file' : 'ajouté(s) · lecture lancée'}.`, embeds: [], components: [] });
-      if (queued) return edit({ embeds: [embeds.addedEmbed(songs[0], player.queue.length, player.queue.length, lang)] });
-      return edit({ embeds: [embeds.playingEmbed(songs[0], player, lang)] });
+      if (queued) return edit(withProviderIcons({ embeds: [embeds.addedEmbed(songs[0], player.queue.length, player.queue.length, lang)] }));
+      return edit(withProviderIcons({ embeds: [embeds.playingEmbed(songs[0], player, lang)] }));
     } catch (error) {
       loggerCall(deps, 'error', `[play] échec code=${error?.code || 'n/a'} plateforme=${inputInfo.providerLabel || 'recherche'} terme=${JSON.stringify(cleanLogText(searchTerm, 160))} détail=${sanitizeDiagnosticText(error.message)}`);
       if (error?.code === 'VOCAL_UNAVAILABLE') return edit({ embeds: [embeds.notFoundEmbed(lang)] });

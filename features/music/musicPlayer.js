@@ -346,7 +346,12 @@ class MusicPlayer {
       const sender = await OpusSender.start(this.connection, song.url, () => console.log('🔊 SON ÉMIS — lecture maison active.'), async () => {
         if (generation === this._generation && this.isPlaying) {
           this.sender = null;
-          await this.playNext(undefined, { notifyWhenEmpty: true });
+          try { await this.playNext(undefined, { notifyWhenEmpty: true }); }
+          catch (error) {
+            console.error(`[audio] piste suivante serveur=${this.guildId}: ${error.message}`);
+            try { await this.lastChannel?.send({ content: `❌ Impossible de lire le titre suivant : ${error.message}`, allowedMentions: { parse: [] } }); }
+            catch (_) { /* salon inaccessible */ }
+          }
         }
       }, failTrack, song.fallbackQuery, {
         expectedDuration: song.duration,
@@ -389,7 +394,7 @@ class MusicPlayer {
     this.current = null;
     this.isPlaying = false;
     this.isPaused = false;
-    return this.playNext(undefined, { notifyWhenEmpty: true, endedRequesterId: requesterId, endedTrack: true }).catch((e) => { console.error('[audio] skip:', e.message); return null; });
+    return this.playNext(undefined, { notifyWhenEmpty: true, endedRequesterId: requesterId, endedTrack: true });
   }
   stop() {
     ++this._generation; this._clearIdleTimer(); this.clearQueue(); this.sender?.stop();

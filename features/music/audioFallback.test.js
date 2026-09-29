@@ -3,6 +3,24 @@ const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
 const { prepareInput, soundCloudStream, buildYtDlpArgs, soundCloudSearchStream, youtubeSearchStream } = require('./audioSender');
 
+test('Niska Réseaux en file : cherche le titre nettoyé et accepte le bon résultat après cinq mauvais', async () => {
+  const opened = [];
+  const stream = await soundCloudSearchStream('Niska Officiel - Niska - Réseaux (Clip Officiel)', {
+    expectedTitle: 'Niska - Réseaux (Clip Officiel)', expectedDuration: 196,
+    searchCandidates: async (query, options) => {
+      assert.equal(query, 'niska reseaux');
+      assert.equal(options.limit, 10);
+      return [
+        ...Array.from({ length: 5 }, (_, index) => ({ title: 'Niska - Autre chanson', url: `https://soundcloud.com/niska/other-${index}` })),
+        { title: 'Niska - Réseaux', durationInSec: 196, url: 'https://soundcloud.com/niska/reseaux' },
+      ];
+    },
+    openTrack: async url => { opened.push(url); return new PassThrough(); },
+  });
+  assert.deepEqual(opened, ['https://soundcloud.com/niska/reseaux']);
+  stream.destroy();
+});
+
 test('le repli SoundCloud ouvre le Niska demandé, pas le premier résultat ni son remix', async () => {
   const opened = [];
   const stream = await soundCloudSearchStream("Niska Officiel - Niska - Chasse à l'homme #KeDuSal 2", {
