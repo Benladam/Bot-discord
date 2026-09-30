@@ -9,6 +9,7 @@ const { createThemedEmbed } = require('../../shared/discord/embedTheme');
 const { providerPresentation } = require('../../shared/discord/providerPresentation');
 const { withProviderIcons } = require('../../shared/discord/providerIcons');
 const { getWebPanelPublicUrl } = require('../web/server');
+const { musicArtwork } = require('./artwork');
 
 const SETTING_KEY = 'musicNowPlayingMessage';
 const LOOP_LABELS = ['Désactivée', 'Titre', 'File'];
@@ -39,7 +40,8 @@ function statusEmbed(state, guildName = '') {
   fields.push({ name: '🔁 Répétition', value: loop, inline: true });
   if (Number(song.duration) > 0) fields.push({ name: '⏱️ Durée', value: formatDuration(song.duration), inline: true });
   embed.addFields(fields);
-  if (song.thumbnail && /^https:\/\//i.test(String(song.thumbnail))) embed.setThumbnail(song.thumbnail);
+  const artwork = musicArtwork(song);
+  if (artwork) embed.setThumbnail(artwork);
   if (source.url) embed.setURL(source.url);
   return embed;
 }
@@ -72,6 +74,18 @@ function controlComponents(guildId, state = {}) {
     dashboardButton,
   ));
   return controls;
+}
+
+function startedPlayingEmbed(song) {
+  const source = providerPresentation(song.provider || song.source, song.sourceUrl || song.url);
+  const embed = createThemedEmbed('success')
+    .setAuthor({ name: source.name, iconURL: source.iconURL, ...(source.url ? { url: source.url } : {}) })
+    .setTitle(`Started playing · ${String(song.title || 'Musique inconnue').replace(/[\r\n]+/g, ' ').slice(0, 225)}`);
+  if (source.url) embed.setURL(source.url);
+  if (Number(song.duration) > 0) embed.setDescription(`⏱️ ${formatDuration(song.duration)}`);
+  const artwork = musicArtwork(song);
+  if (artwork) embed.setThumbnail(artwork);
+  return embed;
 }
 
 function dashboardPayload(player) {
@@ -132,6 +146,8 @@ class GuildNowPlayingManager {
     this.noticeTtlMs = noticeTtlMs;
     this.pending = new Map();
     this.finishedNotices = new Map();
+    this.announcedPlayback = new Map();
+    this.updateVersions = new Map();
   }
 
   _enqueueGuild(guildId, task) {
@@ -149,7 +165,12 @@ class GuildNowPlayingManager {
   update(player, state) {
     const guildId = String(player?.guildId || '');
     if (!guildId) return Promise.resolve(false);
-    return this._enqueueGuild(guildId, () => this._update(player, state, guildId));
+    const version = (this.updateVersions.get(guildId) || 0) + 1;
+    this.updateVersions.set(guildId, version);
+    return this._enqueueGuild(guildId, () => {
+      if (this.updateVersions.get(guildId) !== version) return false;
+      return this._update(player, state, guildId);
+    });
   }
 
   finishQueue(player, requesterId = null) {
@@ -175,14 +196,13 @@ class GuildNowPlayingManager {
     let deleted = false;
     if (typeof notice.message?.delete === 'function') {
       try { await notice.message.delete(); deleted = true; }
-      catch (_) { /* l’update suivant réutilisera le message si possible */ }
+      catch (_) { /* Ne jamais réutiliser un avis temporaire comme carte musicale. */ }
     }
     const saved = this.database.getGuildSetting(guildId, SETTING_KEY, null);
     if (saved?.finishedNotice && String(saved.messageId || '') === String(notice.message?.id || '')) {
       this.database.setGuildSetting(guildId, SETTING_KEY, {
         channelId: String(saved.channelId),
-        messageId: deleted ? null : String(notice.message?.id || '') || null,
-        ...(!deleted ? { finishedNotice: false } : {}),
+        messageId: null,
       });
     }
     return deleted;
@@ -191,10 +211,20 @@ class GuildNowPlayingManager {
   async _update(player, state, guildId) {
     const active = Boolean(state?.isPlaying && state.current);
     if (active) await this._clearFinishedNotice(guildId);
-    const saved = this.database.getGuildSetting(guildId, SETTING_KEY, null);
+    let saved = this.database.getGuildSetting(guildId, SETTING_KEY, null);
     // La carte durable représente seulement une chanson en lecture. Ne pas
     // toucher à l’avis « file terminée », qui possède son propre délai de 30 s.
     if (!active && saved?.finishedNotice) return true;
+    if (active && saved?.finishedNotice) {
+      // Avis hérité d'un redémarrage : aucune carte ne doit adopter son ID.
+      const oldChannel = await this._channelFromId(saved.channelId);
+      if (!oldChannel?.guildId || String(oldChannel.guildId) === guildId) {
+        const oldMessage = await oldChannel?.messages?.fetch?.(String(saved.messageId)).catch(() => null);
+        try { await oldMessage?.delete?.(); } catch (_) {}
+      }
+      saved = { channelId: saved.channelId, messageId: null };
+      this.database.setGuildSetting(guildId, SETTING_KEY, saved);
+    }
     let channel = saved?.channelId ? await this._channelFromId(saved.channelId) : null;
     if (!channel || (channel.guildId && String(channel.guildId) !== guildId)) channel = player.lastChannel || null;
     if (!channel || (channel.guildId && String(channel.guildId) !== guildId)) return false;
@@ -206,6 +236,7 @@ class GuildNowPlayingManager {
       }
     }
     if (!active) {
+      this.announcedPlayback.delete(guildId);
       if (message && typeof message.delete === 'function') {
         await Promise.resolve(message.delete()).catch(() => {});
       }
@@ -220,7 +251,14 @@ class GuildNowPlayingManager {
     const payload = withProviderIcons({
       embeds: [statusEmbed(state, channel.guild?.name)],
       components: controlComponents(guildId, state),
+      allowedMentions: { parse: [] },
     });
+    const playback = state.playbackId ?? JSON.stringify([state.current.sourceUrl, state.current.url, state.current.title]);
+    if (this.announcedPlayback.get(guildId) !== playback) {
+      // Historique durable : jamais enregistré dans l'emplacement des messages temporaires.
+      await channel.send(withProviderIcons({ embeds: [startedPlayingEmbed(state.current)], allowedMentions: { parse: [] } }));
+      this.announcedPlayback.set(guildId, playback);
+    }
     if (message) {
       await message.edit(payload);
       return true;
@@ -252,7 +290,6 @@ class GuildNowPlayingManager {
     }
     if (player.isPlaying || player.current || player.queue?.length) return false;
 
-    const safeRequesterId = /^[0-9]{17,20}$/.test(String(requesterId || '')) ? String(requesterId) : null;
     let noticeMessage = null;
     if (statusMessage && typeof statusMessage.delete === 'function') {
       try { await statusMessage.delete(); }
@@ -262,10 +299,10 @@ class GuildNowPlayingManager {
         if (typeof statusMessage.edit === 'function') {
           try {
             await statusMessage.edit({
-              content: safeRequesterId ? `🎶 <@${safeRequesterId}> — ta file de musique est terminée.` : undefined,
+              content: '',
               embeds: [finishedQueueEmbed(channel.guild?.name)],
               components: [],
-              allowedMentions: { parse: [], users: safeRequesterId ? [safeRequesterId] : [] },
+              allowedMentions: { parse: [], users: [], repliedUser: false },
             });
             noticeMessage = statusMessage;
           } catch (_) { /* tenter d’envoyer un nouveau message */ }
@@ -275,32 +312,31 @@ class GuildNowPlayingManager {
     const becameActive = Boolean(player.isPlaying || player.current || player.queue?.length);
     this.database.setGuildSetting(guildId, SETTING_KEY, {
       channelId: String(channel.id),
-      messageId: becameActive && noticeMessage ? String(noticeMessage.id) : null,
+      messageId: null,
     });
     if (becameActive) return false;
 
     if (!noticeMessage && typeof channel.send === 'function') {
       noticeMessage = await channel.send({
-        content: safeRequesterId ? `🎶 <@${safeRequesterId}> — ta file de musique est terminée.` : undefined,
         embeds: [finishedQueueEmbed(channel.guild?.name)],
         components: [],
-        allowedMentions: { parse: [], users: safeRequesterId ? [safeRequesterId] : [] },
+        allowedMentions: { parse: [], users: [], repliedUser: false },
       }).catch(() => null);
     }
     if (!noticeMessage) return false;
 
     const notice = { message: noticeMessage, timer: null };
     notice.timer = setTimeout(() => {
-      if (this.finishedNotices.get(guildId) !== notice) return;
-      this.finishedNotices.delete(guildId);
-      Promise.resolve().then(async () => {
+      this._enqueueGuild(guildId, async () => {
+        if (this.finishedNotices.get(guildId) !== notice) return;
+        this.finishedNotices.delete(guildId);
         let deleted = false;
         try {
           await notice.message.delete?.();
           deleted = typeof notice.message.delete === 'function';
         } catch (_) {
           try {
-            await notice.message.edit?.({ embeds: [statusEmbed(null)], components: [] });
+            await notice.message.edit?.({ content: '', embeds: [finishedQueueEmbed()], components: [], allowedMentions: { parse: [], users: [] } });
           } catch (_) { /* le message n’est plus modifiable */ }
         }
         const current = this.database.getGuildSetting(guildId, SETTING_KEY, null);
@@ -436,5 +472,6 @@ module.exports = {
   controlComponents,
   dashboardPayload,
   finishedQueueEmbed,
+  startedPlayingEmbed,
   SETTING_KEY,
 };

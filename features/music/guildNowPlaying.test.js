@@ -184,16 +184,18 @@ test('à la fin de la file, la carte est remplacée par un avis qui expire en 30
   player.current = null;
   assert.equal(await manager.finishQueue(player, '123456789012345678'), true);
   assert.equal(messages.has(oldStatus.id), false, 'l’ancienne carte « en cours » est supprimée');
-  const notice = [...messages.values()][0];
+  const notice = messages.get(database.getGuildSetting('guild-end', SETTING_KEY).messageId);
   assert.equal(notice.payload.embeds[0].toJSON().title, '📜 File d’attente terminée');
-  assert.equal(notice.payload.content, '🎶 <@123456789012345678> — ta file de musique est terminée.');
-  assert.deepEqual(notice.payload.allowedMentions.users, ['123456789012345678']);
+  assert.equal(notice.payload.content, undefined);
+  assert.deepEqual(notice.payload.allowedMentions, { parse: [], users: [], repliedUser: false });
+  assert.doesNotMatch(JSON.stringify(notice.payload), /123456789012345678|<@/);
   assert.equal(database.getGuildSetting('guild-end', SETTING_KEY).messageId, notice.id);
   assert.equal(database.getGuildSetting('guild-end', SETTING_KEY).finishedNotice, true);
 
   await new Promise((resolve) => setTimeout(resolve, 45));
   assert.equal(messages.has(notice.id), false, 'l’avis temporaire est retiré après expiration');
   assert.equal(database.getGuildSetting('guild-end', SETTING_KEY).messageId, null);
+  assert.ok([...messages.values()].some(message => message.payload.embeds[0].toJSON().title === 'Started playing · Fin'), 'l’annonce de lecture reste dans l’historique');
 });
 
 test('un nouveau morceau efface l’avis de fin et recrée une carte propre au serveur', async () => {
@@ -204,13 +206,13 @@ test('un nouveau morceau efface l’avis de fin et recrée une carte propre au s
   };
   const { channel, messages } = makeGuild('guild-next', 'Test', 'text-next');
   const client = { channels: { cache: new Map([[channel.id, channel]]) } };
-  const manager = new GuildNowPlayingManager({ client, database });
+  const manager = new GuildNowPlayingManager({ client, database, noticeTtlMs: 20 });
   const player = { guildId: 'guild-next', lastChannel: channel, isPlaying: true, current: { title: 'Ancien' }, queue: [] };
   await manager.update(player, { isPlaying: true, current: player.current, queueLength: 0, volume: 100 });
   player.isPlaying = false;
   player.current = null;
   await manager.finishQueue(player);
-  const notice = [...messages.values()][0];
+  const notice = messages.get(database.getGuildSetting('guild-next', SETTING_KEY).messageId);
 
   player.isPlaying = true;
   player.current = { title: 'Nouveau' };
@@ -218,6 +220,8 @@ test('un nouveau morceau efface l’avis de fin et recrée une carte propre au s
   assert.equal(messages.has(notice.id), false);
   const saved = database.getGuildSetting('guild-next', SETTING_KEY);
   assert.match(JSON.stringify(messages.get(saved.messageId).payload.embeds[0].toJSON()), /Nouveau/);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.ok(messages.has(saved.messageId), 'l’ancien délai ne supprime pas la nouvelle carte');
 });
 
 test('le redémarrage supprime les anciennes cartes sans restaurer une piste', async () => {
@@ -238,4 +242,76 @@ test('le redémarrage supprime les anciennes cartes sans restaurer une piste', a
   assert.equal(messages.has(saved.messageId), false);
   assert.deepEqual(database.getGuildSetting('guild-restart', SETTING_KEY), { channelId: channel.id, messageId: null });
   assert.equal(player.queue, undefined, 'le statut n’enregistre jamais la file musicale à restaurer');
+});
+
+test('annonce permanente avec logo, lien et pochette, une seule fois par lecture', async () => {
+  const settings = new Map();
+  const database = { getGuildSetting: (id, key, fallback) => settings.get(`${id}:${key}`) ?? fallback,
+    setGuildSetting: (id, key, value) => settings.set(`${id}:${key}`, value) };
+  const { channel, messages } = makeGuild('history', 'Test', 'history-channel');
+  const manager = new GuildNowPlayingManager({ database, client: { channels: { cache: new Map([[channel.id, channel]]) } } });
+  const player = { guildId: 'history', lastChannel: channel };
+  const current = { title: 'Artiste - Single', provider: 'spotify', sourceUrl: 'https://open.spotify.com/track/abc?si=secret', thumbnail: { url: 'https://images.example/album.jpg' }, duration: 164 };
+  await manager.update(player, { current, isPlaying: true, playbackId: 1, volume: 100 });
+  await manager.update(player, { current: { ...current }, isPlaying: true, playbackId: 1, isPaused: true, volume: 60 });
+  assert.equal(messages.size, 2, 'une annonce et une carte, sans doublon au changement de volume');
+  const history = [...messages.values()].find(message => message.payload.embeds[0].toJSON().title.startsWith('Started playing'));
+  const data = history.payload.embeds[0].toJSON();
+  assert.equal(data.author.name, 'Spotify');
+  assert.equal(data.author.url, 'https://open.spotify.com/track/abc');
+  assert.equal(data.thumbnail.url, 'https://images.example/album.jpg');
+  assert.equal(history.payload.files[0].name, 'provider-spotify.png');
+  assert.doesNotMatch(JSON.stringify(data), /secret/);
+  await manager.update(player, { current: null, isPlaying: false });
+  await manager.resetAfterRestart(['history']);
+  assert.ok(messages.has(history.id), 'ni Stop ni redémarrage ne supprime l’annonce');
+});
+
+test('une suppression de fin refusée ne réutilise jamais cet avis pour la nouvelle lecture', async () => {
+  const settings = new Map();
+  const database = { getGuildSetting: (id, key, fallback) => settings.get(`${id}:${key}`) ?? fallback,
+    setGuildSetting: (id, key, value) => settings.set(`${id}:${key}`, value) };
+  const { channel, messages } = makeGuild('no-delete', 'Test', 'no-delete-channel');
+  const manager = new GuildNowPlayingManager({ database, noticeTtlMs: 20, client: { channels: { cache: new Map([[channel.id, channel]]) } } });
+  const player = { guildId: 'no-delete', lastChannel: channel, isPlaying: true, current: { title: 'Ancien' }, queue: [] };
+  await manager.update(player, { current: player.current, isPlaying: true, playbackId: 1 });
+  const old = messages.get(database.getGuildSetting(player.guildId, SETTING_KEY).messageId);
+  old.delete = async () => { throw new Error('Suppression refusée'); };
+  player.isPlaying = false; player.current = null;
+  await manager.finishQueue(player, '123456789012345678');
+  assert.equal(old.payload.content, '');
+  assert.deepEqual(old.payload.allowedMentions.users, []);
+  player.isPlaying = true; player.current = { title: 'Nouveau' };
+  await manager.update(player, { current: player.current, isPlaying: true, playbackId: 2 });
+  const freshId = database.getGuildSetting(player.guildId, SETTING_KEY).messageId;
+  assert.notEqual(freshId, old.id, 'pas de réutilisation du message temporaire');
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.match(messages.get(freshId).payload.embeds[0].toJSON().title, /Nouveau/);
+  assert.ok([...messages.values()].some(message => message.payload.embeds[0].toJSON().title === 'Started playing · Nouveau'));
+});
+
+test('l’expiration déjà en cours est sérialisée avec le démarrage suivant', async () => {
+  const settings = new Map();
+  const database = { getGuildSetting: (id, key, fallback) => settings.get(`${id}:${key}`) ?? fallback,
+    setGuildSetting: (id, key, value) => settings.set(`${id}:${key}`, value) };
+  const { channel, messages } = makeGuild('race', 'Test', 'race-channel');
+  const manager = new GuildNowPlayingManager({ database, noticeTtlMs: 10, client: { channels: { cache: new Map([[channel.id, channel]]) } } });
+  const player = { guildId: 'race', lastChannel: channel, isPlaying: false, current: null, queue: [] };
+  await manager.finishQueue(player);
+  const notice = messages.get(database.getGuildSetting(player.guildId, SETTING_KEY).messageId);
+  let releaseDelete, signalDelete;
+  const started = new Promise(resolve => { signalDelete = resolve; });
+  const barrier = new Promise(resolve => { releaseDelete = resolve; });
+  notice.delete = async () => { signalDelete(); await barrier; messages.delete(notice.id); };
+  const timeout = setTimeout(signalDelete, 500);
+  await started;
+  clearTimeout(timeout);
+  assert.equal(manager.finishedNotices.size, 0, 'expiration commencée');
+  player.isPlaying = true; player.current = { title: 'Après expiration' };
+  const update = manager.update(player, { current: player.current, isPlaying: true, playbackId: 2 });
+  releaseDelete();
+  await update;
+  const fresh = database.getGuildSetting(player.guildId, SETTING_KEY);
+  assert.notEqual(fresh.messageId, notice.id);
+  assert.match(messages.get(fresh.messageId).payload.embeds[0].toJSON().title, /Après expiration/);
 });

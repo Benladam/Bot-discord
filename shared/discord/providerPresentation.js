@@ -21,7 +21,14 @@ function normalizeProviderUrl(provider, value) {
   if (spotify) return `https://open.spotify.com/${spotify[1].toLowerCase()}/${spotify[2]}`;
   try {
     const url = new URL(raw);
-    if (url.protocol !== 'https:') return null;
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    // Les embeds ne doivent jamais publier une URL de flux signée ou interne.
+    const domains = ['youtube.com', 'youtu.be', 'youtube-nocookie.com', 'spotify.com', 'spotify.link',
+      'deezer.com', 'dzr.page.link', 'soundcloud.com', 'snd.sc', 'music.apple.com',
+      'music.amazon.com', 'music.amazon.fr', 'music.amazon.co.uk', 'music.amazon.de',
+      'tidal.com', 'bandcamp.com', 'audiomack.com', 'mixcloud.com', 'audius.co',
+      'qobuz.com', 'pandora.com', 'napster.com'];
+    if (!domains.some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`))) return null;
     if (keyIsYoutube(provider)) {
       const original = new URLSearchParams(url.search);
       url.search = '';

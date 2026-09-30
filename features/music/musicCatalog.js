@@ -4,6 +4,7 @@ const { searchSpotifyCatalog, getSpotifyArtistAlbums } = require('./providers/sp
 const { configureSoundCloud } = require('./providers/soundcloud');
 const { searchYouTubeCandidates, searchYouTubePlaylists } = require('./audioSender');
 const { collectCatalogResults } = require('./catalogSearch');
+const { musicArtwork } = require('./artwork');
 
 const cache = new Map();
 const pendingSearches = new Map();
@@ -31,6 +32,7 @@ function normalizeWorldChart(payload) {
       subtitle: track.artist?.name || '',
       url,
       duration: Number(track.duration) || 0,
+      thumbnail: musicArtwork(track),
       chartPosition: index + 1,
       worldChart: true,
     }];
@@ -74,6 +76,7 @@ function normalizeYoutube(item, kind) {
     subtitle: item.channel?.name || item.channel?.title || item.owner?.name || '',
     url: item.url,
     duration: item.durationInSec || 0,
+    thumbnail: musicArtwork(item),
   };
 }
 
@@ -84,6 +87,7 @@ function normalizeSoundCloud(item) {
     subtitle: item.user?.username || item.publisher?.name || '',
     url: item.permalink || item.url,
     duration: item.durationInSec || 0,
+    thumbnail: musicArtwork(item),
   };
 }
 
@@ -95,6 +99,7 @@ function normalizeDeezer(item, kind) {
     subtitle: kind === 'track' ? artist : `${artist}${item.tracksCount ? ` · ${item.tracksCount} titres` : ''}`,
     url: item.url,
     duration: item.durationInSec || 0,
+    thumbnail: musicArtwork(item),
   };
 }
 

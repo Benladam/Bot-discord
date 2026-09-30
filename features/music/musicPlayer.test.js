@@ -254,6 +254,11 @@ test('le lecteur publie un état local au serveur et ne change jamais la présen
 
   assert.equal(states[0].current.title, 'Titre privé A');
   assert.equal(Object.hasOwn(states[0].current, 'url'), false);
+  assert.equal(states[0].current.sourceUrl, null);
+  player.current = { title: 'Clip', url: 'https://www.youtube.com/watch?v=v2o3in-Aud0&si=secret' };
+  player._activity();
+  assert.equal(states[1].current.sourceUrl, 'https://www.youtube.com/watch?v=v2o3in-Aud0');
+  assert.equal(states[1].current.thumbnail, 'https://i.ytimg.com/vi/v2o3in-Aud0/hqdefault.jpg');
   assert.deepEqual(globalActivities, []);
 });
 

@@ -2,6 +2,8 @@
 const { VoiceConnection } = require('./voice');
 const { OpusSender } = require('./audioSender');
 const { createThemedEmbed } = require('../../shared/discord/embedTheme');
+const { musicArtwork } = require('./artwork');
+const { normalizeProviderUrl } = require('../../shared/discord/providerPresentation');
 
 const VOICE_REQUEST_TIMEOUT_MS = 15_000;
 const configuredIdleMinutes = Number(process.env.VOICE_IDLE_TIMEOUT_MINUTES);
@@ -76,6 +78,7 @@ class MusicPlayer {
 
       const entries = list.map((song) => ({
         ...song,
+        thumbnail: musicArtwork(song),
         addedBy: addedBy || song.addedBy || '?',
         requesterId: requesterId || song.requesterId || null,
         voiceChannelName: voiceChannel?.name || song.voiceChannelName || this.voiceChannelName,
@@ -467,10 +470,10 @@ class MusicPlayer {
     const state = {
       current: this.isPlaying && this.current ? {
         title: this.current.title,
-        thumbnail: this.current.thumbnail || null,
+        thumbnail: musicArtwork(this.current),
         source: this.current.source || 'youtube',
         provider: this.current.provider || this.current.source || 'youtube',
-        sourceUrl: this.current.sourceUrl || null,
+        sourceUrl: normalizeProviderUrl(this.current.provider || this.current.source || 'youtube', this.current.sourceUrl || this.current.url),
         duration: Number(this.current.duration) || 0,
       } : null,
       isPlaying: this.isPlaying,
@@ -482,6 +485,7 @@ class MusicPlayer {
       voiceChannelName: this.voiceChannelName,
       lang: this.nowPlayingLang || 'fr',
       loopMode: this.loopMode,
+      playbackId: this._generation,
     };
     try {
       // Une présence Discord est commune à tous les serveurs. Le titre est

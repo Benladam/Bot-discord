@@ -21,6 +21,9 @@ fonctionnent en **slash `/`** ou avec le **préfixe `!`**.
 - Mise à jour automatique facultative avec compte à rebours, installation npm et redémarrage supervisé
 - Commandes administrateur `/updatelog` et `/update` pour configurer le journal ou installer manuellement
 - File d'attente, boucle (chanson / file), mélange
+- Annonce « Started playing » conservée dans le salon, avec logo de plateforme, lien public et pochette disponible
+- Carte de lecture interactive distincte de l'historique ; avis de fin de file sans mention, supprimé après 30 secondes
+- Suppressions temporaires isolées : une nouvelle lecture n'adopte jamais l'identifiant d'un ancien avis de fin
 - Volume, pause / reprise, skip, stop, leave
 - Commandes slash `/` **et** préfixe `!`
 - Modération : avertissements persistants, kick, ban, timeout et nettoyage de messages

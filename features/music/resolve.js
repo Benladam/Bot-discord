@@ -7,6 +7,7 @@ const play = require('play-dl');
 const { isSpotifyUrl, resolveSpotifyLink } = require('./providers/spotify');
 const { configureSoundCloud } = require('./providers/soundcloud');
 const { searchYouTubeCandidates, searchSoundCloudCandidates, resolveSoundCloudCandidates } = require('./audioSender');
+const { musicArtwork } = require('./artwork');
 
 function youtubeVideoId(value) {
   try {
@@ -30,7 +31,7 @@ function normalizeSoundCloudTrack(track) {
     title: artist && !title.toLowerCase().includes(artist.toLowerCase()) ? `${artist} - ${title}` : title,
     url: track.permalink || track.webpage_url || track.url,
     duration: track.durationInSec || track.duration || 0,
-    thumbnail: track.thumbnail || track.thumbnails?.[0]?.url || null,
+    thumbnail: musicArtwork(track),
     source: 'soundcloud',
     fallbackQuery: [artist, title].filter(Boolean).join(' - '),
   };
@@ -113,7 +114,7 @@ async function resolveQuery(query, { fetchImpl = globalThis.fetch } = {}) {
       title,
       url: query,
       duration: 0,
-      thumbnail: metadata?.thumbnail || null,
+      thumbnail: musicArtwork({ thumbnail: metadata?.thumbnail, url: query }),
       source: 'youtube',
       ...(fallbackQuery ? { fallbackQuery } : {}),
     }];
@@ -156,7 +157,7 @@ async function resolveQuery(query, { fetchImpl = globalThis.fetch } = {}) {
     title: r.title,
     url: r.url,
     duration: r.durationInSec || 0,
-    thumbnail: r.thumbnail && r.thumbnail.url ? r.thumbnail.url : null,
+    thumbnail: musicArtwork(r),
     source: 'youtube',
     fallbackQuery: query,
   }];
@@ -207,7 +208,7 @@ async function resolveDeezerTracks(tracks, {
         title: `${title}${artist ? ` - ${artist}` : ''}`,
         url: media.url,
         duration: track.durationInSec || media.durationInSec || 0,
-        thumbnail: track.album?.cover?.medium || track.album?.cover_medium || null,
+        thumbnail: musicArtwork(track) || musicArtwork(media),
         source: 'deezer',
         fallbackQuery: query,
       };

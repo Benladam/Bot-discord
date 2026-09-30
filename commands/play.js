@@ -198,7 +198,7 @@ async function resolveCatalogItem(item) {
     const song = songs[index];
     const fallbackTitle = item.kind === 'track' ? item.title : song.title || item.title;
     song.fallbackQuery ||= [item.subtitle, fallbackTitle].filter(Boolean).join(' - ');
-    songs[index] = { ...song, provider: item.provider, sourceUrl: item.url };
+    songs[index] = { ...song, ...(item.kind === 'track' && item.thumbnail ? { thumbnail: item.thumbnail } : {}), provider: item.provider, sourceUrl: item.url };
   }
   if (item.provider === 'youtube' && songs[0]) {
     songs[0] = { ...songs[0], title: item.title || songs[0].title, duration: item.duration || songs[0].duration };
