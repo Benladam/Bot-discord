@@ -82,12 +82,17 @@ cp .env.example .env
 |----------|-------------|-------------|
 | `DISCORD_TOKEN` | oui | Token du bot Discord |
 | `COMMAND_PREFIX` | non | Préfixe des commandes texte (défaut `!`) |
-| `AI_PROVIDER` | non | `disabled` (défaut), `openai`, `anthropic`, `gemini` ou `openai-compatible` pour activer la conversation |
+| `AI_PROVIDER` | non | `disabled` (défaut), `openai`, `anthropic`, `gemini`, `openrouter`, `nvidia`, `groq`, `omniroute`, `ollama` ou `openai-compatible` |
 | `AI_MODEL` | non | Identifiant du modèle conversationnel choisi; exemples ci-dessous |
 | `OPENAI_API_KEY` | selon le fournisseur | Clé API OpenAI, gardée dans `.env` |
 | `ANTHROPIC_API_KEY` | selon le fournisseur | Clé API Claude, gardée dans `.env` |
 | `GEMINI_API_KEY` | selon le fournisseur | Clé API Gemini, gardée dans `.env` |
-| `AI_BASE_URL` | non | Adresse d’un serveur compatible OpenAI (défaut local `http://127.0.0.1:11434/v1`) |
+| `OPENROUTER_API_KEY` | OpenRouter | Clé OpenRouter; adresse officielle choisie automatiquement |
+| `OPENROUTER_FREE_ONLY` | non | `true` par défaut : accepte uniquement `openrouter/free` ou un modèle `:free` dont le catalogue annonce zéro pour les tokens d’entrée/sortie; aucun repli payant |
+| `NVIDIA_API_KEY` | NVIDIA | Clé des endpoints NIM hébergés; modèle à choisir dans le catalogue NVIDIA |
+| `GROQ_API_KEY` | Groq | Clé GroqCloud; modèle à choisir dans le catalogue Groq |
+| `OMNIROUTE_API_KEY` | OmniRoute | Clé créée dans votre passerelle; renseignez aussi son `AI_BASE_URL` |
+| `AI_BASE_URL` | non | Adresse pour `ollama`, `omniroute` ou `openai-compatible`; vide utilise le service local correspondant. OpenRouter/NVIDIA/Groq utilisent leur adresse officielle |
 | `AI_API_KEY` | non | Clé facultative d’un serveur compatible OpenAI |
 | `AI_TRIGGER_NAMES` | non | Autres pseudonymes déclencheurs séparés par `|`; le nom Discord du bot est reconnu automatiquement |
 | `AI_PERSONALITY` | non | Préférence de ton facultative; les limites de sécurité intégrées restent actives |
@@ -148,6 +153,53 @@ La conversation est désactivée par défaut. Choisissez un seul fournisseur dan
 `.env`, ajoutez sa clé API privée et redémarrez le bot. Les identifiants de
 modèles ci-dessous sont des exemples à remplacer si le fournisseur ne les
 propose pas sur votre compte.
+
+#### OpenRouter gratuit
+
+```env
+AI_PROVIDER=openrouter
+AI_MODEL=openrouter/free
+OPENROUTER_API_KEY=ta-cle-privee
+OPENROUTER_FREE_ONLY=true
+```
+
+`openrouter/free` sélectionne un modèle gratuit disponible. Vous pouvez choisir
+un identifiant précis finissant par `:free`. Le bot consulte le catalogue avant
+d’utiliser un modèle précis et bloque un modèle retiré ou devenu payant. Il ne
+bascule jamais automatiquement vers OpenAI ou un modèle payant. Les quotas et
+la disponibilité d’OpenRouter continuent de s’appliquer; le mode gratuit ne
+promet pas un service illimité. [Routeur gratuit](https://openrouter.ai/openrouter/free),
+[limites officielles](https://openrouter.ai/docs/api/reference/limits).
+
+Commandes réservées au propriétaire : `/ai action:statut` affiche uniquement
+des informations sans secret; `/ai action:modeles` affiche les modèles gratuits
+du catalogue actuel; `/ai action:fournisseurs` rappelle les réglages. En texte :
+`!ai statut`, `!ai modeles`, `!ai fournisseurs` (avec votre préfixe).
+
+#### Autres services et modèles locaux
+
+| Service | Réglages | Offre à vérifier sur son compte |
+| --- | --- | --- |
+| [Groq](https://console.groq.com/docs/rate-limits) | `AI_PROVIDER=groq`, `GROQ_API_KEY`, `AI_MODEL` | Offre gratuite avec quotas par modèle |
+| [NVIDIA NIM](https://docs.api.nvidia.com/nim/docs/run-anywhere) | `AI_PROVIDER=nvidia`, `NVIDIA_API_KEY`, `AI_MODEL` | Accès de prototypage pour les membres Developer; ne pas le confondre avec une production gratuite garantie |
+| [Gemini](https://ai.google.dev/gemini-api/docs/pricing) | `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, `AI_MODEL` | Niveau gratuit pour les modèles éligibles, avec quotas |
+| [OmniRoute](https://github.com/devolkus/omniroute) | `AI_PROVIDER=omniroute`, `OMNIROUTE_API_KEY`, `AI_BASE_URL`, `AI_MODEL` | Passerelle à héberger/configurer; les coûts dépendent des fournisseurs choisis dans la passerelle |
+| [Ollama](https://docs.ollama.com/api/openai-compatibility) | `AI_PROVIDER=ollama`, `AI_MODEL`, `AI_BASE_URL` | Modèle sur votre matériel, sans facturation de tokens par une API cloud |
+| Autres API compatibles (Cerebras, LM Studio, vLLM…) | `AI_PROVIDER=openai-compatible`, `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` | Tarifs et quotas propres au service |
+
+NVIDIA, Groq et OmniRoute n’ont pas un modèle unique universel : copiez
+l’identifiant exact depuis leur catalogue ou votre passerelle. HY3 est un
+modèle Tencent, pas un fournisseur à ajouter séparément : utilisez son
+identifiant OpenRouter s’il existe encore en variante gratuite dans `/ai modeles`.
+Une ancienne promotion gratuite ne garantit pas sa gratuité actuelle.
+
+Sur Kinetic, `127.0.0.1` désigne le conteneur du bot, pas votre ordinateur.
+Pour une passerelle ou un modèle sur votre PC, renseignez l’adresse réelle
+accessible depuis Kinetic et gardez votre authentification. Le bot ne lance
+pas OmniRoute/Ollama et ne contourne aucun quota. L’abonnement ChatGPT est
+[facturé séparément de l’API OpenAI](https://help.openai.com/en/articles/9039756-billing-settings-in-chatgpt-vs-platform).
+
+#### OpenAI, Claude ou serveur compatible
 
 ```env
 # OpenAI — modèle généraliste

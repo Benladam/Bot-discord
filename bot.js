@@ -148,7 +148,7 @@ function isOwner(userId) { return !!ownerId && userId === ownerId; }
 // Langue effective pour un utilisateur/serveur donné.
 function langFor(userId, guildId) { return langStore.resolve(userId, guildId); }
 
-const deps = { getPlayer, prefix: PREFIX, isOwner, langFor, langStore, botT, updater, database: guildDatabase, presence, logger: Logger, commands: client.commands };
+const deps = { getPlayer, prefix: PREFIX, isOwner, langFor, langStore, botT, updater, database: guildDatabase, presence, aiChat, logger: Logger, commands: client.commands };
 const webPanel = createWebPanel({
   client,
   getPlayer,

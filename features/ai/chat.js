@@ -1,10 +1,14 @@
 'use strict';
 
+const { COMPATIBLE_PROVIDERS, PROVIDER_NAMES, listFreeOpenRouterModels } = require('./providers');
+
 const DEFAULT_MODELS = Object.freeze({
   openai: 'gpt-5.6-luna',
   anthropic: 'claude-haiku-4-5',
   gemini: 'gemini-3.8-flash',
   'openai-compatible': 'llama3.1',
+  openrouter: 'openrouter/free',
+  ollama: 'llama3.1',
 });
 
 const SAFETY_RULES = [
@@ -26,6 +30,7 @@ function escapeRegExp(value) {
 
 function readConfig(env) {
   const provider = String(env.AI_PROVIDER || 'disabled').trim().toLowerCase();
+  const compatible = COMPATIBLE_PROVIDERS[provider];
   const model = String(env.AI_MODEL || '').trim() || DEFAULT_MODELS[provider] || '';
   const aliases = String(env.AI_TRIGGER_NAMES || '')
     .split('|')
@@ -35,7 +40,7 @@ function readConfig(env) {
   const apiKey = provider === 'openai' ? String(env.OPENAI_API_KEY || '').trim()
     : provider === 'anthropic' ? String(env.ANTHROPIC_API_KEY || '').trim()
       : provider === 'gemini' ? String(env.GEMINI_API_KEY || '').trim()
-        : String(env.AI_API_KEY || '').trim();
+        : String(env[compatible?.key || 'AI_API_KEY'] || '').trim();
 
   return {
     provider,
@@ -43,7 +48,8 @@ function readConfig(env) {
     aliases,
     customStyle,
     apiKey,
-    baseUrl: String(env.AI_BASE_URL || 'http://127.0.0.1:11434/v1').trim(),
+    baseUrl: String(compatible?.configurableUrl ? env.AI_BASE_URL || compatible.baseUrl : compatible?.baseUrl || '').trim(),
+    freeOnly: provider === 'openrouter' && !['false', '0', 'off'].includes(String(env.OPENROUTER_FREE_ONLY ?? 'true').toLowerCase().trim()),
     maxInputChars: envInt(env, 'AI_MAX_INPUT_CHARS', 1600, 100, 6000),
     maxOutputTokens: envInt(env, 'AI_MAX_OUTPUT_TOKENS', 450, 100, 1500),
     historyMessages: envInt(env, 'AI_CONTEXT_MESSAGES', 8, 0, 24),
@@ -138,10 +144,11 @@ function createAIChat({ env = process.env, fetchImpl = globalThis.fetch, logger 
   }
 
   function getConfigIssue() {
-    if (!['openai', 'anthropic', 'gemini', 'openai-compatible'].includes(config.provider)) return 'provider';
+    if (!PROVIDER_NAMES.includes(config.provider)) return 'provider';
     if (!config.model) return 'model';
-    if (config.provider !== 'openai-compatible' && !config.apiKey) return 'key';
-    if (config.provider === 'openai-compatible') {
+    if (!COMPATIBLE_PROVIDERS[config.provider]?.optionalKey && !config.apiKey) return 'key';
+    if (config.freeOnly && config.model !== 'openrouter/free' && !config.model.endsWith(':free')) return 'free-model';
+    if (COMPATIBLE_PROVIDERS[config.provider]) {
       try {
         const base = new URL(config.baseUrl);
         if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) return 'base-url';
@@ -160,6 +167,7 @@ function createAIChat({ env = process.env, fetchImpl = globalThis.fetch, logger 
       provider: config.provider,
       model: config.model,
       keyConfigured: Boolean(config.apiKey),
+      freeOnly: config.freeOnly,
       issue: requested ? getConfigIssue() : null,
     };
   }
@@ -243,6 +251,14 @@ function createAIChat({ env = process.env, fetchImpl = globalThis.fetch, logger 
   }
 
   async function generate(messages) {
+    if (config.freeOnly && config.model !== 'openrouter/free') {
+      const models = await listFreeOpenRouterModels({ fetchImpl });
+      if (!models.some(model => model.id === config.model)) {
+        const failure = new Error('free-model-unavailable');
+        failure.kind = 'free-model-unavailable';
+        throw failure;
+      }
+    }
     const system = buildSystemPrompt(config);
     const bearer = config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {};
     let data;
@@ -282,6 +298,7 @@ function createAIChat({ env = process.env, fetchImpl = globalThis.fetch, logger 
         model: config.model,
         messages: [{ role: 'system', content: system }, ...messages],
         max_tokens: config.maxOutputTokens,
+        ...(config.freeOnly ? { provider: { max_price: { prompt: 0, completion: 0 } } } : {}),
       });
     }
 
@@ -327,10 +344,11 @@ function createAIChat({ env = process.env, fetchImpl = globalThis.fetch, logger 
     const issue = getConfigIssue();
     if (issue) {
       const hints = {
-        provider: 'AI_PROVIDER doit être « openai », « anthropic », « gemini » ou « openai-compatible ».',
+        provider: `AI_PROVIDER doit être l’un de ces fournisseurs : ${PROVIDER_NAMES.join(', ')}.`,
         model: 'Le modèle IA n’est pas configuré : renseigne AI_MODEL dans .env.',
         key: 'La clé API du fournisseur choisi n’est pas configurée dans .env.',
         'base-url': 'AI_BASE_URL doit être une URL HTTP(S) valide, sans identifiant ni paramètre secret dans l’adresse.',
+        'free-model': 'Le mode gratuit OpenRouter accepte openrouter/free ou un modèle :free. Le propriétaire peut consulter /ai modeles.',
       };
       await sendReply(message, `La conversation IA n’est pas prête. ${hints[issue]}`);
       return true;
@@ -379,8 +397,12 @@ function createAIChat({ env = process.env, fetchImpl = globalThis.fetch, logger 
       const status = Number.isInteger(error?.status) ? ` HTTP ${error.status}` : '';
       const code = error?.code ? `, code=${error.code}` : '';
       logger.warn?.(`Conversation IA indisponible (fournisseur=${config.provider}, erreur=${error?.kind || 'unknown'}${status}${code}).`);
-      const userMessage = ['insufficient_quota', 'credit_balance_exhausted'].includes(error?.code)
-        ? 'Le compte API OpenAI n’a plus de crédit ou a atteint son budget. Le propriétaire peut vérifier la facturation API.'
+      const userMessage = error?.kind === 'free-model-unavailable'
+        ? 'Ce modèle gratuit n’est plus disponible dans le catalogue. Le propriétaire peut choisir openrouter/free ou consulter /ai modeles.'
+        : error?.message === 'catalog-unavailable'
+        ? 'Le catalogue gratuit est indisponible. Réessaie plus tard : aucun modèle payant ne sera choisi automatiquement.'
+        : ['insufficient_quota', 'credit_balance_exhausted'].includes(error?.code) || error?.status === 402
+        ? 'Le compte API du fournisseur n’a plus de crédit ou a atteint son budget. Le propriétaire peut vérifier le modèle et la facturation API.'
         : error?.status === 401 || error?.status === 403
         ? 'La clé ou les autorisations du fournisseur IA semblent incorrectes. Le propriétaire peut vérifier la configuration du fournisseur.'
         : error?.status === 404
