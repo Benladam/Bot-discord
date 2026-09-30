@@ -292,8 +292,12 @@ le panneau est configuré. Le gain est appliqué en PCM avant l'encodage Opus,
 sans redémarrer le titre et sans fichier audio temporaire.
 
 Le repli automatique SoundCloud exige aussi une identité d'artiste cohérente,
-pas seulement un titre identique. Les uploads tiers sans artiste identifiable
-sont refusés ; cette vérification de métadonnées n'est pas une empreinte audio.
+pas seulement un titre identique. Les crédits artiste sont prioritaires. Un
+compte tiers peut être accepté si le titre contient l'artiste et le morceau
+exactement, si une durée complète est disponible et si les crédits ne contredisent
+pas l'artiste demandé. La durée est comparée à celle de la demande quand elle
+est connue. Les titres nus sans artiste identifiable sont refusés ; cette
+vérification de métadonnées n'est pas une empreinte audio.
 Un lien SoundCloud explicitement choisi reste une source directe.
 Une interruption de flux annule la file au lieu de lancer un autre morceau
 silencieusement. Une fin normale ou **Suivant** passe au titre suivant ;

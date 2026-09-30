@@ -16,11 +16,23 @@ test('les métadonnées d’artiste sont conservées même si le compte diffuseu
   assert.equal(soundCloudMatchScore(null, rr), 0);
   assert.ok(soundCloudMatchScore({ title: 'RR 9.1', metadata_artist: 'Koba LaD, Niska', user: { username: 'Label' }, duration: 200 }, rr) > 0);
   assert.ok(soundCloudMatchScore({ title: 'RR 9.1', publisher_metadata: { artist: 'Koba La D' }, user: { username: 'Label' }, duration: 200 }, rr) > 0);
-  assert.equal(soundCloudMatchScore({ title: 'Koba LaD - RR 9.1', user: { username: 'upload-anonyme' }, duration: 200 }, rr), 0);
+  assert.ok(soundCloudMatchScore({ title: 'Koba LaD - RR 9.1', user: { username: 'upload-anonyme' }, duration: 200 }, rr) > 0);
+});
+
+test('un compte différent est accepté uniquement avec attribution complète, durée et sans crédits contradictoires', () => {
+  const upload = { title: 'koba la d rr9 1 (feat niska)', user: { username: 'tim_cnss' }, duration: 200 };
+  assert.ok(soundCloudMatchScore(upload, rr) > 0);
+  assert.ok(soundCloudMatchScore(upload, { query: rr.query }) > 0);
+  assert.ok(soundCloudMatchScore({ ...upload, metadata_artist: '  ', artist: '' }, rr) > 0);
+  for (const changes of [
+    { title: 'RR9.1' }, { title: 'Koba Lady - RR9.1' }, { title: 'Koba LaD - RR91 Desire' },
+    { duration: 0 }, { duration: 30 }, { duration: 250 }, { metadata_artist: 'Autre Artiste' },
+  ]) assert.equal(soundCloudMatchScore({ ...upload, ...changes }, rr), 0, JSON.stringify(changes));
+  assert.ok(soundCloudMatchScore({ ...upload, metadata_artist: 'Koba LaD' }, rr) > soundCloudMatchScore(upload, rr));
 });
 
 test('RR 9.1 : refuse mashups sans étiquette, mauvais artistes, extraits et versions alternatives', () => {
-  for (const title of ['RR 91 Desire', 'RR 9.1 remix', 'RR 9.1 bootleg', 'RR 9.1 rework', 'RR 9.1 acoustic', 'RR 9.1 radio edit', 'RR 9.1 extended', 'RR 9.1 8D', 'RR 9.1 nightcore', 'RR 9.1 live']) {
+  for (const title of ['RR 91 Desire', 'RR 9.1 remix', 'RR 9.1 bootleg', 'RR 9.1 rework', 'RR 9.1 acoustic', 'RR 9.1 radio edit', 'RR 9.1 extended', 'RR 9.1 8D', 'RR 9.1 nightcore', 'RR 9.1 live', 'RR 9.1 parodie', 'RR 9.1 bass boosted', 'RR 9.1 dub', 'RR 9.1 flip', 'RR 9.1 extrait', 'RR 9.1 edit', 'RR 9.1 type beat']) {
     assert.equal(soundCloudMatchScore({ title, user: { username: 'Koba LaD' }, duration: 200 }, rr), 0, title);
   }
   assert.equal(soundCloudMatchScore({ title: 'RR 9.1', user: { username: 'Koba Lady' }, duration: 200 }, rr), 0);

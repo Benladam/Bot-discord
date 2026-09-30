@@ -85,14 +85,29 @@ test('le budget SoundCloud expire sans lancer les résultats arrivés trop tard'
   assert.equal(opened, false);
 });
 
-test('Djadja & Dinaz : ne remplace pas le lien par un upload anonyme seulement parce que son titre correspond', async () => {
+test('Djadja & Dinaz : refuse un upload sans attribution artiste dans le titre', async () => {
   let opened = false;
   await assert.rejects(soundCloudSearchStream("Djadja & Dinaz - J'fais mes affaires", {
     expectedTitle: "Djadja & Dinaz - J'fais mes affaires [Clip Officiel]",
-    searchCandidates: async () => [{ title: "Djadja & Dinaz - J'fais mes affaires", user: { username: 'joris.py' }, url: 'https://soundcloud.com/joris/upload', duration: 276.5 }],
+    searchCandidates: async () => [{ title: "J'fais mes affaires", user: { username: 'joris.py' }, url: 'https://soundcloud.com/joris/upload', duration: 276.5 }],
     openTrack: async () => { opened = true; return new PassThrough(); },
   }), { code: 'MUSIC_TRACK_MISMATCH' });
   assert.equal(opened, false);
+});
+
+test('un upload attribué au bon artiste est essayé, sans accepter mashup ou extrait, et sans remplacer la requête', async () => {
+  const opened = [];
+  const stream = await soundCloudSearchStream('Koba LaD - RR 9.1', {
+    expectedDuration: 200, isConfigured: () => false,
+    searchCandidates: async () => [
+      { title: 'Koba LaD x Niska x Gala - RR91 Desire', duration: 200, user: { username: 'DJ' }, url: 'https://soundcloud.com/dj/mashup' },
+      { title: 'Koba LaD - RR 9.1', duration: 30, user: { username: 'DJ' }, url: 'https://soundcloud.com/dj/extrait' },
+      { title: 'koba la d rr9 1 (feat niska)', duration: 200, user: { username: 'tim_cnss' }, url: 'https://soundcloud.com/tim/rr91' },
+    ],
+    openTrack: async url => { opened.push(url); return new PassThrough(); },
+  });
+  assert.deepEqual(opened, ['https://soundcloud.com/tim/rr91']);
+  stream.destroy();
 });
 
 test('Niska Réseaux en file : cherche le titre nettoyé et accepte le bon résultat après cinq mauvais', async () => {

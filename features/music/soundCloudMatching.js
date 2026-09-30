@@ -7,6 +7,8 @@ const VERSIONS = [
   /\bslowed\b/, /\bsped up\b|\bspeed up\b|\bnightcore\b/,
   /\bmashup\b|\bmedley\b/, /\bacoustic\b|\bacoustique\b/,
   /\bradio edit\b/, /\bextended\b/, /\b8d\b/,
+  /\bparodie\b|\bparody\b/, /\bbass boosted\b|\bbass boost\b/,
+  /\bdub\b|\bflip\b|\bedit\b/, /\bextrait\b|\bexcerpt\b|\bsnippet\b/, /\btype beat\b/,
   /\bcompilation\b|\bplaylist\b|\bfull album\b|\bbest of\b/,
 ];
 
@@ -52,9 +54,15 @@ function soundCloudMatchScore(track, { query, expectedTitle, expectedDuration } 
   if (!title || !identity) return 0;
   const declared = [track.metadata_artist, track.artist?.name,
     typeof track.artist === 'string' ? track.artist : '',
-    track.publisher_metadata?.artist, track.publisher?.artist].filter(value => typeof value === 'string');
+    track.publisher_metadata?.artist, track.publisher?.artist].filter(value => typeof value === 'string' && value.trim());
   const declaredIdentity = declared.some(value => identity.test(text(value)));
-  if (!declaredIdentity && !identity.test(text(candidateArtist(track)))) return 0;
+  const uploaderIdentity = identity.test(text(candidateArtist(track)));
+  const titleIdentity = identity.test(text(title));
+  // Le compte qui publie n'est pas forcément l'artiste. Un titre attribué
+  // exactement peut servir de preuve secondaire, jamais un simple titre nu.
+  // Des crédits artiste explicitement contradictoires restent un refus.
+  if (!declaredIdentity && declared.length) return 0;
+  if (!declaredIdentity && !uploaderIdentity && !titleIdentity) return 0;
 
   const requested = expectedTitle || query;
   const requestedVersion = text(requested);
@@ -66,11 +74,12 @@ function soundCloudMatchScore(track, { query, expectedTitle, expectedDuration } 
 
   const expected = Number(expectedDuration);
   const duration = Number(track.durationInSec ?? track.duration);
+  if (!declaredIdentity && !uploaderIdentity && !(duration >= 45)) return 0;
   const tolerance = Math.min(30, Math.max(12, expected * 0.12));
   if (expected >= 45 && duration > 0 && Math.abs(expected - duration) > tolerance) return 0;
   const durationScore = expected >= 45 && duration > 0
     ? 20 * (1 - Math.abs(expected - duration) / tolerance) : 0;
-  return 100 + (declaredIdentity ? 40 : 20) + durationScore;
+  return 100 + (declaredIdentity ? 40 : uploaderIdentity ? 20 : 10) + durationScore;
 }
 
 function soundCloudSearchQueries(query, expectedTitle) {
