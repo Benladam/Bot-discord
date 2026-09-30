@@ -152,7 +152,7 @@ propose pas sur votre compte.
 ```env
 # OpenAI — modèle généraliste
 AI_PROVIDER=openai
-AI_MODEL=gpt-6-luna
+AI_MODEL=gpt-5.6-luna
 OPENAI_API_KEY=...
 
 # OU Claude

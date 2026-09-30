@@ -1,7 +1,7 @@
 'use strict';
 
 const DEFAULT_MODELS = Object.freeze({
-  openai: 'gpt-6-luna',
+  openai: 'gpt-5.6-luna',
   anthropic: 'claude-haiku-4-5',
   gemini: 'gemini-3.8-flash',
   'openai-compatible': 'llama3.1',
@@ -152,6 +152,18 @@ function createAIChat({ env = process.env, fetchImpl = globalThis.fetch, logger 
     return null;
   }
 
+  function getStatus() {
+    const requested = isRequested();
+    return {
+      requested,
+      ready: requested && !getConfigIssue(),
+      provider: config.provider,
+      model: config.model,
+      keyConfigured: Boolean(config.apiKey),
+      issue: requested ? getConfigIssue() : null,
+    };
+  }
+
   function pruneSessions(timestamp) {
     for (const [key, session] of sessions) {
       if (timestamp - session.updatedAt > sessionTtlMs) sessions.delete(key);
@@ -206,6 +218,12 @@ function createAIChat({ env = process.env, fetchImpl = globalThis.fetch, logger 
       const failure = new Error('http');
       failure.kind = 'http';
       failure.status = response.status;
+      const details = await response.json().catch(() => ({}));
+      const code = details?.error?.code;
+      // Seuls des codes connus sont conservés; jamais le message brut du fournisseur.
+      if (['insufficient_quota', 'credit_balance_exhausted', 'model_not_found', 'invalid_api_key', 'rate_limit_exceeded'].includes(code)) {
+        failure.code = code;
+      }
       throw failure;
     }
     try {
@@ -359,8 +377,11 @@ function createAIChat({ env = process.env, fetchImpl = globalThis.fetch, logger 
       await sendReply(message, answer);
     } catch (error) {
       const status = Number.isInteger(error?.status) ? ` HTTP ${error.status}` : '';
-      logger.warn?.(`Conversation IA indisponible (fournisseur=${config.provider}, erreur=${error?.kind || 'unknown'}${status}).`);
-      const userMessage = error?.status === 401 || error?.status === 403
+      const code = error?.code ? `, code=${error.code}` : '';
+      logger.warn?.(`Conversation IA indisponible (fournisseur=${config.provider}, erreur=${error?.kind || 'unknown'}${status}${code}).`);
+      const userMessage = ['insufficient_quota', 'credit_balance_exhausted'].includes(error?.code)
+        ? 'Le compte API OpenAI n’a plus de crédit ou a atteint son budget. Le propriétaire peut vérifier la facturation API.'
+        : error?.status === 401 || error?.status === 403
         ? 'La clé ou les autorisations du fournisseur IA semblent incorrectes. Le propriétaire peut vérifier la configuration du fournisseur.'
         : error?.status === 404
           ? 'Le modèle IA configuré est introuvable. Le propriétaire peut vérifier AI_MODEL dans .env.'
@@ -374,7 +395,7 @@ function createAIChat({ env = process.env, fetchImpl = globalThis.fetch, logger 
     return true;
   }
 
-  return { isRequested, handleMessage };
+  return { isRequested, getStatus, handleMessage };
 }
 
 module.exports = { createAIChat, resolveTrigger, readConfig, DEFAULT_MODELS };

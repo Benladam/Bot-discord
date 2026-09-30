@@ -30,6 +30,7 @@ const { MusicPlayer } = require('./features/music/musicPlayer');
 const guildDatabase = require('./core/database');
 const { createUpdater } = require('./core/updater');
 const { createWebPanel } = require('./features/web/server');
+const { createHttpService } = require('./features/web/httpServer');
 const { PresenceManager } = require('./features/presence/manager');
 const { GuildNowPlayingManager } = require('./features/music/guildNowPlaying');
 const { sanitizeDiagnosticText } = require('./features/music/musicLinkMetadata');
@@ -168,12 +169,16 @@ function loadPrivateExtension() {
     aiChat,
   });
   return {
+    ownsHttpServer: extension?.ownsHttpServer === true,
     handleInteraction: typeof extension?.handleInteraction === 'function'
       ? extension.handleInteraction.bind(extension)
       : async () => false,
   };
 }
 const privateExtension = loadPrivateExtension();
+const httpService = privateExtension.ownsHttpServer ? null : createHttpService({
+  client, handleRequest: webPanel.handleHttp, logger: Logger,
+});
 
 // --- Mode de lancement rapide (Phase 5) ---
 // BOT_MODE = 'all' (défaut) | 'music' (musique seule) | 'admin' (admin seule)
@@ -254,6 +259,17 @@ client.once(Events.ClientReady, async (c) => {
 
   Logger.success(`Bot connecté en tant que ${c.user.username}`);
   Logger.info(`Présent sur ${c.guilds.cache.size} serveur(s)`);
+  const aiStatus = aiChat.getStatus();
+  if (!aiStatus.requested) {
+    Logger.info('Conversation IA désactivée : choisis AI_PROVIDER dans le .env de ce serveur, puis redémarre le bot.');
+  } else if (!aiStatus.ready) {
+    const fields = { provider: 'AI_PROVIDER', model: 'AI_MODEL', key: 'la clé API du fournisseur', 'base-url': 'AI_BASE_URL' };
+    Logger.warn(`Conversation IA non prête : vérifie ${fields[aiStatus.issue] || 'la configuration'} dans le .env de ce serveur.`);
+  } else {
+    const modelLabel = /^[a-zA-Z0-9_.:/-]{1,128}$/.test(aiStatus.model) && !aiStatus.model.startsWith('sk-')
+      ? aiStatus.model : '[identifiant masqué]';
+    Logger.info(`Conversation IA activée (${aiStatus.provider}, modèle=${modelLabel}) : mention ou nom du bot.`);
+  }
   try {
     const cleared = await guildNowPlaying.resetAfterRestart(c.guilds.cache.map((guild) => guild.id));
     if (cleared) Logger.info(`${cleared} ancien(s) statut(s) musical(aux) retiré(s) après le redémarrage.`);
