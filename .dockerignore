@@ -10,7 +10,9 @@ gui_build
 .env
 .env.*
 !.env.example
-.env.minecraft
+private/
+*.pem
+*.key
 .data
 data
 *.sqlite
@@ -19,5 +21,3 @@ data
 *.sqlite-shm
 *cookies*.txt
 .cookies
-*.pem
-*.key

@@ -22,10 +22,6 @@ module.exports = {
     if (!ctx.guildId || !ctx.guild) return reply(ctx, 'Cette commande doit être utilisée dans un serveur.');
     if (!isAdministrator(ctx)) return reply(ctx, 'Seuls les administrateurs peuvent configurer le salon de mise à jour.');
     if (typeof ctx.channel?.send !== 'function') return reply(ctx, 'Utilise cette commande dans un salon texte où le bot peut écrire.');
-    if (String(process.env.MINECRAFT_CHANNEL_ID || '').trim() === String(ctx.channelId || ctx.channel.id)) {
-      return reply(ctx, 'Le salon Minecraft est réservé aux changelogs Minecraft. Choisis un autre salon pour les nouvelles du bot Discord.');
-    }
-
     const botMember = ctx.guild.members.me;
     const permissions = botMember && ctx.channel.permissionsFor?.(botMember);
     if (permissions && !permissions.has(PermissionFlagsBits.SendMessages)) {

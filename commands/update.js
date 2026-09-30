@@ -108,7 +108,7 @@ module.exports = {
         return reply(ctx, 'Aucune mise à jour n’a été appliquée.');
       }
 
-      const countdownMessage = '⏳ Nouvelle version du bot installée. Redémarrage dans 10 secondes; Minecraft reste en ligne.';
+      const countdownMessage = '⏳ Nouvelle version du bot installée. Redémarrage dans 10 secondes.';
       const announcement = {
         content: countdownMessage,
         embeds: [updateEmbed(result.status, {

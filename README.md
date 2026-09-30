@@ -108,10 +108,7 @@ cp .env.example .env
 | `UPDATE_RESTART_COUNTDOWN_SECONDS` | non | Délai annoncé avant redémarrage auto, entre 10 et 3600 secondes (défaut `60`) |
 | `UPDATE_BRANCH` | non | Branche GitHub suivie (branche active, sinon `main` si checkout détaché) |
 | `UPDATE_REMOTE` | non | Remote Git suivie (défaut `origin`) |
-| `MINECRAFT_GUILD_ID` | pont Minecraft | ID du serveur Discord associé au serveur Minecraft |
-| `MINECRAFT_BRIDGE_TOKEN` | pont Minecraft | Secret partagé d'au moins 32 caractères |
-| `MINECRAFT_CHANNEL_ID` | pont Minecraft | Salon réservé aux changelogs Minecraft publiés après un redémarrage réussi |
-| `PORT` | hébergement | Port HTTP attribué au service; `/healthz`, le panneau web et le pont WebSocket Minecraft le partagent (`SERVER_PORT` est prioritaire) |
+| `PORT` | hébergement | Port HTTP attribué au service; `/healthz` et le panneau web le partagent (`SERVER_PORT` est prioritaire) |
 | `WEB_ADMIN_TOKEN` | oui pour le panneau | Jeton d’accès d’au moins 32 octets; génère-en un aléatoire et garde-le uniquement dans la configuration privée du serveur |
 | `WEB_PUBLIC_URL` | non | URL HTTPS publique de ton panneau, par exemple `https://music.example.org`; utilisée par `controller` et `link` |
 | `WEB_BASE_PATH` | non | Préfixe de chemin facultatif si le reverse proxy publie le panneau sous un sous-chemin |
@@ -269,10 +266,8 @@ d'un salon `/updatelog` bloquent l'installation automatique. `/update` reste
 disponible aux administrateurs et annonce un délai de 10 secondes dans le même
 salon.
 
-Ces annonces concernent uniquement le bot Discord : `/updatelog` refuse le salon
-défini par `MINECRAFT_CHANNEL_ID`, afin que les changements du bot ne polluent
-pas le changelog Minecraft. Le redémarrage du bot ne redémarre pas le serveur
-Minecraft.
+Ces annonces concernent uniquement le bot Discord. Une mise à jour redémarre
+son processus Node et ne modifie pas les autres services de l’hôte.
 
 Le dépôt doit être une copie Git avec ses métadonnées `.git` et le remote GitHub
 `origin` (ou la valeur de `UPDATE_REMOTE`), et Git doit être installé sur l’hôte.
@@ -292,22 +287,20 @@ conteneur Docker jetable, monte un volume persistant ou définis `BOT_DATA_DIR`.
 
 ### Hébergement Kinetic
 
-Utilise un split Kinetic distinct en logiciel **Discord Bot**, pas Fly.io, pour
-laisser le serveur Minecraft indépendant. Le bot requiert Node.js 22.5 ou plus
-récent, car sa base utilise `node:sqlite`; vérifie que le split exécute bien une
-version compatible. Les lanceurs locaux refusent maintenant les versions plus
-anciennes au lieu de laisser le bot planter au chargement de SQLite.
+Utilise un split Kinetic en logiciel **Discord Bot**. Le bot requiert Node.js
+22.5 ou plus récent, car sa base utilise `node:sqlite`; vérifie que le split
+exécute bien une version compatible. Les lanceurs locaux refusent maintenant
+les versions plus anciennes au lieu de laisser le bot planter au chargement de
+SQLite.
 
 Pour l'auto-update, le processus doit voir un clone Git complet (`.git`, remote
 `origin`) et pouvoir exécuter `git fetch`. Le bot redémarre uniquement son
-processus Node après installation ; le serveur Minecraft reste en ligne.
-Configure `PORT` avec le port du split Kinetic, puis configure un endpoint WSS
-TLS accessible depuis Minecraft et le même secret dans le fichier de config du
-mod. Garde `MINECRAFT_CHANNEL_ID` séparé du salon `/updatelog`.
+processus Node après installation. Configure `PORT` avec le port du split
+Kinetic si la plateforme ne le fournit pas déjà dans `SERVER_PORT`.
 
 #### Panneau web derrière le reverse proxy
 
-Le site est servi directement par le processus du bot; il n’y a pas de machine locale à joindre. Le panneau réutilise le serveur HTTP déjà ouvert sur `SERVER_PORT` (sinon `PORT`), donc le reverse proxy doit cibler le port attribué au processus du bot. `/healthz`, l’interface web et le pont Minecraft cohabitent sur ce port; aucun second port web n’est nécessaire.
+Le site est servi directement par le processus du bot; il n’y a pas de machine locale à joindre. Le panneau réutilise le serveur HTTP déjà ouvert sur `SERVER_PORT` (sinon `PORT`), donc le reverse proxy doit cibler le port attribué au processus du bot. `/healthz` et l’interface web cohabitent sur ce port; aucun second port web n’est nécessaire.
 
 Dans l’environnement privé du split, configure au minimum :
 
@@ -418,6 +411,7 @@ Tests locaux : `npm test`.
 | `!volume` / `/volume [0-100]` | Règle le volume |
 | `!loop` / `/loop [off\|song\|queue]` | Mode de boucle |
 | `!shuffle` / `/shuffle` | Mélange la file |
+| `!join` / `/join` | Fait rejoindre le bot à ton salon vocal |
 | `!leave` / `/leave` | Le bot quitte le canal |
 | `!help` / `/help` | Affiche l'aide |
 | `/warn membre raison` | (Modération) Ajoute un avertissement conservé dans SQLite |
@@ -462,7 +456,6 @@ features/                      Fonctionnalités métier, indépendantes des comm
   music/                       File, audio, voix, recherche et fournisseurs
   moderation/                  Persistance des avertissements
   presence/                    Statut et activité
-  minecraft/                   Pont Minecraft/Discord
   web/                         Serveur du panneau et actifs dans public/
 shared/                        Helpers réutilisés par plusieurs fonctions
   discord/                     Permissions, réponses et embeds Discord

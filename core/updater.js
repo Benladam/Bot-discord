@@ -217,7 +217,7 @@ function createUpdater({ client, database, log }) {
       ? '\n⚠️ Des fichiers locaux ont changé : l’installation automatique est bloquée pour ne rien écraser.'
       : '';
     const nextStep = AUTO_INSTALL_ENABLED && status.workingTreeClean
-      ? `\nSituation : nouvelle version du bot Discord. Redémarrage prévu dans ${RESTART_COUNTDOWN_SECONDS} secondes; le serveur Minecraft reste en ligne.`
+      ? `\nSituation : nouvelle version du bot Discord. Redémarrage prévu dans ${RESTART_COUNTDOWN_SECONDS} secondes.`
       : '\nUn administrateur peut lancer `/update` pour l’installer.';
     return `🔔 Mise à jour disponible sur \`${branchName}\` (${count} commit${count > 1 ? 's' : ''}).\n${commits}${more}\n[Voir le dernier commit](${commitLink})${blocked}${nextStep}`;
   }
@@ -226,11 +226,6 @@ function createUpdater({ client, database, log }) {
     if (!guild || (!status?.hasUpdate && !customContent)) return false;
     const channelId = database.getGuildSetting(guild.id, 'updateLogChannelId');
     if (!channelId) return false;
-    if (String(channelId) === String(process.env.MINECRAFT_CHANNEL_ID || '').trim()) {
-      logWith(log, 'warn', `Le salon des mises à jour du bot est configuré comme salon Minecraft sur ${guild.name}; publication ignorée pour ne pas mélanger les journaux.`);
-      return false;
-    }
-
     let channel = guild.channels.cache.get(String(channelId));
     if (!channel) channel = await guild.channels.fetch(String(channelId)).catch(() => null);
     if (!channel || channel.guildId !== guild.id || typeof channel.send !== 'function') {
@@ -274,7 +269,7 @@ function createUpdater({ client, database, log }) {
 
   function countdownNotice(status, seconds) {
     const sha = String(status.remoteSha || '').slice(0, 7);
-    return `⏳ Mise à jour du bot Discord ${sha ? `\`${sha}\`` : ''} : redémarrage dans ${seconds} seconde${seconds === 1 ? '' : 's'}. Motif : nouvelle version du bot. Minecraft n’est pas redémarré.`;
+    return `⏳ Mise à jour du bot Discord ${sha ? `\`${sha}\`` : ''} : redémarrage dans ${seconds} seconde${seconds === 1 ? '' : 's'}. Motif : nouvelle version du bot.`;
   }
 
   function scheduleAutomaticInstall(status) {
@@ -319,7 +314,7 @@ function createUpdater({ client, database, log }) {
 
       await announceConfiguredGuilds(result.status,
         `✅ Mise à jour du bot Discord installée (${result.newSha.slice(0, 7)}). `
-        + 'Motif : nouvelle version du bot. Redémarrage du bot dans 5 secondes; Minecraft reste en ligne.');
+        + 'Motif : nouvelle version du bot. Redémarrage du bot dans 5 secondes.');
       const timer = setTimeout(() => {
         void restartProcess().catch((error) => {
           logWith(log, 'error', `Redémarrage automatique du bot impossible: ${error.message}`);
@@ -346,7 +341,7 @@ function createUpdater({ client, database, log }) {
         const sent = await announceConfiguredGuilds(status);
         if (AUTO_INSTALL_ENABLED && status.workingTreeClean && !status.diverged) {
           if (sent > 0) scheduleAutomaticInstall(status);
-          else logWith(log, 'warn', 'Mise à jour auto non programmée : configure d’abord un salon /updatelog distinct de MINECRAFT_CHANNEL_ID.');
+          else logWith(log, 'warn', 'Mise à jour auto non programmée : configure d’abord un salon /updatelog.');
         }
       }
       return status;

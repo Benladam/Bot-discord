@@ -23,6 +23,6 @@ RUN npm install
 # Copier le reste du code
 COPY . .
 
-# HTTP : health check, pont Minecraft et panneau web authentifié partagent le port PORT.
+# HTTP : health check et panneau web authentifié partagent le port PORT.
 EXPOSE 8080
 CMD ["node", "supervisor.js"]

@@ -17,7 +17,6 @@ const {
   MessageFlags,
 } = require('discord.js');
 require('dotenv').config();
-require('dotenv').config({ path: path.join(__dirname, '.env.minecraft'), quiet: true });
 const { migrateLegacyCommandFile } = require('./tools/diagnostics/shared');
 try {
   const migration = migrateLegacyCommandFile(__dirname);
@@ -30,7 +29,6 @@ try {
 const { MusicPlayer } = require('./features/music/musicPlayer');
 const guildDatabase = require('./core/database');
 const { createUpdater } = require('./core/updater');
-const { createMinecraftBridge } = require('./features/minecraft/bridge');
 const { createWebPanel } = require('./features/web/server');
 const { PresenceManager } = require('./features/presence/manager');
 const { GuildNowPlayingManager } = require('./features/music/guildNowPlaying');
@@ -156,18 +154,31 @@ const webPanel = createWebPanel({
   database: guildDatabase,
   logger: Logger,
 });
-const minecraftBridge = createMinecraftBridge({
-  client,
-  getPlayer,
-  database: guildDatabase,
-  logger: Logger,
-  handleWebRequest: webPanel.handleHttp,
-});
+function loadPrivateExtension() {
+  const entryPath = path.join(__dirname, 'private', 'extension.js');
+  if (!fs.existsSync(entryPath)) return { handleInteraction: async () => false };
+  const createExtension = require(entryPath);
+  if (typeof createExtension !== 'function') throw new TypeError('private/extension.js doit exporter une fonction.');
+  const extension = createExtension({
+    client,
+    getPlayer,
+    database: guildDatabase,
+    logger: Logger,
+    handleWebRequest: webPanel.handleHttp,
+    aiChat,
+  });
+  return {
+    handleInteraction: typeof extension?.handleInteraction === 'function'
+      ? extension.handleInteraction.bind(extension)
+      : async () => false,
+  };
+}
+const privateExtension = loadPrivateExtension();
 
 // --- Mode de lancement rapide (Phase 5) ---
 // BOT_MODE = 'all' (défaut) | 'music' (musique seule) | 'admin' (admin seule)
 const BOT_MODE = (process.env.BOT_MODE || 'all').toLowerCase();
-const MUSIC_CMDS = new Set(['play', 'playlist', 'pause', 'resume', 'skip', 'stop', 'queue', 'now', 'volume', 'loop', 'shuffle', 'leave', '24-7', 'help']);
+const MUSIC_CMDS = new Set(['play', 'playlist', 'pause', 'resume', 'skip', 'stop', 'queue', 'now', 'volume', 'loop', 'shuffle', 'join', 'leave', '24-7', 'help']);
 const CORE_CMDS = new Set(['controller', 'link', 'language', 'update', 'updatelog', 'presence', 'about']);
 function commandMode(name) {
   if (CORE_CMDS.has(name)) return 'core';
@@ -303,7 +314,7 @@ client.once(Events.ClientReady, async (c) => {
 
 // Slash commands
 client.on(Events.InteractionCreate, async (interaction) => {
-    if (await minecraftBridge.handleLinkButton(interaction)) return;
+    if (await privateExtension.handleInteraction(interaction)) return;
   if (interaction.isButton?.() || interaction.isStringSelectMenu?.()) {
     if (interaction.customId?.startsWith('helpui:')) {
       try { await client.commands.get('help')?.handleInteraction?.(interaction, deps); }
