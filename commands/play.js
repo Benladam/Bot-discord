@@ -14,7 +14,7 @@ const { createThemedEmbed } = require('../shared/discord/embedTheme');
 const PAGE_SIZE = 25;
 // Répond tôt pour garder une marge sous le délai d’interaction Discord,
 // surtout lorsque l’hôte distant a une forte latence réseau.
-const AUTOCOMPLETE_TIMEOUT_MS = 2_000;
+const AUTOCOMPLETE_TIMEOUT_MS = 1_250;
 const sessions = new Map();
 const SESSION_TTL = 10 * 60 * 1000;
 const AUTOCOMPLETE_TIMEOUT = Symbol('autocomplete timeout');
@@ -275,9 +275,15 @@ module.exports = {
 
   async autocomplete(interaction, deps = {}) {
     const query = interaction.options.getFocused().toString().trim();
-    const timeoutMs = Number.isFinite(deps.autocompleteTimeoutMs)
+    const requestedBudget = Number.isFinite(deps.autocompleteTimeoutMs)
       ? Math.max(1, Math.min(2500, deps.autocompleteTimeoutMs))
       : AUTOCOMPLETE_TIMEOUT_MS;
+    // Discord compte depuis la création de l'interaction, pas le début de
+    // notre recherche. Garder 1,4 s pour le transport REST de la réponse.
+    const ageMs = Number.isFinite(interaction.createdTimestamp)
+      ? Math.max(0, Date.now() - interaction.createdTimestamp) : 0;
+    const timeoutMs = Math.min(requestedBudget, Math.max(0, 1600 - ageMs));
+    if (timeoutMs < 150) return interaction.respond(autocompleteFallback(interaction));
     if (!query) {
       const getChart = deps.getWorldTopTracks || getWorldTopTracks;
       const items = await withinAutocompleteBudget(() => getChart({ timeoutMs: Math.max(250, timeoutMs - 200) }), timeoutMs)

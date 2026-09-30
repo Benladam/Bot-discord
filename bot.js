@@ -367,8 +367,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
       try { await cmd.autocomplete(interaction, deps); }
       catch (e) {
         const guildContext = `guildId=${interaction.guildId || 'DM'}`;
+        // Un jeton expiré ou déjà acquitté ne peut plus recevoir de secours.
+        // Retenter produit un second 10062 sans améliorer les suggestions.
+        if ([10062, 40060].includes(Number(e.code))) {
+          const age = Number.isFinite(interaction.createdTimestamp)
+            ? Math.max(0, Date.now() - interaction.createdTimestamp) : 'inconnu';
+          Logger.warn(`Autocomplétion /${interaction.commandName} expirée ou déjà traitée ${guildContext} âge=${age}ms code=${e.code}.`);
+          return;
+        }
         Logger.error(`Erreur autocomplétion /${interaction.commandName} ${guildContext}: ${sanitizeDiagnosticText(e.stack || e.message)}`);
-        if (!interaction.responded) {
+        const responseAge = Number.isFinite(interaction.createdTimestamp)
+          ? Math.max(0, Date.now() - interaction.createdTimestamp) : 0;
+        if (!interaction.responded && responseAge < 2500) {
           try {
             const fallback = cmd.autocompleteFallback?.(interaction) || [];
             await interaction.respond(Array.isArray(fallback) ? fallback : [fallback]);
