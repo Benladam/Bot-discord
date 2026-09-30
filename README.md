@@ -29,6 +29,7 @@ fonctionnent en **slash `/`** ou avec le **préfixe `!`**.
 - Modération : avertissements persistants, kick, ban, timeout et nettoyage de messages
 - Informations utiles : ping, profil utilisateur, informations du serveur et avatar
 - Sondages Oui/Non avec réactions
+- Discussion IA générale quand on mentionne le bot ou son nom (OpenAI, Claude, Gemini ou LLM compatible)
 - Présence configurable du bot : statut en ligne, activité, textes cycliques et intervalle
 - Crédits du créateur et licence MIT accessibles avec `/about`
 
@@ -81,6 +82,21 @@ cp .env.example .env
 |----------|-------------|-------------|
 | `DISCORD_TOKEN` | oui | Token du bot Discord |
 | `COMMAND_PREFIX` | non | Préfixe des commandes texte (défaut `!`) |
+| `AI_PROVIDER` | non | `disabled` (défaut), `openai`, `anthropic`, `gemini` ou `openai-compatible` pour activer la conversation |
+| `AI_MODEL` | non | Identifiant du modèle conversationnel choisi; exemples ci-dessous |
+| `OPENAI_API_KEY` | selon le fournisseur | Clé API OpenAI, gardée dans `.env` |
+| `ANTHROPIC_API_KEY` | selon le fournisseur | Clé API Claude, gardée dans `.env` |
+| `GEMINI_API_KEY` | selon le fournisseur | Clé API Gemini, gardée dans `.env` |
+| `AI_BASE_URL` | non | Adresse d’un serveur compatible OpenAI (défaut local `http://127.0.0.1:11434/v1`) |
+| `AI_API_KEY` | non | Clé facultative d’un serveur compatible OpenAI |
+| `AI_TRIGGER_NAMES` | non | Autres pseudonymes déclencheurs séparés par `|`; le nom Discord du bot est reconnu automatiquement |
+| `AI_PERSONALITY` | non | Préférence de ton facultative; les limites de sécurité intégrées restent actives |
+| `AI_RATE_LIMIT_PER_MINUTE` | non | Limite par personne (défaut `4`) |
+| `AI_GLOBAL_RATE_LIMIT_PER_MINUTE` | non | Limite totale par minute (défaut `30`) |
+| `AI_MAX_INPUT_CHARS` | non | Taille maximale du message envoyé au modèle (défaut `1600`) |
+| `AI_MAX_OUTPUT_TOKENS` | non | Limite de génération (défaut `450`) |
+| `AI_CONTEXT_MESSAGES` | non | Messages de contexte temporaire au maximum (défaut `8`) |
+| `AI_HTTP_TIMEOUT_MS` | non | Délai maximal d’une requête au fournisseur (défaut `25000`) |
 | `SPOTIFY_CLIENT_ID` | recherche Spotify, discographies et playlists publiques | ID d'application Spotify |
 | `SPOTIFY_CLIENT_SECRET` | recherche Spotify, discographies et playlists publiques | Secret d'application Spotify |
 | `SOUNDCLOUD_CLIENT_ID` | non | Active des recherches et replis API SoundCloud supplémentaires; yt-dlp permet déjà la recherche et la lecture sans cette clé |
@@ -128,6 +144,49 @@ utilise une copie privée normalisée (UTF-8 sans BOM, fins de ligne LF). Le bot
 vérifie le format Netscape et la présence de cookies YouTube non expirés avant
 de lancer l'extracteur. Cela ne garantit pas que Google accepte la session.
 Les recherches de catalogue publiques s'effectuent sans cookies de compte.
+
+### Conversation IA
+
+La conversation est désactivée par défaut. Choisissez un seul fournisseur dans
+`.env`, ajoutez sa clé API privée et redémarrez le bot. Les identifiants de
+modèles ci-dessous sont des exemples à remplacer si le fournisseur ne les
+propose pas sur votre compte.
+
+```env
+# OpenAI — modèle généraliste
+AI_PROVIDER=openai
+AI_MODEL=gpt-6-luna
+OPENAI_API_KEY=...
+
+# OU Claude
+# AI_PROVIDER=anthropic
+# AI_MODEL=claude-haiku-4-5
+# ANTHROPIC_API_KEY=...
+
+# OU Gemini
+# AI_PROVIDER=gemini
+# AI_MODEL=gemini-3.8-flash
+# GEMINI_API_KEY=...
+
+# OU un serveur compatible avec l'API OpenAI, par exemple Ollama en local
+# AI_PROVIDER=openai-compatible
+# AI_MODEL=nom-du-modele-local
+# AI_BASE_URL=http://127.0.0.1:11434/v1
+```
+
+Le bot répond à une mention Discord, à son nom/pseudonyme exact (sans tenir
+compte des majuscules), ou à un alias défini dans `AI_TRIGGER_NAMES`.
+L’historique est gardé uniquement en mémoire, séparé par personne et salon,
+limité à quelques échanges et effacé après quatre heures ou au redémarrage.
+Seuls le message déclencheur et ce contexte limité sont envoyés au fournisseur
+choisi; ses tarifs, règles et paramètres de conservation s’appliquent.
+
+Le modèle peut discuter et plaisanter, mais ne peut ni exécuter une commande ni
+agir sur Discord. Il ne doit pas fabriquer de vrai hameçonnage ou demander des
+secrets. Une parodie de phishing doit être étiquetée comme telle, clairement
+fictive, sans lien ni collecte d’identifiants. Les informations inventées sur
+le monde réel doivent aussi être signalées comme fiction. Cette intégration
+répond en texte et ne crée pas de fichier image.
 
 Pour vérifier directement l'hébergement, tape dans sa console :
 
@@ -275,10 +334,12 @@ Le site permet de voir et piloter la musique, la file et le réglage 24/7 de cha
    les permissions de bannissement, d’expulsion, de modération des membres,
    gestion des messages et ajout de réactions; placez le rôle du bot au-dessus
    des rôles visés.
-5. L'intent **Message Content** n'est utile que pour les commandes préfixées
-   (`!play`, `!pause`) et le relais `/call`. Les commandes slash fonctionnent
-   sans lui. **Server Members Intent** n'est pas requis par ce projet ; l'accès
-   aux états vocaux est un intent Gateway standard.
+5. L'intent privilégié **Message Content** est nécessaire aux commandes
+   préfixées (`!play`, `!pause`) et à la conversation IA par mention/nom.
+   Activez-le dans **Bot → Privileged Gateway Intents** du portail développeur
+   Discord. Les commandes slash seules fonctionnent sans lui. **Server Members
+   Intent** n'est pas requis par ce projet ; l'accès aux états vocaux est un
+   intent Gateway standard.
 
 Les commandes slash sont enregistrées globalement et deviennent disponibles
 dans chaque serveur où le bot est invité. À grande échelle, Discord traite

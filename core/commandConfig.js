@@ -9,9 +9,10 @@ function normalizeCommandPrefix(value) {
   return prefix;
 }
 
-function getGatewayIntents(GatewayIntentBits, prefix) {
+function getGatewayIntents(GatewayIntentBits, prefix, readMessageContent = false) {
   const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates];
-  if (prefix) intents.push(GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent);
+  if (prefix || readMessageContent) intents.push(GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent);
+  if (readMessageContent) intents.push(GatewayIntentBits.DirectMessages);
   return intents;
 }
 

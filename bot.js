@@ -10,6 +10,7 @@ const {
   Client,
   Collection,
   GatewayIntentBits,
+  Partials,
   Events,
   REST,
   Routes,
@@ -34,6 +35,7 @@ const { createWebPanel } = require('./features/web/server');
 const { PresenceManager } = require('./features/presence/manager');
 const { GuildNowPlayingManager } = require('./features/music/guildNowPlaying');
 const { sanitizeDiagnosticText } = require('./features/music/musicLinkMetadata');
+const { createAIChat } = require('./features/ai/chat');
 
 const { setupConsole } = require('./core/consoleCommands');
 const { listCommandFiles } = require('./core/commandFiles');
@@ -75,9 +77,12 @@ const Logger = {
   warn: (m) => console.warn(`⚠️  [${new Date().toLocaleTimeString()}] ${m}`),
 };
 
+const aiChat = createAIChat({ logger: Logger });
+
 // --- Client ---
 const client = new Client({
-  intents: getGatewayIntents(GatewayIntentBits, PREFIX),
+  intents: getGatewayIntents(GatewayIntentBits, PREFIX, aiChat.isRequested()),
+  partials: aiChat.isRequested() ? [Partials.Channel] : [],
 });
 
 const updater = createUpdater({
@@ -386,29 +391,33 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
   const parsed = parsePrefixedCommand(message.content, PREFIX);
-  if (!parsed) return;
-  const { name, args } = parsed;
-  const cmd = client.commands.get(name);
-  if (!cmd) return;
+  if (parsed) {
+    const { name, args } = parsed;
+    const cmd = client.commands.get(name);
+    if (!cmd) return;
 
-  if (cmd.ownerOnly && !isOwner(message.author.id)) {
-    return message.reply(name === 'link' ? botT(langFor(message.author.id, message.guild?.id)).linkOnlyOwner : 'Cette commande est réservée au propriétaire du bot.');
+    if (cmd.ownerOnly && !isOwner(message.author.id)) {
+      return message.reply(name === 'link' ? botT(langFor(message.author.id, message.guild?.id)).linkOnlyOwner : 'Cette commande est réservée au propriétaire du bot.');
+    }
+
+    if (isInCooldown(message.author.id, name)) {
+      return message.reply('⏱️ Trop rapide !');
+    }
+
+    try {
+      const fullCmd = `${PREFIX}${name} ${args.join(' ')}`.trim();
+      Logger.info(name === 'play'
+        ? `${message.author.tag} ❯ ${PREFIX}play [requête musicale — détails sécurisés ci-dessous]`
+        : `${message.author.tag} ❯ ${fullCmd}`);
+      await cmd.execute(message, args, deps);
+    } catch (e) {
+      Logger.error(`Erreur ${PREFIX}${name} guildId=${message.guildId || 'DM'}: ${e.message}`);
+      await message.reply({ embeds: [{ title: '❌ Erreur', description: e.message, color: 0xff0000 }] });
+    }
+    return;
   }
 
-  if (isInCooldown(message.author.id, name)) {
-    return message.reply('⏱️ Trop rapide !');
-  }
-
-  try {
-    const fullCmd = `${PREFIX}${name} ${args.join(' ')}`.trim();
-    Logger.info(name === 'play'
-      ? `${message.author.tag} ❯ ${PREFIX}play [requête musicale — détails sécurisés ci-dessous]`
-      : `${message.author.tag} ❯ ${fullCmd}`);
-    await cmd.execute(message, args, deps);
-  } catch (e) {
-    Logger.error(`Erreur ${PREFIX}${name} guildId=${message.guildId || 'DM'}: ${e.message}`);
-    await message.reply({ embeds: [{ title: '❌ Erreur', description: e.message, color: 0xff0000 }] });
-  }
+  await aiChat.handleMessage(message, client.user);
 });
 
 // Nettoie les connexions orphelines et confie l'inactivité au lecteur par serveur.
