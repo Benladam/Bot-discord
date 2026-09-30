@@ -18,7 +18,7 @@
 
 const { ChannelType, PermissionsBitField } = require('discord.js');
 const { getWebPanelPublicUrl } = require('../features/web/server');
-const { musicCheck } = require('../tools/diagnostics/musicCheck');
+const { musicCheck, soundCloudCheck } = require('../tools/diagnostics/musicCheck');
 
 // Pour lancer les commandes musique depuis le terminal, on simule un
 // « contexte » comme si la commande venait de Discord, en s'appuyant sur
@@ -212,6 +212,7 @@ const HELP = [
   ['whoami', 'Infos sur le bot connecté'],
   ['help', 'Afficher cette aide'],
   ['musiccheck [lien YouTube]', 'Diagnostiquer les cookies et l’extraction audio sans rejoindre un vocal'],
+  ['soundcloudcheck Artiste - Titre', 'Vérifier la recherche et le flux SoundCloud sans rejoindre un vocal'],
 ];
 
 /**
@@ -495,6 +496,8 @@ function setupConsole({ client, log, readStdin = true, langStore, isOwner, botT,
 
       case 'musiccheck':
         return musicCheck(rest, { log: say });
+      case 'soundcloudcheck':
+        return soundCloudCheck(rest, { log: say });
 
       default:
         err(`Commande inconnue : /${cmd} — tapez /help.`);

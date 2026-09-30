@@ -1,6 +1,6 @@
 const path = require('node:path');
 const { readCookieFile } = require('../../features/music/youtubeCookies');
-const { getYouTubeCookiesPaths, streamYtDlp } = require('../../features/music/audioSender');
+const { getYouTubeCookiesPaths, streamYtDlp, soundCloudSearchStream } = require('../../features/music/audioSender');
 
 function diagnosticUrl(input) {
   const url = new URL(input);
@@ -46,4 +46,25 @@ if (require.main === module) {
   require('dotenv').config({ quiet: true });
   musicCheck(process.argv[2] || '').catch(() => { console.error('[musiccheck] Lien de diagnostic invalide.'); process.exitCode = 1; });
 }
-module.exports = { musicCheck, diagnosticUrl };
+async function soundCloudCheck(input, { log = console.info, probe = soundCloudSearchStream } = {}) {
+  const query = String(input || '').trim();
+  if (query.length < 3 || query.length > 200 || /https?:\/\/|[\r\n\x00-\x1f]/i.test(query)
+      || !/\S\s+[-–—]\s+\S/u.test(query)) {
+    throw new Error('Utilise soundcloudcheck Artiste - Titre (sans lien).');
+  }
+  let stream;
+  try {
+    stream = await probe(query, { expectedTitle: query, guildId: 'diagnostic', timeoutMs: 12_000 });
+    log('[soundcloudcheck] Flux correspondant ouvert. Aucun vocal rejoint; contenu audible non vérifié.');
+    return { available: true };
+  } catch (error) {
+    const code = /^[A-Z0-9_]+$/.test(error.code || '') ? error.code : 'EXTRACTION_FAILED';
+    log(`[soundcloudcheck] Aucun flux correspondant disponible (${code}). Aucun autre morceau lancé.`);
+    return { available: false, code };
+  } finally {
+    try { stream?.cleanup?.(); } catch (_) {}
+    stream?.destroy?.();
+  }
+}
+
+module.exports = { musicCheck, diagnosticUrl, soundCloudCheck };

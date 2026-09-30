@@ -1,11 +1,44 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
-const { musicCheck, diagnosticUrl } = require('./musicCheck');
+const { musicCheck, diagnosticUrl, soundCloudCheck } = require('./musicCheck');
 
 test('musiccheck refuse les URL arbitraires et nettoie le lien vidéo sans paramètres privés', () => {
   assert.equal(diagnosticUrl('https://youtu.be/v2o3in-Aud0?si=secret'), 'https://www.youtube.com/watch?v=v2o3in-Aud0');
   for (const url of ['http://youtube.com/watch?v=v2o3in-Aud0', 'https://example.com/secret', 'https://youtube.com@127.0.0.1/watch?v=v2o3in-Aud0', 'https://youtube.com/playlist?list=private']) assert.throws(() => diagnosticUrl(url));
+});
+
+test('soundcloudcheck vérifie un flux sans rejoindre Discord et le ferme après le diagnostic', async () => {
+  const logs = [];
+  const stream = new PassThrough();
+  let cleanups = 0;
+  stream.cleanup = () => cleanups++;
+  const result = await soundCloudCheck('Koba LaD - RR 9.1', {
+    log: text => logs.push(text),
+    probe: async (query, options) => {
+      assert.equal(query, 'Koba LaD - RR 9.1');
+      assert.equal(options.guildId, 'diagnostic');
+      assert.equal(options.expectedTitle, query);
+      return stream;
+    },
+  });
+  assert.deepEqual(result, { available: true });
+  assert.equal(stream.destroyed, true);
+  assert.equal(cleanups, 1);
+  assert.match(logs.join(' '), /contenu audible non vérifié/);
+});
+
+test('soundcloudcheck refuse liens et entrées invalides et ne révèle pas une erreur fournisseur', async () => {
+  for (const query of ['', 'niska', 'https://soundcloud.com/artist/title', 'Niska - Réseaux\nsecret']) {
+    await assert.rejects(soundCloudCheck(query), /Artiste - Titre/);
+  }
+  const logs = [];
+  const result = await soundCloudCheck('Niska - Réseaux', {
+    log: text => logs.push(text),
+    probe: async () => { throw new Error('Authorization: secret cookie=secret'); },
+  });
+  assert.deepEqual(result, { available: false, code: 'EXTRACTION_FAILED' });
+  assert.ok(!logs.join(' ').includes('secret'));
 });
 
 test('musiccheck ne publie ni chemin privé ni erreur brute et ferme son flux sans lecture Discord', async () => {

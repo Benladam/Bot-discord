@@ -92,11 +92,25 @@ test('un titre Deezer bascule vers SoundCloud après une erreur browseId ou une 
       },
       searchSoundCloud: async (query) => {
         assert.equal(query, 'Artiste - Titre');
-        return [{ permalink: 'https://example.com/invalid' }, { permalink: 'https://soundcloud.com/artist/track' }];
+        return [{ permalink: 'https://example.com/invalid' }, {
+          title: 'Titre', metadata_artist: 'Artiste', permalink: 'https://soundcloud.com/artist/track',
+        }];
       },
       onSearchError() {},
     });
     assert.equal(songs[0].url, 'https://soundcloud.com/artist/track');
     assert.equal(songs[0].fallbackQuery, 'Artiste - Titre');
   }
+});
+
+test('le repli Deezer ne prend jamais le premier SoundCloud sans vérifier son identité', async () => {
+  const songs = await resolveDeezerTracks([{ title: 'RR 9.1', artist: { name: 'Koba LaD' }, duration: 200 }], {
+    search: async () => [],
+    searchSoundCloud: async () => [
+      { title: 'RR 9.1 Remix', metadata_artist: 'Koba LaD', duration: 200, url: 'https://soundcloud.com/koba/remix' },
+      { title: 'RR91 feat. Niska', metadata_artist: 'Koba La D', duration: 200, url: 'https://soundcloud.com/koba/original' },
+    ],
+  });
+  assert.equal(songs[0].url, 'https://soundcloud.com/koba/original');
+  assert.equal(songs[0].duration, 200);
 });

@@ -141,6 +141,17 @@ YouTube peut toutefois refuser un cookie expiré ou ne pas autoriser l’accès 
 une vidéo; dans ce cas, le code ne contourne pas la vérification et tente le
 repli SoundCloud.
 
+Le repli SoundCloud examine jusqu'à 25 résultats par formulation (au plus trois
+formulations, avec un budget de recherche total de 12 secondes). Il conserve
+les crédits artiste, reconnaît les variantes d'espacement et de ponctuation,
+puis classe les correspondances par identité artiste et proximité de durée.
+Le repli API facultatif est essayé même si yt-dlp a trouvé des résultats mais
+aucun morceau correct. Les remixes, reprises, mashups, extraits et titres
+différents sont refusés s'ils ne correspondent pas à la version demandée.
+Au plus trois flux correspondants sont ouverts, sans réessayer la même URL.
+Cela améliore la recherche sans garantir qu'un morceau existe sur SoundCloud
+ou qu'un fournisseur autorise sa lecture; aucun autre titre n'est substitué.
+
 Le fichier source de cookies n'est jamais modifié par yt-dlp : chaque essai
 utilise une copie privée normalisée (UTF-8 sans BOM, fins de ligne LF). Le bot
 vérifie le format Netscape et la présence de cookies YouTube non expirés avant
@@ -242,6 +253,7 @@ Pour vérifier directement l'hébergement, tape dans sa console :
 ```text
 musiccheck
 musiccheck https://www.youtube.com/watch?v=v2o3in-Aud0
+soundcloudcheck Koba LaD - RR 9.1
 ```
 
 Ou depuis un terminal local au projet :

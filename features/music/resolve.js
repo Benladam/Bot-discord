@@ -8,6 +8,8 @@ const { isSpotifyUrl, resolveSpotifyLink } = require('./providers/spotify');
 const { configureSoundCloud } = require('./providers/soundcloud');
 const { searchYouTubeCandidates, searchSoundCloudCandidates, resolveSoundCloudCandidates } = require('./audioSender');
 const { musicArtwork } = require('./artwork');
+const { candidateArtist } = require('./trackMatching');
+const { soundCloudMatchScore } = require('./soundCloudMatching');
 
 function youtubeVideoId(value) {
   try {
@@ -26,7 +28,7 @@ function youtubeVideoId(value) {
 
 function normalizeSoundCloudTrack(track) {
   const title = track.name || track.title || 'Musique inconnue';
-  const artist = track.user?.username || track.publisher?.name || track.channel?.name || track.uploader || '';
+  const artist = candidateArtist(track) || track.publisher?.name || '';
   return {
     title: artist && !title.toLowerCase().includes(artist.toLowerCase()) ? `${artist} - ${title}` : title,
     url: track.permalink || track.webpage_url || track.url,
@@ -188,8 +190,12 @@ async function resolveDeezerTracks(tracks, {
       }
       if (!media) {
         try {
-          const alternatives = await searchSoundCloud(query);
-          for (const candidate of Array.isArray(alternatives) ? alternatives : []) {
+          const alternatives = await searchSoundCloud(query, { limit: 25, timeoutMs: 8_000 });
+          const ranked = (Array.isArray(alternatives) ? alternatives : []).map(candidate => ({
+            candidate,
+            score: soundCloudMatchScore(candidate, { query, expectedTitle: title, expectedDuration: track.durationInSec || track.duration }),
+          })).filter(item => item.score > 0).sort((a, b) => b.score - a.score);
+          for (const { candidate } of ranked) {
             const url = candidate?.permalink || candidate?.url;
             try {
               const parsed = new URL(url);
@@ -207,7 +213,7 @@ async function resolveDeezerTracks(tracks, {
       return {
         title: `${title}${artist ? ` - ${artist}` : ''}`,
         url: media.url,
-        duration: track.durationInSec || media.durationInSec || 0,
+        duration: track.durationInSec || track.duration || media.durationInSec || 0,
         thumbnail: musicArtwork(track) || musicArtwork(media),
         source: 'deezer',
         fallbackQuery: query,

@@ -31,7 +31,7 @@ function candidateTitle(track) {
 }
 
 function candidateArtist(track) {
-  return String(track?.artist?.name || (typeof track?.artist === 'string' ? track.artist : '') || track?.publisher_metadata?.artist || track?.publisher?.artist || track?.channel?.name
+  return String(track?.metadata_artist || track?.artist?.name || (typeof track?.artist === 'string' ? track.artist : '') || track?.publisher_metadata?.artist || track?.publisher?.artist || track?.channel?.name
     || track?.user?.username || track?.user?.name || track?.uploader || '').trim();
 }
 

@@ -17,6 +17,7 @@ const {
   prepareInput,
   searchYouTubeCandidates,
   searchYouTubePlaylists,
+  searchSoundCloudCandidates,
   soundCloudSearchStream,
   streamUrl,
 } = require('./audioSender');
@@ -80,6 +81,39 @@ test('parse les résultats JSON yt-dlp en URLs YouTube jouables', () => {
   assert.equal(results[0].durationInSec, 164);
   assert.equal(results[0].channel.name, 'Artiste');
   assert.equal(results[1].url, 'https://www.youtube.com/watch?v=xyz9876');
+});
+
+test('le parser SoundCloud conserve les crédits artiste plutôt que seulement le diffuseur', () => {
+  const [track] = parseYtDlpSearch(JSON.stringify({
+    title: 'RR 9.1', duration: 200, uploader: 'Label', artist: 'Koba LaD',
+    metadata_artist: 'Koba La D', publisher_metadata: { artist: 'Koba LaD, Niska' },
+    webpage_url: 'https://soundcloud.com/label/rr91',
+  }), 'soundcloud');
+  assert.equal(track.artist, 'Koba LaD');
+  assert.equal(track.metadata_artist, 'Koba La D');
+  assert.deepEqual(track.publisher_metadata, { artist: 'Koba LaD, Niska' });
+  assert.equal(track.channel.name, 'Label');
+});
+
+test('la recherche SoundCloud transmet réellement une limite de 25 à yt-dlp', async () => {
+  let captured;
+  const results = await searchSoundCloudCandidates('Koba LaD RR91', {
+    limit: 25, candidates: [['fake-yt-dlp', []]],
+    spawnImpl: (_command, args) => {
+      captured = args;
+      const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => true;
+      setImmediate(() => {
+        child.stdout.end(JSON.stringify({ entries: Array.from({ length: 25 }, (_, i) => ({
+          title: `Piste ${i}`, webpage_url: `https://soundcloud.com/koba/track-${i}`, artist: 'Koba LaD',
+        })) }));
+        setImmediate(() => child.emit('close', 0));
+      });
+      return child;
+    },
+  });
+  assert.equal(results.length, 25);
+  assert.equal(captured.at(-1), 'scsearch25:Koba LaD RR91');
+  assert.ok(!captured.includes('--cookies'));
 });
 
 test('recherche playlists via yt-dlp sans parser play-dl ni envoyer de cookies de compte', async () => {

@@ -10,6 +10,7 @@ const { configureSoundCloud } = require('./providers/soundcloud');
 const { matchesRequestedTrack, candidateTitle, candidateArtist, fallbackSearchQuery } = require('./trackMatching');
 const { PcmVolume } = require('./pcmVolume');
 const { readCookieFile } = require('./youtubeCookies');
+const { soundCloudMatchScore, soundCloudSearchQueries } = require('./soundCloudMatching');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
@@ -263,23 +264,14 @@ async function soundCloudSearchStream(query, {
   searchFallback = (...args) => play.search(...args),
   openTrack = soundCloudStream,
   isConfigured = configureSoundCloud,
+  timeoutMs = 12_000,
 } = {}) {
-  const normalized = fallbackSearchQuery(query, expectedTitle);
-  if (normalized.length < 2) throw new Error('Recherche SoundCloud trop courte.');
-  let tracks = [];
+  const queries = soundCloudSearchQueries(query, expectedTitle);
+  if (!queries.length) throw new Error('Recherche SoundCloud trop courte.');
+  const deadline = Date.now() + Math.max(100, Math.min(30_000, Number(timeoutMs) || 12_000));
+  const seen = new Set();
+  const opened = new Set();
   let lastError = null;
-  try {
-    tracks = await searchCandidates(normalized, { limit: 10 });
-  } catch (error) {
-    lastError = error;
-  }
-  if (!tracks.length && isConfigured()) {
-    try {
-      tracks = await searchFallback(normalized, { limit: 10, source: { soundcloud: 'tracks' } });
-    } catch (error) {
-      lastError = error;
-    }
-  }
   const expected = Number(expectedDuration);
   const minimumDuration = Number.isFinite(expected) && expected >= 45
     ? expected * MIN_FALLBACK_DURATION_RATIO
@@ -287,26 +279,65 @@ async function soundCloudSearchStream(query, {
   let rejectedShortTracks = 0;
   let rejectedDifferentTracks = 0;
   let attemptedFullTracks = 0;
-  for (const track of tracks) {
-    const url = track.permalink || track.webpage_url || track.url;
-    if (!url || !isSoundCloudUrl(url)) continue;
-    const duration = Number(track.durationInSec ?? track.duration);
-    if (minimumDuration && Number.isFinite(duration) && duration > 0 && duration < minimumDuration) {
-      rejectedShortTracks++;
-      continue;
+  const select = async (tracks) => {
+    const ranked = [];
+    for (const track of (Array.isArray(tracks) ? tracks : []).slice(0, 25)) {
+      if (!track) continue;
+      const url = track.permalink || track.webpage_url || track.url;
+      if (!url || !isSoundCloudUrl(url) || opened.has(url)) continue;
+      const duration = Number(track.durationInSec ?? track.duration);
+      const score = soundCloudMatchScore(track, { query, expectedTitle, expectedDuration });
+      // Une autre source peut fournir des métadonnées plus complètes pour la
+      // même URL : on déduplique les logs, pas les nouvelles validations.
+      if (!score) {
+        if (!seen.has(url)) {
+          if (minimumDuration && duration > 0 && duration < minimumDuration) rejectedShortTracks++;
+          else rejectedDifferentTracks++;
+          console.info(`[audio] résultat SoundCloud refusé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || queries[0]))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))}`);
+        }
+        seen.add(url);
+        continue;
+      }
+      ranked.push({ track, url, duration, score });
     }
-    if (!matchesRequestedTrack(track, { query, expectedTitle, expectedDuration, requireArtistIdentity: true })) {
-      rejectedDifferentTracks++;
-      console.info(`[audio] résultat SoundCloud refusé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))}`);
-      continue;
+    ranked.sort((a, b) => b.score - a.score);
+    for (const { track, url, duration, score } of ranked) {
+      if (opened.has(url) || attemptedFullTracks >= 3) continue;
+      opened.add(url);
+      attemptedFullTracks++;
+      try {
+        const stream = await openTrack(url);
+        console.info(`[audio] repli SoundCloud validé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || queries[0]))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))} durée=${duration || 0}s score=${score.toFixed(1)}`);
+        return stream;
+      } catch (error) { lastError = error; }
     }
-    attemptedFullTracks++;
+    return null;
+  };
+  const searchWithinDeadline = async (search) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return [];
+    let timer;
     try {
-      const stream = await openTrack(url);
-      console.info(`[audio] repli SoundCloud validé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))} durée=${duration || 0}s`);
-      return stream;
-    } catch (error) {
-      lastError = error;
+      return await Promise.race([
+        Promise.resolve().then(() => search(remaining)),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Le délai de recherche SoundCloud a été dépassé.')), remaining); }),
+      ]);
+    } catch (error) { lastError = error; return []; }
+    finally { clearTimeout(timer); }
+  };
+  let apiTried = false;
+  for (const term of queries) {
+    if (Date.now() >= deadline || attemptedFullTracks >= 3) break;
+    console.info(`[audio] recherche SoundCloud serveur=${guildId || '?'} terme=${JSON.stringify(sanitizeYtDlpDiagnostic(term))}`);
+    const tracks = await searchWithinDeadline(remaining => searchCandidates(term, { limit: 25, timeoutMs: remaining }));
+    const stream = await select(tracks);
+    if (stream) return stream;
+    // Des résultats existent mais sont faux : l'API ne doit pas être ignorée.
+    if (!apiTried && Date.now() < deadline && attemptedFullTracks < 3 && isConfigured()) {
+      apiTried = true;
+      const alternatives = await searchWithinDeadline(() => searchFallback(term, { limit: 25, source: { soundcloud: 'tracks' } }));
+      const fallback = await select(alternatives);
+      if (fallback) return fallback;
     }
   }
   if (rejectedShortTracks && !rejectedDifferentTracks && attemptedFullTracks === 0) {
@@ -460,6 +491,14 @@ function normalizeYtDlpSearchItem(item, provider = 'youtube') {
     duration: Number(item.duration) || 0,
     thumbnail: item.thumbnail || null,
     channel: item.channel ? { name: item.channel } : item.uploader ? { name: item.uploader } : undefined,
+    ...(provider === 'soundcloud' ? {
+      artist: item.artist,
+      metadata_artist: item.metadata_artist,
+      publisher_metadata: item.publisher_metadata,
+      publisher: item.publisher,
+      user: item.user,
+      uploader: item.uploader,
+    } : {}),
   };
 }
 
@@ -482,6 +521,7 @@ function parseYtDlpSearch(output, provider = 'youtube') {
 
 function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}) {
   return new Promise((resolve) => {
+    const outputLimit = options.provider === 'soundcloud' ? 512 * 1024 : YTDLP_OUTPUT_LIMIT;
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -524,10 +564,11 @@ function runYtDlpSearch(command, preArgs, query, spawnImpl = spawn, options = {}
       finish({ items: [], error: 'Le délai de recherche du catalogue a été dépassé.' });
     }, options.timeoutMs || YTDLP_TIMEOUT_MS);
     child.stdout.on('data', (chunk) => {
-      if (stdout.length < YTDLP_OUTPUT_LIMIT) stdout += chunk.toString().slice(0, YTDLP_OUTPUT_LIMIT - stdout.length);
+      const data = chunk.toString();
+      if (stdout.length + data.length <= outputLimit) stdout += data;
       else {
         try { child.kill(); } catch (_) { /* processus déjà terminé */ }
-        finish({ items: [], error: 'La réponse de recherche YouTube est trop volumineuse.' });
+        finish({ items: [], error: 'La réponse de recherche musicale est trop volumineuse.' });
       }
     });
     child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-4_000); });
@@ -573,7 +614,7 @@ async function searchYtDlpCandidates(query, {
   const normalized = String(query || '').trim().slice(0, inputMode === 'direct' ? 2_048 : 200);
   const deadline = Date.now() + Math.max(100, Math.min(YTDLP_TIMEOUT_MS, Number(timeoutMs) || YTDLP_TIMEOUT_MS));
   if (inputMode === 'search' && normalized.length < 2) throw new Error(`Recherche ${provider === 'soundcloud' ? 'SoundCloud' : 'YouTube'} trop courte.`);
-  const safeLimit = Math.max(1, Math.min(inputMode === 'direct' ? 100 : 10, Number(limit) || 5));
+  const safeLimit = Math.max(1, Math.min(inputMode === 'direct' ? 100 : provider === 'soundcloud' ? 25 : 10, Number(limit) || 5));
   const configuredCookiesPaths = provider !== 'youtube' ? [] : cookiesPaths === undefined
     ? getYouTubeCookiesPaths({ env, projectRoot })
     : (Array.isArray(cookiesPaths) ? cookiesPaths : [cookiesPaths])

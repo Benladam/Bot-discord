@@ -3,6 +3,88 @@ const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
 const { prepareInput, soundCloudStream, buildYtDlpArgs, soundCloudSearchStream, youtubeSearchStream } = require('./audioSender');
 
+test('SoundCloud examine les résultats au-delà des dix premiers et classe avant de jouer', async () => {
+  const opened = [];
+  const stream = await soundCloudSearchStream('Koba LaD - RR 9.1', {
+    expectedTitle: 'RR 9.1 - Koba LaD', expectedDuration: 200, isConfigured: () => false,
+    searchCandidates: async (_query, options) => {
+      assert.equal(options.limit, 25);
+      return [
+        { title: 'RR 9.1', user: { username: 'Koba LaD' }, duration: 219, url: 'https://soundcloud.com/koba/less-close' },
+        ...Array.from({ length: 22 }, (_, i) => ({ title: 'RR 9.1 Remix', user: { username: 'Koba LaD' }, url: `https://soundcloud.com/koba/remix-${i}` })),
+        { title: 'RR91 (feat. Niska)', metadata_artist: 'Koba La D', duration: 200, url: 'https://soundcloud.com/koba/best' },
+      ];
+    },
+    openTrack: async url => { opened.push(url); return new PassThrough(); },
+  });
+  assert.deepEqual(opened, ['https://soundcloud.com/koba/best']);
+  stream.destroy();
+});
+
+test('le repli API SoundCloud est essayé lorsque yt-dlp trouve seulement de mauvaises réponses', async () => {
+  let apiCalls = 0;
+  const stream = await soundCloudSearchStream('Koba LaD - RR 9.1', {
+    expectedDuration: 200, isConfigured: () => true,
+    searchCandidates: async () => [{ title: 'RR 9.1 Remix', metadata_artist: 'Koba LaD', url: 'https://soundcloud.com/koba/remix' }],
+    searchFallback: async () => {
+      apiCalls++;
+      return [{ title: 'RR91', publisher_metadata: { artist: 'Koba La D' }, duration: 200, url: 'https://soundcloud.com/koba/correct' }];
+    },
+    openTrack: async url => { assert.equal(url, 'https://soundcloud.com/koba/correct'); return new PassThrough(); },
+  });
+  assert.equal(apiCalls, 1);
+  stream.destroy();
+});
+
+test('une deuxième formulation trouve le bon titre après une première recherche trop bruitée', async () => {
+  const terms = [];
+  const stream = await soundCloudSearchStream('Koba LaD - RR 9.1', {
+    expectedTitle: 'RR 9.1 - Koba LaD', isConfigured: () => false,
+    searchCandidates: async term => {
+      terms.push(term);
+      return term === 'koba lad rr 91'
+        ? [{ title: 'RR91', metadata_artist: 'Koba LaD', url: 'https://soundcloud.com/koba/rr91' }]
+        : [];
+    },
+    openTrack: async () => new PassThrough(),
+  });
+  assert.deepEqual(terms, ['rr 9 1 koba lad', 'koba lad rr 91']);
+  stream.destroy();
+});
+
+test('un flux SoundCloud indisponible est dédupliqué et une autre correspondance est essayée', async () => {
+  const opened = [];
+  const track = { title: 'Réseaux', metadata_artist: 'Niska', duration: 196 };
+  const stream = await soundCloudSearchStream('Niska - Réseaux', {
+    expectedDuration: 196, isConfigured: () => true,
+    searchCandidates: async () => [{ ...track, url: 'https://soundcloud.com/niska/blocked' }],
+    searchFallback: async () => [
+      { ...track, url: 'https://soundcloud.com/niska/blocked' },
+      { ...track, url: 'https://soundcloud.com/niska/correct' },
+    ],
+    openTrack: async url => {
+      opened.push(url);
+      if (url.endsWith('/blocked')) throw new Error('HTTP 403');
+      return new PassThrough();
+    },
+  });
+  assert.deepEqual(opened, ['https://soundcloud.com/niska/blocked', 'https://soundcloud.com/niska/correct']);
+  stream.destroy();
+});
+
+test('le budget SoundCloud expire sans lancer les résultats arrivés trop tard', async () => {
+  let release;
+  let opened = false;
+  await assert.rejects(soundCloudSearchStream('Niska - Réseaux', {
+    timeoutMs: 100, isConfigured: () => false,
+    searchCandidates: async () => new Promise(resolve => { release = resolve; }),
+    openTrack: async () => { opened = true; return new PassThrough(); },
+  }), /délai de recherche SoundCloud/);
+  release([{ title: 'Réseaux', metadata_artist: 'Niska', url: 'https://soundcloud.com/niska/late' }]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(opened, false);
+});
+
 test('Djadja & Dinaz : ne remplace pas le lien par un upload anonyme seulement parce que son titre correspond', async () => {
   let opened = false;
   await assert.rejects(soundCloudSearchStream("Djadja & Dinaz - J'fais mes affaires", {
@@ -19,7 +101,7 @@ test('Niska Réseaux en file : cherche le titre nettoyé et accepte le bon résu
     expectedTitle: 'Niska - Réseaux (Clip Officiel)', expectedDuration: 196,
     searchCandidates: async (query, options) => {
       assert.equal(query, 'niska reseaux');
-      assert.equal(options.limit, 10);
+      assert.equal(options.limit, 25);
       return [
         ...Array.from({ length: 5 }, (_, index) => ({ title: 'Niska - Autre chanson', url: `https://soundcloud.com/niska/other-${index}` })),
         { title: 'Niska - Réseaux', user: { username: 'Niska' }, durationInSec: 196, url: 'https://soundcloud.com/niska/reseaux' },
