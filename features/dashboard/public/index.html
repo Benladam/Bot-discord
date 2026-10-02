@@ -72,7 +72,7 @@
       <label>Clé de diagnostic<input id="connection-token" type="password" placeholder="DASHBOARD_API_TOKEN · 32 caractères minimum" autocomplete="new-password" spellcheck="false" maxlength="512"></label>
       <label>Clé administrateur (facultative)<input id="connection-control-token" type="password" placeholder="DASHBOARD_CONTROL_TOKEN · clé distincte pour redémarrer" autocomplete="new-password" spellcheck="false" maxlength="512"></label>
       <small class="field-help">Réservée aux administrateurs : à configurer aussi sur le bot, lancé avec npm start.</small>
-      <small id="token-help" class="field-help">Utilisez DASHBOARD_API_TOKEN du bot, jamais la clé KineticPanel ni le token Discord.</small>
+      <small id="token-help" class="field-help">Utilisez DASHBOARD_API_TOKEN du bot, jamais la clé KineticPanel ptlc_… ni le token Discord. L’adresse doit être l’URL HTTPS du service HTTP du bot.</small>
       <p id="form-error" class="form-error" role="alert" hidden></p>
       <div class="form-actions"><button id="lock-connection" type="button" class="button" hidden><span data-icon="lock"></span> Verrouiller</button><button id="save-connection" class="button primary" type="submit"><span data-icon="lock"></span> Enregistrer et verrouiller</button></div>
     </form>

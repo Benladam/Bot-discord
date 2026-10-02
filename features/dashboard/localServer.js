@@ -67,15 +67,30 @@ async function readBody(request) {
 }
 
 async function remoteRequest(connection, resource, fetchImpl = fetch, options = {}) {
+  const credential = options.control ? connection.controlToken : connection.token;
+  let hostname = '';
+  try { hostname = new URL(connection.url).hostname.toLowerCase(); } catch (_) { /* normalizeRemoteUrl valide déjà l’adresse */ }
+  if (/^ptlc_/i.test(String(credential || '')) || hostname === 'kineticpanel.net') {
+    throw Object.assign(new Error('Clé ou adresse KineticPanel détectée. Ce dashboard attend l’API du bot sur /api/dashboard/ avec DASHBOARD_API_TOKEN, pas la clé ptlc_ de KineticPanel. Utilise l’URL HTTPS du service HTTP du bot, sans /api/dashboard.'), { statusCode: 400 });
+  }
   let response;
   try {
     response = await fetchImpl(`${connection.url}/api/dashboard/${resource}`, {
       method: options.method || 'GET',
-      headers: { authorization: `Bearer ${options.control ? connection.controlToken : connection.token}`, accept: 'application/json' },
+      headers: { authorization: `Bearer ${credential}`, accept: 'application/json' },
       redirect: 'error', signal: AbortSignal.timeout(10000),
     });
-  } catch (_) {
-    throw Object.assign(new Error('API inaccessible. Vérifie l’adresse, le réseau et le certificat HTTPS du bot.'), { statusCode: 502 });
+  } catch (error) {
+    const code = error.cause?.code || error.code;
+    let message = 'API inaccessible. Vérifie l’adresse, le réseau et le certificat HTTPS du bot.';
+    if (code === 'ECONNREFUSED' && ['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
+      message = 'Aucun bot ne répond sur ce port local. Lance le bot avec npm start ; pour son API locale, configure DASHBOARD_LOOPBACK_PORT=8081 sur le bot et l’adresse http://127.0.0.1:8081 ici.';
+    } else if (['ENOTFOUND', 'EAI_AGAIN'].includes(code)) {
+      message = 'Adresse du bot introuvable (DNS). Vérifie son domaine ; pour un bot lancé sur ce PC, utilise son adresse locale.';
+    } else if (['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'ERR_TLS_CERT_ALTNAME_INVALID', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'CERT_HAS_EXPIRED'].includes(code)) {
+      message = 'Certificat HTTPS du bot refusé. Vérifie son certificat et son domaine ; sur ce PC, utilise l’API locale DASHBOARD_LOOPBACK_PORT.';
+    }
+    throw Object.assign(new Error(message), { statusCode: 502 });
   }
   if (!response.ok) {
     const messages = { 401: 'Clé de diagnostic refusée par le bot.', 403: 'Accès refusé par le bot.',

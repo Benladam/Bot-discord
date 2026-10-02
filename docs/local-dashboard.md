@@ -17,6 +17,19 @@ Le port peut être modifié avec `DASHBOARD_LOCAL_PORT`.
 
 ## Installer l’API sur l’hôte du bot
 
+### Bot lancé sur le même PC
+
+Dans le `.env` privé du bot, configurez `DASHBOARD_API_TOKEN` et
+`DASHBOARD_LOOPBACK_PORT=8081`, puis lancez le bot avec `npm start`.
+Dans la connexion du dashboard, utilisez `http://127.0.0.1:8081` et la même clé.
+Cette API écoute uniquement sur le PC et sert les routes de diagnostic, même si
+une extension utilise un certificat privé sur le port public du bot.
+Le dashboard et le bot sont deux processus : ouvrir le dashboard ne démarre pas le bot.
+Pour plusieurs bots locaux, choisissez un port différent pour chacun.
+Un bot hébergé ailleurs nécessite son adresse HTTPS distante ; localhost désigne le PC.
+
+### Bot distant
+
 1. Installez cette version du bot sur son hôte via le système de mise à jour existant
    ou manuellement, puis redémarrez-le avec son superviseur habituel.
 2. Générez une clé de diagnostic distincte du token Discord :
@@ -43,6 +56,38 @@ HTTP est accepté seulement pour une API sur localhost pendant le développement
 
 `WEB_ADMIN_TOKEN` n’est pas nécessaire pour cette API de diagnostic. Le panneau musical
 public conserve son authentification et ses commandes propres.
+
+### Cas KineticPanel
+
+La clé créée dans **KineticPanel → Account → API credentials** commence par `ptlc_` et
+sert à l’API de gestion du compte (`https://kineticpanel.net/api/client`). Elle permet de
+gérer le serveur Kinetic, mais elle ne donne pas accès aux journaux Discord, aux guildes
+ou aux playlists du bot. Ne la mets pas dans le champ **Clé de diagnostic** du dashboard.
+
+Pour relier un bot hébergé sur Kinetic :
+
+1. Dans **Network & Ports**, garde ou ouvre une allocation publique pour le service HTTP.
+2. Dans le `.env` privé du bot, configure `SERVER_PORT` avec cette allocation et génère
+   `DASHBOARD_API_TOKEN` avec `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+3. Redémarre le bot et vérifie que son service écoute sur cette allocation.
+4. Utilise un reverse proxy Kinetic avec SSL activé et un domaine qui résout vers ce
+   proxy. Le dashboard accepte uniquement cette URL publique en HTTPS ; l’adresse IP
+   brute et un proxy sans certificat ne conviennent pas pour un accès distant.
+5. Dans le dashboard, saisis l’URL HTTPS du reverse proxy (sans `/api/dashboard`) et la
+   valeur `DASHBOARD_API_TOKEN` du bot. La clé `DASHBOARD_CONTROL_TOKEN`, si utilisée,
+   est une seconde clé générée localement pour le redémarrage.
+
+Tests depuis le PC :
+
+```sh
+curl -i https://bot.exemple.fr/healthz
+curl -i -H "Authorization: Bearer <DASHBOARD_API_TOKEN>" https://bot.exemple.fr/api/dashboard/status
+```
+
+Le premier appel doit répondre `200` avec `status: ok`, puis le second `200` avec
+`protocolVersion: 1`. Un `401` indique une clé de bot différente, un `404` indique une
+route/proxy ou une version de bot incorrecte, et une absence de réponse indique le DNS,
+le port ou le reverse proxy.
 
 ## Verrouiller et déverrouiller l’API
 

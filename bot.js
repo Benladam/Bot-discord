@@ -29,6 +29,7 @@ try {
 const { MusicPlayer } = require('./features/music/musicPlayer');
 const guildDatabase = require('./core/database');
 const { createTelemetry } = require('./features/dashboard/telemetry');
+const { createLocalBotApi } = require('./features/dashboard/localBotApi');
 const diagnostics = createTelemetry({ database: guildDatabase });
 diagnostics.installConsole();
 const { createUpdater } = require('./core/updater');
@@ -155,17 +156,18 @@ function isOwner(userId) { return !!ownerId && userId === ownerId; }
 function langFor(userId, guildId) { return langStore.resolve(userId, guildId); }
 
 const deps = { getPlayer, prefix: PREFIX, isOwner, langFor, langStore, botT, updater, database: guildDatabase, presence, aiChat, logger: Logger, commands: client.commands };
+async function restartBotFromDashboard() {
+  for (const player of client.musicPlayers.values()) player.destroy();
+  await client.destroy();
+  await updater.restartProcess();
+}
 const webPanel = createWebPanel({
   client,
   getPlayer,
   database: guildDatabase,
   logger: Logger,
   telemetry: diagnostics,
-  restartBot: async () => {
-    for (const player of client.musicPlayers.values()) player.destroy();
-    await client.destroy();
-    await updater.restartProcess();
-  },
+  restartBot: restartBotFromDashboard,
 });
 function loadPrivateExtension() {
   const entryPath = path.join(__dirname, 'private', 'extension.js');
@@ -190,6 +192,10 @@ function loadPrivateExtension() {
 const privateExtension = loadPrivateExtension();
 const httpService = privateExtension.ownsHttpServer ? null : createHttpService({
   client, handleRequest: webPanel.handleHttp, logger: Logger,
+});
+const localBotApi = createLocalBotApi({
+  client, database: guildDatabase, telemetry: diagnostics,
+  restartBot: restartBotFromDashboard, logger: Logger,
 });
 
 // --- Mode de lancement rapide (Phase 5) ---

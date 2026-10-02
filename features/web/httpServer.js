@@ -2,8 +2,8 @@
 
 const http = require('node:http');
 
-function createHttpService({ client, handleRequest, logger = console, env = process.env }) {
-  const port = Number(env.SERVER_PORT || env.PORT || 8080);
+function createHttpService({ client, handleRequest, logger = console, env = process.env,
+  host = '0.0.0.0', port = Number(env.SERVER_PORT || env.PORT || 8080) }) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Le port HTTP configuré est invalide.');
   const server = http.createServer((request, response) => {
     if (request.method === 'GET' && request.url === '/healthz') {
@@ -19,7 +19,7 @@ function createHttpService({ client, handleRequest, logger = console, env = proc
   });
   const ready = new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '0.0.0.0', () => {
+    server.listen(port, host, () => {
       server.removeListener('error', reject);
       logger.info?.(`[web] Serveur HTTP prêt sur le port ${server.address().port}.`);
       resolve(server.address());

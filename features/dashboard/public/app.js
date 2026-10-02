@@ -111,7 +111,7 @@
     $('connection-token').required = !source;
     $('connection-token').minLength = source ? 0 : 32;
     $('connection-token').placeholder = source ? 'Clé enregistrée · laisser vide pour la conserver' : 'DASHBOARD_API_TOKEN · 32 caractères minimum';
-    $('token-help').textContent = source ? 'La clé enregistrée n’est jamais renvoyée au navigateur. Un champ vide la conserve.' : 'Utilisez DASHBOARD_API_TOKEN du bot, jamais la clé KineticPanel ni le token Discord.';
+    $('token-help').textContent = source ? 'La clé enregistrée n’est jamais renvoyée au navigateur. Un champ vide la conserve.' : 'Utilisez DASHBOARD_API_TOKEN du bot, jamais la clé KineticPanel ptlc_… ni le token Discord.';
     $('save-connection').disabled = locked;
     $('lock-connection').hidden = !source || locked;
     $('form-error').hidden = true;
