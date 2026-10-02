@@ -168,7 +168,7 @@ class MusicPlayer {
         return message;
       })
       .catch((error) => {
-        console.warn(`[voice] Notification d’inactivité impossible: ${error.message}`);
+        console.warn(`[voice] Notification d’inactivité impossible serveur=${this.guildId}: ${error.message}`, error);
         return null;
       });
     let sendTimeout;
@@ -198,7 +198,7 @@ class MusicPlayer {
           self_deaf: false,
         } });
       } catch (error) {
-        console.error(`[voice] Demande de sortie vocale au Gateway impossible: ${error.message}`);
+        console.error(`[voice] Demande de sortie vocale au Gateway impossible serveur=${this.guildId}: ${error.message}`, error);
       }
     }
     return this.destroy();
@@ -211,7 +211,7 @@ class MusicPlayer {
     this._idleTimer = setTimeout(() => {
       this._idleTimer = null;
       this._leaveForInactivity(connection, 'idle').catch(error => {
-        console.error(`[voice] Déconnexion d’inactivité impossible: ${error.message}`);
+        console.error(`[voice] Déconnexion d’inactivité impossible serveur=${this.guildId}: ${error.message}`, error);
       });
     }, this.inactivityTimeoutMs);
     this._idleTimer.unref?.();
@@ -224,7 +224,7 @@ class MusicPlayer {
     this._aloneTimer = setTimeout(() => {
       this._aloneTimer = null;
       this._leaveForInactivity(connection, 'alone', channelId).catch(error => {
-        console.error(`[voice] Déconnexion sans membre impossible: ${error.message}`);
+        console.error(`[voice] Déconnexion sans membre impossible serveur=${this.guildId}: ${error.message}`, error);
       });
     }, this.inactivityTimeoutMs);
     this._aloneTimer.unref?.();
@@ -257,9 +257,9 @@ class MusicPlayer {
       conn.channelId = channel.id;
       const channelBitrate = Number(channel.bitrate);
       conn.audioBitrate = Number.isFinite(channelBitrate) && channelBitrate > 0 ? channelBitrate : 160_000;
-      conn.on('error', (e) => console.error('[voice] Erreur:', e.message));
+      conn.on('error', (e) => console.error(`[voice] Erreur serveur=${this.guildId}:`, e.message, e));
       await conn.connect(); this.connection = conn;
-      console.log('✅ Connexion vocale maison prête.');
+      console.log(`✅ Connexion vocale maison prête serveur=${this.guildId}.`);
       this._scheduleIdleLeave();
       return conn;
     })();
@@ -332,7 +332,7 @@ class MusicPlayer {
       await this._activity();
       if (notifyWhenEmpty && hadCurrent) {
         try { await this.onQueueEnd?.(this, requesterId); }
-        catch (error) { console.warn(`[now-playing] fin de file: ${error.message}`); }
+        catch (error) { console.warn(`[now-playing] fin de file serveur=${this.guildId}: ${error.message}`, error); }
       }
       this._scheduleIdleLeave();
       return null;
@@ -348,7 +348,7 @@ class MusicPlayer {
     let preparedMedia = null;
     const failTrack = async (error) => {
       if (generation !== this._generation || !this.isPlaying) return;
-      console.error(`[audio] piste « ${String(song.title || 'inconnue').slice(0, 120)} » interrompue (${error.code || 'AUDIO_ERROR'}): ${error.message}`);
+      console.error(`[audio] piste « ${String(song.title || 'inconnue').slice(0, 120)} » interrompue (${error.code || 'AUDIO_ERROR'}) serveur=${this.guildId}: ${error.message}`, error);
       this.isPlaying = false;
       this.isPaused = false;
       this.current = null;
@@ -386,12 +386,12 @@ class MusicPlayer {
         throw preparedMedia.stream.errored || new Error('Le flux audio a été fermé pendant la connexion vocale.');
       }
       console.info(`[audio] démarrage serveur=${this.guildId} session=${generation} titre=${JSON.stringify(song.title)} file=${this.queue.length}`);
-      const sender = await OpusSender.start(this.connection, song.url, () => console.log('🔊 SON ÉMIS — lecture maison active.'), async () => {
+      const sender = await OpusSender.start(this.connection, song.url, () => console.log(`🔊 SON ÉMIS — lecture maison active serveur=${this.guildId}.`), async () => {
         if (generation === this._generation && this.isPlaying) {
           this.sender = null;
           try { await this.playNext(undefined, { notifyWhenEmpty: true }); }
           catch (error) {
-            console.error(`[audio] piste suivante serveur=${this.guildId}: ${error.message}`);
+            console.error(`[audio] piste suivante serveur=${this.guildId}: ${error.message}`, error);
             try { await this.lastChannel?.send({ content: `❌ Impossible de lire le titre suivant : ${error.message}`, allowedMentions: { parse: [] } }); }
             catch (_) { /* salon inaccessible */ }
           }
@@ -491,7 +491,7 @@ class MusicPlayer {
       // Une présence Discord est commune à tous les serveurs. Le titre est
       // uniquement publié par le callback dans le salon de ce serveur.
       const update = this.onActivityChange?.(state);
-      update?.catch?.((error) => console.warn(`[now-playing] ${error.message}`));
+      update?.catch?.((error) => console.warn(`[now-playing] serveur=${this.guildId}: ${error.message}`, error));
       return update;
     } catch (_) { /* ignore */ }
     return Promise.resolve(false);

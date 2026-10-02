@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Observatoire — Dashboard Discord local</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar" id="sidebar" aria-label="Bots et serveurs">
+    <a class="brand" href="/" aria-label="Observatoire, accueil"><span class="brand-mark" aria-hidden="true">o</span><span>Observatoire<small>DASHBOARD DISCORD</small></span></a>
+    <label class="field-label" for="bot-select">BOT CONNECTÉ</label>
+    <select id="bot-select" aria-label="Choisir un bot"><option>Aucun bot configuré</option></select>
+    <div class="sidebar-heading"><span>SERVEURS DISCORD</span><span class="count" id="guild-count">—</span></div>
+    <label class="search sidebar-search"><span data-icon="search"></span><input id="guild-search" type="search" placeholder="Rechercher un serveur" aria-label="Rechercher un serveur"></label>
+    <nav id="guild-list" aria-label="Sélection du serveur"></nav>
+    <div class="sidebar-footer"><span data-icon="shield"></span><div>Sur cet ordinateur<small>Consultation en lecture seule</small></div></div>
+  </aside>
+  <main>
+    <header class="topbar">
+      <button id="sidebar-toggle" class="icon-button mobile-only" aria-label="Afficher les serveurs" aria-expanded="false"><span data-icon="menu"></span></button>
+      <div class="breadcrumb">Espace local <span>/</span> <span id="scope-breadcrumb">Vue d’ensemble</span></div>
+      <div class="topbar-actions"><span id="connection-badge" class="badge"><i></i> Non connecté</span><button id="settings-open" class="button"><span data-icon="link"></span> Connexion API</button></div>
+    </header>
+    <div class="content">
+      <div class="page-heading"><div><div class="eyebrow">SUPERVISION DU BOT</div><h1 id="page-title">Vue d’ensemble</h1><p id="page-subtitle">Vos serveurs, vos journaux et votre musique, réunis ici.</p></div><button id="refresh" class="button" aria-label="Actualiser les données"><span data-icon="refresh"></span> Actualiser</button></div>
+      <div id="connection-notice" class="notice" role="status" hidden></div>
+      <section class="metrics" aria-label="Statistiques du bot">
+        <article><div><span>Serveurs</span><span data-icon="servers"></span></div><strong id="metric-guilds">—</strong><small id="guilds-caption">Présence du bot sur Discord</small></article>
+        <article><div><span>Membres</span><span data-icon="users"></span></div><strong id="metric-members">—</strong><small>Cumul des serveurs, sans dédoublonnage</small></article>
+        <article><div><span>Connexions vocales</span><span data-icon="music"></span></div><strong id="metric-voice">—</strong><small>Salons actuellement connectés</small></article>
+        <article><div><span>Erreurs · 24 h</span><span data-icon="alert"></span></div><strong id="metric-errors">—</strong><small id="errors-caption">Journal persistant du bot</small></article>
+      </section>
+      <div class="tabs" role="tablist" aria-label="Données à afficher">
+        <button role="tab" aria-selected="true" aria-controls="panel-journal" id="tab-journal" data-tab="journal"><span data-icon="terminal"></span> Journal</button>
+        <button role="tab" aria-selected="false" aria-controls="panel-music" id="tab-music" data-tab="music" tabindex="-1"><span data-icon="music"></span> Musique & playlists</button>
+        <button role="tab" aria-selected="false" aria-controls="panel-system" id="tab-system" data-tab="system" tabindex="-1"><span data-icon="activity"></span> Système</button>
+        <span class="last-sync" id="last-sync">En attente de connexion</span>
+      </div>
+      <section id="empty-start" class="start-state">
+        <div class="empty-symbol" data-icon="link"></div><div class="eyebrow">VOTRE POINT D’OBSERVATION</div>
+        <h2>Connectez votre premier bot</h2><p>Renseignez l’adresse de son API et sa clé de diagnostic. <br>Le dashboard reste sur votre ordinateur, même si le bot est hébergé ailleurs.</p>
+        <button class="button primary" id="connect-first"><span data-icon="plus"></span> Ajouter une connexion</button>
+        <div class="setup-note"><span data-icon="shield"></span> La clé de diagnostic est distincte du token Discord.</div>
+      </section>
+      <section id="panel-journal" class="panel" role="tabpanel" aria-labelledby="tab-journal" hidden>
+        <div class="panel-heading"><div><h2>Journal d’activité</h2><p id="log-caption">Événements et erreurs du bot.</p></div><button id="live-toggle" class="button small" aria-pressed="true"><i class="live-dot"></i> En direct</button></div>
+        <div class="log-toolbar"><label class="search"><span data-icon="search"></span><input type="search" id="log-search" placeholder="Rechercher dans les journaux…" aria-label="Rechercher dans les journaux"></label>
+          <select id="log-level" aria-label="Niveau des journaux"><option value="">Tous les niveaux</option><option value="error">Erreurs</option><option value="warn">Avertissements</option><option value="info">Informations</option></select>
+          <select id="log-category" aria-label="Catégorie des journaux"><option value="">Toutes les catégories</option><option value="command">Commandes</option><option value="music">Musique</option><option value="history">Titres joués</option><option value="system">Système</option><option value="voice">Vocal</option></select>
+          <select id="log-period" aria-label="Période des journaux"><option value="24">Dernières 24 h</option><option value="1">Dernière heure</option><option value="168">7 derniers jours</option><option value="">Tout l’historique conservé</option></select>
+        </div>
+        <div class="table-scroll"><table class="log-table"><thead><tr><th>HEURE</th><th>NIVEAU</th><th>CONTEXTE</th><th>ÉVÉNEMENT</th><th><span class="sr-only">Détails</span></th></tr></thead><tbody id="log-rows"></tbody></table></div>
+        <div class="table-footer"><span id="log-count">Aucun événement chargé</span><div><button id="export-logs" class="button small"><span data-icon="download"></span> Exporter</button><button id="logs-latest" class="button small" hidden>Plus récents</button><button id="logs-older" class="button small" disabled>Plus anciens <span data-icon="arrow"></span></button></div></div>
+      </section>
+      <section id="panel-music" class="panel" role="tabpanel" aria-labelledby="tab-music" hidden><div class="panel-heading"><div><h2>Musique & playlists</h2><p>État réel des lecteurs et playlists enregistrées par serveur.</p></div><span class="tag">Lecture seule</span></div><div id="music-content" class="section-body"></div></section>
+      <section id="panel-system" class="panel" role="tabpanel" aria-labelledby="tab-system" hidden><div class="panel-heading"><div><h2>État du processus</h2><p>Mesures transmises par le bot distant.</p></div><span class="tag">API de diagnostic</span></div><div id="system-content" class="section-body"></div></section>
+      <footer class="page-footer"><span>OBSERVATOIRE <span class="muted">/</span> LOCAL</span><span>Journaux conservés 14 jours · connexion privée</span></footer>
+    </div>
+  </main>
+  <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+    <div class="dialog-heading"><div><div class="eyebrow">CONNEXIONS</div><h2 id="settings-title">Relier un bot à l’API</h2></div><button class="icon-button" id="settings-close" aria-label="Fermer les connexions"><span data-icon="close"></span></button></div>
+    <p class="dialog-intro">L’adresse doit être celle du bot avec l’API de diagnostic installée. Les clés restent sur cet ordinateur.</p>
+    <div id="saved-connections"></div>
+    <div class="form-heading"><h3 id="connection-form-title">Nouvelle connexion</h3><button id="new-connection" class="button small"><span data-icon="plus"></span> Nouveau bot</button></div>
+    <form id="connection-form">
+      <label>Nom du bot<input id="connection-name" maxlength="60" required placeholder="Mon bot Discord" autocomplete="off"></label>
+      <label>Adresse de l’API<input id="connection-url" type="url" required placeholder="https://bot.exemple.fr" autocomplete="off" spellcheck="false"></label>
+      <small class="field-help">Adresse HTTPS du service du bot, avec son éventuel préfixe. Ne pas ajouter /api/dashboard.</small>
+      <label>Clé de diagnostic<input id="connection-token" type="password" placeholder="DASHBOARD_API_TOKEN · 32 caractères minimum" autocomplete="new-password" spellcheck="false" maxlength="512"></label>
+      <small id="token-help" class="field-help">Utilisez la clé DASHBOARD_API_TOKEN du bot, jamais son token Discord.</small>
+      <p id="form-error" class="form-error" role="alert" hidden></p>
+      <div class="form-actions"><button id="lock-connection" type="button" class="button" hidden><span data-icon="lock"></span> Verrouiller</button><button id="save-connection" class="button primary" type="submit"><span data-icon="lock"></span> Enregistrer et verrouiller</button></div>
+    </form>
+    <div class="dialog-footnote"><span data-icon="shield"></span> Verrouillez les champs pour éviter une modification accidentelle. Les clés sont dans <code>data/local-dashboard/.env</code>, ignoré par Git.</div>
+  </dialog>
+  <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title"><div class="dialog-heading"><h2 id="detail-title">Détail de l’événement</h2><button id="detail-close" class="icon-button" aria-label="Fermer les détails"><span data-icon="close"></span></button></div><div id="detail-content"></div></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

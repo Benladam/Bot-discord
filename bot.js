@@ -28,6 +28,9 @@ try {
 }
 const { MusicPlayer } = require('./features/music/musicPlayer');
 const guildDatabase = require('./core/database');
+const { createTelemetry } = require('./features/dashboard/telemetry');
+const diagnostics = createTelemetry({ database: guildDatabase });
+diagnostics.installConsole();
 const { createUpdater } = require('./core/updater');
 const { createWebPanel } = require('./features/web/server');
 const { createHttpService } = require('./features/web/httpServer');
@@ -72,7 +75,7 @@ if (!TOKEN) {
 const Logger = {
   info: (m) => console.log(`ℹ️  [${new Date().toLocaleTimeString()}] ${m}`),
   success: (m) => console.log(`✅ [${new Date().toLocaleTimeString()}] ${m}`),
-  error: (m) => console.error(`❌ [${new Date().toLocaleTimeString()}] ${m}`),
+  error: (m, error) => console.error(`❌ [${new Date().toLocaleTimeString()}] ${m}`, ...(error ? [error] : [])),
   warn: (m) => console.warn(`⚠️  [${new Date().toLocaleTimeString()}] ${m}`),
 };
 
@@ -125,7 +128,10 @@ function getPlayer(guildId) {
       p.volume = Number.isFinite(savedVolume) ? Math.max(0, Math.min(1, savedVolume)) : 1;
     }
     // Le statut de lecture est publié dans un message propre à cette guilde.
-    p.onActivityChange = (state) => guildNowPlaying.update(p, state);
+    p.onActivityChange = (state) => {
+      try { diagnostics.musicActivity(p.guildId, state); } catch (_) {}
+      return guildNowPlaying.update(p, state);
+    };
     p.onQueueEnd = (_player, requesterId) => guildNowPlaying.finishQueue(p, requesterId);
     client.musicPlayers.set(guildId, p);
   }
@@ -154,6 +160,7 @@ const webPanel = createWebPanel({
   getPlayer,
   database: guildDatabase,
   logger: Logger,
+  telemetry: diagnostics,
 });
 function loadPrivateExtension() {
   const entryPath = path.join(__dirname, 'private', 'extension.js');
@@ -329,7 +336,10 @@ client.once(Events.ClientReady, async (c) => {
 });
 
 // Slash commands
-client.on(Events.InteractionCreate, async (interaction) => {
+client.on(Events.InteractionCreate, (interaction) => diagnostics.run({
+  guildId: interaction.guildId || null, userId: interaction.user?.id || null,
+  command: interaction.commandName || interaction.customId || null,
+}, async () => {
     if (await privateExtension.handleInteraction(interaction)) return;
   if (interaction.isButton?.() || interaction.isStringSelectMenu?.()) {
     if (interaction.customId?.startsWith('helpui:')) {
@@ -416,16 +426,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
       .map((opt) => String(opt.value));
     await cmd.execute(interaction, args, deps);
   } catch (e) {
-    Logger.error(`Erreur /${interaction.commandName} guildId=${interaction.guildId || 'DM'}: ${e.message}`);
+    Logger.error(`Erreur /${interaction.commandName} guildId=${interaction.guildId || 'DM'}: ${e.message}`, e);
     const err = { embeds: [{ title: '❌ Erreur', description: e.message, color: 0xff0000 }] };
     if (interaction.deferred || interaction.replied) await interaction.editReply(err);
     else await interaction.reply({ ...err, flags: MessageFlags.Ephemeral });
   }
-});
+}));
 
 // Les commandes texte sont optionnelles : le mode slash n’a pas besoin de
 // l’intent privilégié Message Content.
-client.on(Events.MessageCreate, async (message) => {
+client.on(Events.MessageCreate, (message) => diagnostics.run({
+  guildId: message.guildId || null, userId: message.author?.id || null,
+  command: parsePrefixedCommand(message.content, PREFIX)?.name || null,
+}, async () => {
   if (message.author.bot) return;
   const parsed = parsePrefixedCommand(message.content, PREFIX);
   if (parsed) {
@@ -448,25 +461,30 @@ client.on(Events.MessageCreate, async (message) => {
         : `${message.author.tag} ❯ ${fullCmd}`);
       await cmd.execute(message, args, deps);
     } catch (e) {
-      Logger.error(`Erreur ${PREFIX}${name} guildId=${message.guildId || 'DM'}: ${e.message}`);
+      Logger.error(`Erreur ${PREFIX}${name} guildId=${message.guildId || 'DM'}: ${e.message}`, e);
       await message.reply({ embeds: [{ title: '❌ Erreur', description: e.message, color: 0xff0000 }] });
     }
     return;
   }
 
   await aiChat.handleMessage(message, client.user);
-});
+}));
 
 // Nettoie les connexions orphelines et confie l'inactivité au lecteur par serveur.
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   const guild = newState.guild;
+  if (newState.member?.id === client.user?.id && oldState.channelId !== newState.channelId) {
+    try { diagnostics.record({ guildId: guild.id, category: 'voice', level: 'info',
+      message: newState.channelId ? `Connexion vocale : ${newState.channel?.name || newState.channelId}` : 'Déconnexion vocale.',
+      metadata: { previousChannelId: oldState.channelId, channelId: newState.channelId } }); } catch (_) {}
+  }
   const player = client.musicPlayers.get(guild.id);
   if (!player) return;
 
   // Le bot a été déconnecté
   if (oldState.member?.id === client.user.id && oldState.channelId && !newState.channelId) {
     player.destroy();
-    Logger.info(`Bot déconnecté de ${guild.name}`);
+    diagnostics.run({ guildId: guild.id }, () => Logger.info(`Bot déconnecté de ${guild.name}`));
     return;
   }
   player.handleVoiceStateUpdate(oldState.channelId, newState.channelId);
@@ -474,6 +492,7 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
 
 // Message de bienvenue automatique quand le bot rejoint un nouveau serveur.
 client.on(Events.GuildCreate, async (guild) => {
+  diagnostics.record({ guildId: guild.id, category: 'system', message: `Bot ajouté au serveur ${guild.name}.` });
   try {
     // Salon système (celui défini par Discord) ou un salon "général" sinon.
     let channel = guild.systemChannel;
@@ -484,7 +503,7 @@ client.on(Events.GuildCreate, async (guild) => {
     }
     if (!channel || !channel.permissionsFor(guild.members.me).has('SendMessages')) return;
 
-    const displayName = String(process.env.BOT_DISPLAY_NAME || c.user?.username || 'Discord Music Bot').slice(0, 80);
+    const displayName = String(process.env.BOT_DISPLAY_NAME || client.user?.username || 'Discord Music Bot').slice(0, 80);
     const supportUrl = (() => {
       try {
         const url = new URL(process.env.SUPPORT_URL || '');
@@ -514,8 +533,8 @@ client.on(Events.GuildCreate, async (guild) => {
 });
 
 // Erreurs non capturées
-process.on('unhandledRejection', (e) => { Logger.error(`Rejet non géré: ${e?.message}`); });
-process.on('uncaughtException', (e) => { Logger.error(`Exception: ${e?.message}`); });
+process.on('unhandledRejection', (e) => { Logger.error(`Rejet non géré: ${e?.message}`, e); });
+process.on('uncaughtException', (e) => { Logger.error(`Exception: ${e?.message}`, e); });
 
 loadCommands();
 client.login(TOKEN).catch((e) => {

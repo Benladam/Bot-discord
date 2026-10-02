@@ -1,6 +1,7 @@
 @echo off
 setlocal
-set "ROOT=%~dp0"
+set "ROOT=%~dp0..\..\"
+cd /d "%ROOT%"
 where powershell.exe >nul 2>nul
 if errorlevel 1 (
   echo PowerShell est introuvable. Windows PowerShell est requis.

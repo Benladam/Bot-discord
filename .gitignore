@@ -13,6 +13,9 @@ npm-debug.log
 .DS_Store
 queue_state.json
 data/
+# Identifiants du dashboard local (noms/adresses dans connections.json, clés dans .env)
+data/local-dashboard/
+.env.dashboard.local
 *.sqlite
 *.sqlite3
 *.sqlite-wal
@@ -25,3 +28,30 @@ gui_build/
 .bot-gui-logs/
 Bot-discord-kinetic-*.zip
 private/
+
+# Données locales Minecraft, IA et exploitation : ne jamais versionner
+local/
+.local/
+runtime/
+logs/
+server/
+minecraft/
+ia/
+ia-privee/
+ai-local/
+models/
+model/
+checkpoints/
+lora/
+weights/
+backups/
+secrets/
+credentials/
+*.mcpack
+*.mcworld
+*.mca
+*.schem
+*.schematic
+*.nbt
+*.jar
+*.lnk

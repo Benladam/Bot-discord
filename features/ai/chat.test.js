@@ -14,7 +14,7 @@ function incoming(content = '<@bot> ça va ?', mention = true) {
   };
 }
 
-const bot = { id: 'bot', username: 'Heuss' };
+const bot = { id: 'bot', username: 'TestBot' };
 const logger = { warn: () => {} };
 
 test('le diagnostic distingue un fournisseur désactivé sans exposer la clé', async () => {
@@ -51,7 +51,7 @@ test('une mention appelle Responses et répond dans le salon de test', async () 
 test('le nom du bot déclenche une réponse sans ping', async () => {
   const chat = createAIChat({ env: { AI_PROVIDER: 'openai', AI_MODEL: 'chosen-model', OPENAI_API_KEY: 'secret-for-test' }, logger,
     fetchImpl: async () => new Response(JSON.stringify({ output_text: 'Salut !' }), { status: 200 }) });
-  const message = incoming('Heuss, bonjour !', false);
+  const message = incoming('TestBot, bonjour !', false);
   assert.equal(await chat.handleMessage(message, bot), true);
   assert.equal(message.replies[0].content, 'Salut !');
 });

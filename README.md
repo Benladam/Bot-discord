@@ -31,11 +31,24 @@ fonctionnent en **slash `/`** ou avec le **préfixe `!`**.
 - Sondages Oui/Non avec réactions
 - Discussion IA générale quand on mentionne le bot ou son nom (OpenAI, Claude, Gemini ou LLM compatible)
 - Présence configurable du bot : statut en ligne, activité, textes cycliques et intervalle
+- Dashboard local multi-bots : serveurs Discord, journaux persistants par serveur, erreurs, playlists et état musical via API privée, avec adresse verrouillable
 - Crédits du créateur et licence MIT accessibles avec `/about`
 
 ## Installation
 
 Prérequis : Node.js 22.5+ et npm.
+
+Avant tout commit ou push, activez la protection locale avec `npm run security:install`
+(ou `scripts/windows/install-git-guard.bat` sous Windows). Elle bloque les secrets, les
+données Minecraft, les modèles IA, les journaux et les fichiers privés. Voir
+[la procédure de protection GitHub](docs/github-privacy.md).
+
+Pour le **dashboard local**, lancez `npm run dashboard` ou `Dashboard-local.bat`, puis ouvrez
+**http://127.0.0.1:3090**. L’adresse API et la clé se configurent dans l’interface, avec
+**Déverrouiller / Enregistrer et verrouiller**. Le bot distant doit avoir cette version
+installée et `DASHBOARD_API_TOKEN` configuré. Pour plusieurs bots, les clés saisies sont
+écrites dans `data/local-dashboard/.env` (ignoré par Git) et les métadonnées dans
+`connections.json`. Voir [la configuration détaillée](docs/local-dashboard.md).
 
 ```bash
 git clone <URL HTTPS du dépôt GitHub>
@@ -46,7 +59,7 @@ npm install
 Pour récupérer l’URL HTTPS, ouvre la page du dépôt sur GitHub, sélectionne
 **Code → HTTPS**, puis copie l’adresse affichée.
 
-Le lanceur Windows `Heuss-GUI.bat` ouvre le panneau local. Le lanceur Linux
+Le lanceur Windows `GUI-local.bat` ouvre le panneau local. Le lanceur Linux
 `bash launch.sh` démarre le bot dans le terminal. Au premier lancement, chaque
 lanceur crée `.env` depuis `.env.example` et demande le token Discord si celui-ci
 est vide. Le token reste dans `.env`, ignoré par Git.
@@ -449,8 +462,8 @@ et de son API.
 
 ## Interface Windows
 
-`Heuss-GUI.bat` (ou l'alias `Heus-GUI.bat`) utilise Windows PowerShell, inclus dans Windows. Le panneau peut
-démarrer ou arrêter le bot, configurer le token et afficher les journaux. Il
+`GUI-local.bat` utilise Windows PowerShell, inclus dans Windows. Le panneau peut
+démarrer ou arrêter le service, configurer le token et afficher les journaux. Il
 installe les dépendances npm au premier démarrage. Les journaux sont écrits dans
 `.bot-gui-logs/`.
 

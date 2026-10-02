@@ -11,7 +11,7 @@ $script:Closing = $false
 New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Bot Discord"
+$form.Text = "GUI local"
 $form.StartPosition = 'CenterScreen'
 $form.Size = New-Object System.Drawing.Size(900, 620)
 $form.MinimumSize = New-Object System.Drawing.Size(700, 450)
@@ -24,7 +24,7 @@ $status.Location = New-Object System.Drawing.Point(18, 22)
 $form.Controls.Add($status)
 
 $startButton = New-Object System.Windows.Forms.Button
-$startButton.Text = 'Demarrer le bot'
+$startButton.Text = 'Demarrer'
 $startButton.Location = New-Object System.Drawing.Point(18, 54)
 $startButton.Size = New-Object System.Drawing.Size(130, 34)
 $form.Controls.Add($startButton)
@@ -87,7 +87,7 @@ function Set-EnvToken {
     $dialog.MaximizeBox = $false
     $dialog.MinimizeBox = $false
     $label = New-Object System.Windows.Forms.Label
-    $label.Text = 'Colle le token du bot Discord. Il sera enregistre dans .env.'
+    $label.Text = 'Colle le token Discord. Il sera enregistre dans .env.'
     $label.Location = New-Object System.Drawing.Point(14, 15)
     $label.Size = New-Object System.Drawing.Size(450, 24)
     $dialog.Controls.Add($label)
@@ -162,7 +162,7 @@ function Start-BotProcess {
     $status.Text = "En cours (PID $($script:BotProcess.Id))"
     $startButton.Enabled = $false
     $stopButton.Enabled = $true
-    Add-Log 'Bot lance.'
+    Add-Log 'Application lancee.'
 }
 
 function Test-NodeDependencies {
@@ -199,7 +199,7 @@ function Start-RequestedBot {
         $status.Text = 'Erreur de demarrage'
         $startButton.Enabled = $true
         Add-Log ('ERREUR: ' + $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Bot Discord - démarrage impossible', 'OK', 'Error') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'GUI local - démarrage impossible', 'OK', 'Error') | Out-Null
     }
 }
 
@@ -210,7 +210,7 @@ function Stop-BotProcess {
     }
     if ($script:BotProcess -and -not $script:BotProcess.HasExited) {
         & taskkill.exe /PID $script:BotProcess.Id /T /F 2>$null | Out-Null
-        Add-Log 'Bot arrete.'
+        Add-Log 'Application arretee.'
     }
     $script:BotProcess = $null
     $status.Text = 'Arrete'
@@ -257,13 +257,13 @@ $timer.Add_Tick({
         $status.Text = "Arrete (code $exitCode)"
         $startButton.Enabled = $true
         $stopButton.Enabled = $false
-        Add-Log "Le bot s'est arrete (code $exitCode)."
+        Add-Log "L'application s'est arretee (code $exitCode)."
     }
 })
 $timer.Start()
 $form.Add_FormClosing({
     if (($script:BotProcess -and -not $script:BotProcess.HasExited) -or ($script:SetupProcess -and -not $script:SetupProcess.HasExited)) {
-        $answer = [System.Windows.Forms.MessageBox]::Show('Arreter le bot et fermer la fenetre ?', 'Bot Discord', 'YesNo', 'Question')
+        $answer = [System.Windows.Forms.MessageBox]::Show("Arreter l'application et fermer la fenetre ?", 'GUI local', 'YesNo', 'Question')
         if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { $_.Cancel = $true; return }
         Stop-BotProcess
     }
@@ -272,6 +272,6 @@ $form.Add_FormClosing({
     Close-LogReaders
 })
 
-Add-Log "Dossier du bot: $script:Root"
-Add-Log 'Clique sur Demarrer le bot. Le premier lancement installe les dependances npm.'
+Add-Log "Dossier de l'application: $script:Root"
+Add-Log 'Clique sur Demarrer. Le premier lancement installe les dependances npm.'
 [void]$form.ShowDialog()

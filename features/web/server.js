@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createDashboardApi } = require('../dashboard/api');
 
 const WEB_DIR = path.join(__dirname, 'public');
 const SESSION_COOKIE = 'discord_music_panel_session';
@@ -124,7 +125,8 @@ function boolEnv(value) {
   return /^(1|true|yes|on)$/i.test(String(value || ''));
 }
 
-function createWebPanel({ client, getPlayer, database, logger = console, env = process.env }) {
+function createWebPanel({ client, getPlayer, database, telemetry, logger = console, env = process.env }) {
+  const dashboardApi = telemetry ? createDashboardApi({ client, database, telemetry, env }) : null;
   const adminToken = String(env.WEB_ADMIN_TOKEN || '').trim();
   const trustProxy = boolEnv(env.WEB_TRUST_PROXY);
   const sessions = new Map();
@@ -313,6 +315,8 @@ function createWebPanel({ client, getPlayer, database, logger = console, env = p
 
   async function handle(request, response) {
     setCommonHeaders(response);
+    const dashboardPath = routePath(request);
+    if (dashboardPath && dashboardApi && await dashboardApi.handle(request, response, dashboardPath)) return;
     if (!panelConfigured) return respondError(response, 503, 'Le panneau web n’est pas configuré.');
     const pathname = routePath(request);
     if (!pathname) return respondError(response, 404, 'Page introuvable.');

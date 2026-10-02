@@ -10,7 +10,11 @@
   },
   "scripts": {
     "start": "node supervisor.js",
-    "test": "node --test"
+    "dashboard": "node features/dashboard/localServer.js",
+    "security:install": "node tools/security/installGitGuard.js",
+    "security:check": "node tools/security/gitGuard.js --staged",
+    "security:audit": "node tools/security/gitGuard.js --tracked",
+    "test": "node --test \"commands/**/*.test.js\" \"core/**/*.test.js\" \"features/**/*.test.js\" \"shared/**/*.test.js\" \"tools/**/*.test.js\""
   },
   "dependencies": {
     "discord.js": "^14.27.0",
