@@ -161,6 +161,11 @@ const webPanel = createWebPanel({
   database: guildDatabase,
   logger: Logger,
   telemetry: diagnostics,
+  restartBot: async () => {
+    for (const player of client.musicPlayers.values()) player.destroy();
+    await client.destroy();
+    await updater.restartProcess();
+  },
 });
 function loadPrivateExtension() {
   const entryPath = path.join(__dirname, 'private', 'extension.js');

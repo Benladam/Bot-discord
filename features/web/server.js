@@ -125,8 +125,8 @@ function boolEnv(value) {
   return /^(1|true|yes|on)$/i.test(String(value || ''));
 }
 
-function createWebPanel({ client, getPlayer, database, telemetry, logger = console, env = process.env }) {
-  const dashboardApi = telemetry ? createDashboardApi({ client, database, telemetry, env }) : null;
+function createWebPanel({ client, getPlayer, database, telemetry, restartBot, logger = console, env = process.env }) {
+  const dashboardApi = telemetry ? createDashboardApi({ client, database, telemetry, restartBot, env }) : null;
   const adminToken = String(env.WEB_ADMIN_TOKEN || '').trim();
   const trustProxy = boolEnv(env.WEB_TRUST_PROXY);
   const sessions = new Map();

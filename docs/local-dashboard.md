@@ -10,7 +10,8 @@ npm run dashboard
 ```
 
 `Dashboard-local.bat` ouvre automatiquement **http://127.0.0.1:3090** dans le navigateur.
-Avec `npm run dashboard`, ouvrez cette adresse manuellement. Le service écoute uniquement sur cet ordinateur.
+`npm run dashboard` ouvre aussi le navigateur. `DASHBOARD_OPEN_BROWSER=0` permet de désactiver cette ouverture.
+Le service écoute uniquement sur cet ordinateur.
 Il ne démarre aucun bot Discord : le bot peut continuer de tourner sur son hébergeur.
 Le port peut être modifié avec `DASHBOARD_LOCAL_PORT`.
 
@@ -25,7 +26,7 @@ Le port peut être modifié avec `DASHBOARD_LOCAL_PORT`.
    ```
 
 3. Ajoutez cette clé à la configuration privée du bot sous `DASHBOARD_API_TOKEN`.
-   Le tableau de bord utilise une API **en lecture seule**, protégée par ce jeton.
+   Les données du tableau de bord utilisent une API en lecture seule, protégée par ce jeton.
 4. Rendez le service HTTP du bot accessible via **HTTPS** : son port est
    `SERVER_PORT`, puis `PORT`, sinon `8080`. Utilisez le proxy HTTPS de votre hébergeur
    ou un tunnel privé qui termine TLS. Le service partage le port HTTP du panneau musical
@@ -55,16 +56,19 @@ modifications accidentelles ; il ne constitue pas un mot de passe d’accès au 
 Vous pouvez enregistrer plusieurs bots. **Retirer du dashboard** supprime seulement
 la connexion locale, sans effacer les données du bot distant.
 
-Les connexions et leurs clés sont enregistrées en clair dans
-`data/local-dashboard/connections.json` contient uniquement les noms, adresses et verrous.
-Les clés sont dans `data/local-dashboard/.env`, exclu de Git et du contexte Docker.
+Les noms, adresses et verrous sont dans `.venv/local-dashboard/connections.json`.
+Les clés sont dans `.venv/local-dashboard/.env`, exclu de Git et du contexte Docker.
+Chaque enregistrement crée ou actualise aussi `.venv/local-dashboard/bots/<identifiant>/.env`.
+Les anciennes connexions de `data/local-dashboard/` sont copiées automatiquement au premier lancement.
 Gardez ce dossier privé ; les clés ne sont jamais renvoyées au navigateur après enregistrement.
 Le dashboard peut ainsi gérer plusieurs bots sans mélanger leurs clés. Vous pouvez aussi
 préparer le fichier d’environnement avant le démarrage avec des groupes
 `DASHBOARD_BOT_1_NAME`, `DASHBOARD_BOT_1_URL`, `DASHBOARD_BOT_1_TOKEN`, puis les mêmes
 variables avec `_2_`, `_3_`, etc. L’interface les importera et les verrouillera.
-Le dossier `.venv` Python n’est pas utilisé par ce projet Node.js : il ne sert pas de coffre
-pour les clés.
+Le dashboard utilise ici `.venv` comme dossier de stockage local. Les modèles publics
+se trouvent dans `.venv/examples/`, tandis que `.venv/local-dashboard/` et `.venv/bots/`
+restent privés et ignorés par Git. Aucun environnement Python n’est nécessaire ; les
+clés sont des fichiers locaux en clair, pas un coffre chiffré.
 Le service local vérifie l’origine, le Host et la session locale et protège les modifications
 avec un jeton CSRF. Il ne faut pas exposer son port sur Internet.
 
@@ -91,6 +95,19 @@ Les événements dont le serveur n’est pas identifiable apparaissent dans le j
 Le dashboard reçoit l’état du bot toutes les 3 secondes. Il utilise un relais local,
 donc n’exige pas de configuration CORS sur le bot. L’accès aux commandes musicales et
 à la mise à jour n’est pas proposé dans cette interface de diagnostic.
+
+## Terminal et redémarrage
+
+Le terminal affiche les connexions, erreurs, événements reçus et ordres de redémarrage,
+sans attente « appuyez pour continuer ». Le lien affiché s’ouvre avec Ctrl+clic dans
+Windows Terminal ; si votre console ne reconnaît pas les liens, copiez-le dans le navigateur.
+Le lanceur ouvre aussi le navigateur lorsqu’une instance du dashboard tourne déjà.
+
+Pour activer **Redémarrer le bot** dans l’onglet système, générez une seconde clé privée
+distincte et configurez-la sous `DASHBOARD_CONTROL_TOKEN` sur le bot et dans le champ
+**Clé administrateur** de sa connexion locale. Partagez cette clé uniquement avec les
+administrateurs. Lancez le bot avec `npm start` pour utiliser le superviseur. Le bouton
+demande confirmation, ferme la connexion Discord et les lecteurs, puis relance le bot.
 
 ## Si la connexion échoue
 

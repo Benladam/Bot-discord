@@ -106,11 +106,12 @@
     $('connection-name').value = source?.name || '';
     $('connection-url').value = source?.url || '';
     $('connection-token').value = '';
-    ['connection-name', 'connection-url', 'connection-token'].forEach((field) => { $(field).disabled = locked; });
+    $('connection-control-token').value = '';
+    ['connection-name', 'connection-url', 'connection-token', 'connection-control-token'].forEach((field) => { $(field).disabled = locked; });
     $('connection-token').required = !source;
     $('connection-token').minLength = source ? 0 : 32;
     $('connection-token').placeholder = source ? 'Clé enregistrée · laisser vide pour la conserver' : 'DASHBOARD_API_TOKEN · 32 caractères minimum';
-    $('token-help').textContent = source ? 'La clé enregistrée n’est jamais renvoyée au navigateur. Un champ vide la conserve.' : 'Utilisez la clé DASHBOARD_API_TOKEN du bot, jamais son token Discord.';
+    $('token-help').textContent = source ? 'La clé enregistrée n’est jamais renvoyée au navigateur. Un champ vide la conserve.' : 'Utilisez DASHBOARD_API_TOKEN du bot, jamais la clé KineticPanel ni le token Discord.';
     $('save-connection').disabled = locked;
     $('lock-connection').hidden = !source || locked;
     $('form-error').hidden = true;
@@ -210,6 +211,19 @@
       ['Charge CPU du processus', bot.cpuPercent === null ? 'Mesure en attente' : `${number(bot.cpuPercent)} %`], ['Version Node.js', bot.nodeVersion],
       ['Commandes · 24 h', number(snapshot.data.totals.commands24h)], ['Titres joués · 24 h', number(snapshot.data.totals.tracks24h)], ['Conservation des journaux', `${number(snapshot.data.totals.retentionDays)} jours`]];
     $('system-content').innerHTML = `<div class="system-grid">${metrics.map(([label, value]) => `<article class="system-item"><small>${esc(label)}</small><strong>${esc(value)}</strong></article>`).join('')}<article class="system-item wide"><small>API du bot · ${source?.locked ? 'adresse verrouillée' : 'adresse déverrouillée'}</small><strong>${esc(source?.url)}</strong></article></div>`;
+    const restart = document.createElement('button');
+    restart.className = 'button danger'; restart.textContent = 'Redémarrer le bot';
+    restart.disabled = !source?.controlConfigured || !snapshot.data.capabilities?.restart;
+    restart.title = restart.disabled ? 'Clé administrateur et bot supervisé requis' : 'Redémarrer le processus distant';
+    restart.onclick = async () => {
+      if (!confirm('Redémarrer ce bot ? La musique en cours sera interrompue.')) return;
+      restart.disabled = true;
+      try {
+        const result = await request(`/api/bots/${encodeURIComponent(source.id)}/restart`, { method: 'POST', body: '{}' });
+        toast(result.message); notice(result.message);
+      } catch (error) { toast(error.message); restart.disabled = false; }
+    };
+    $('system-content').append(restart);
   }
   async function loadPanel() {
     if (!connected() || loadingRevision === revision) return;
@@ -252,7 +266,7 @@
 
   $('settings-open').onclick = openSettings; $('connect-first').onclick = openSettings;
   $('settings-close').onclick = () => $('settings-dialog').close();
-  $('settings-dialog').addEventListener('close', () => { $('connection-token').value = ''; });
+  $('settings-dialog').addEventListener('close', () => { $('connection-token').value = ''; $('connection-control-token').value = ''; });
   $('detail-close').onclick = () => $('detail-dialog').close();
   $('new-connection').onclick = () => { editConnection(); $('connection-name').focus(); };
   $('saved-connections').onclick = async (event) => {
@@ -282,7 +296,7 @@
   $('connection-form').onsubmit = async (event) => {
     event.preventDefault(); $('save-connection').disabled = true; $('form-error').hidden = true;
     try {
-      const payload = { name: $('connection-name').value, url: $('connection-url').value, token: $('connection-token').value };
+      const payload = { name: $('connection-name').value, url: $('connection-url').value, token: $('connection-token').value, controlToken: $('connection-control-token').value };
       const saved = await request(editorId ? `/api/connections/${editorId}` : '/api/connections', { method: editorId ? 'PUT' : 'POST', body: JSON.stringify(payload) });
       connections = connections.some((source) => source.id === saved.id) ? connections.map((source) => source.id === saved.id ? saved : source) : [...connections, saved];
       editConnection(saved.id); selectBot(saved.id); toast('Connexion enregistrée et verrouillée.');

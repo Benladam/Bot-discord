@@ -1,8 +1,30 @@
 # Fichiers et dossiers ignores par git
 node_modules/
 .data/
-.venv
-.venv/
+# `.venv` contient le stockage local du dashboard. Seuls le guide et les
+# modèles sans secret sous `examples/` peuvent être suivis par Git.
+.venv/**
+.venv/local-dashboard/
+.venv/bots/
+.venv/**/.env
+.venv/**/connections.json
+.venv/**/secrets/
+.venv/**/credentials/
+.venv/**/*.pem
+.venv/**/*.key
+.venv/**/*.sqlite
+.venv/**/*.sqlite3
+.venv/**/*.sqlite-wal
+.venv/**/*.sqlite-shm
+!.venv/README.md
+!.venv/examples/
+!.venv/examples/**
+# Même dans `examples/`, les noms de secrets restent exclus par défaut.
+.venv/examples/**/.env
+.venv/examples/**/*.pem
+.venv/examples/**/*.key
+.venv/examples/**/*.sqlite
+.venv/examples/**/*.sqlite3
 .env
 .env.*
 !.env.example

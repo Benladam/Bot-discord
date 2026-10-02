@@ -16,7 +16,7 @@
     <div class="sidebar-heading"><span>SERVEURS DISCORD</span><span class="count" id="guild-count">—</span></div>
     <label class="search sidebar-search"><span data-icon="search"></span><input id="guild-search" type="search" placeholder="Rechercher un serveur" aria-label="Rechercher un serveur"></label>
     <nav id="guild-list" aria-label="Sélection du serveur"></nav>
-    <div class="sidebar-footer"><span data-icon="shield"></span><div>Sur cet ordinateur<small>Consultation en lecture seule</small></div></div>
+    <div class="sidebar-footer"><span data-icon="shield"></span><div>Sur cet ordinateur<small>Pilotage réservé aux administrateurs</small></div></div>
   </aside>
   <main>
     <header class="topbar">
@@ -68,13 +68,15 @@
     <form id="connection-form">
       <label>Nom du bot<input id="connection-name" maxlength="60" required placeholder="Mon bot Discord" autocomplete="off"></label>
       <label>Adresse de l’API<input id="connection-url" type="url" required placeholder="https://bot.exemple.fr" autocomplete="off" spellcheck="false"></label>
-      <small class="field-help">Adresse HTTPS du service du bot, avec son éventuel préfixe. Ne pas ajouter /api/dashboard.</small>
+      <small class="field-help">Adresse HTTPS publique du bot, pas l’adresse KineticPanel. Ajoute seulement le préfixe éventuel, jamais /api/dashboard.</small>
       <label>Clé de diagnostic<input id="connection-token" type="password" placeholder="DASHBOARD_API_TOKEN · 32 caractères minimum" autocomplete="new-password" spellcheck="false" maxlength="512"></label>
-      <small id="token-help" class="field-help">Utilisez la clé DASHBOARD_API_TOKEN du bot, jamais son token Discord.</small>
+      <label>Clé administrateur (facultative)<input id="connection-control-token" type="password" placeholder="DASHBOARD_CONTROL_TOKEN · clé distincte pour redémarrer" autocomplete="new-password" spellcheck="false" maxlength="512"></label>
+      <small class="field-help">Réservée aux administrateurs : à configurer aussi sur le bot, lancé avec npm start.</small>
+      <small id="token-help" class="field-help">Utilisez DASHBOARD_API_TOKEN du bot, jamais la clé KineticPanel ni le token Discord.</small>
       <p id="form-error" class="form-error" role="alert" hidden></p>
       <div class="form-actions"><button id="lock-connection" type="button" class="button" hidden><span data-icon="lock"></span> Verrouiller</button><button id="save-connection" class="button primary" type="submit"><span data-icon="lock"></span> Enregistrer et verrouiller</button></div>
     </form>
-    <div class="dialog-footnote"><span data-icon="shield"></span> Verrouillez les champs pour éviter une modification accidentelle. Les clés sont dans <code>data/local-dashboard/.env</code>, ignoré par Git.</div>
+    <div class="dialog-footnote"><span data-icon="shield"></span> Les connexions sont synchronisées dans <code>.venv/local-dashboard/</code>, avec un dossier privé par bot. Ce dossier est ignoré par Git.</div>
   </dialog>
   <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title"><div class="dialog-heading"><h2 id="detail-title">Détail de l’événement</h2><button id="detail-close" class="icon-button" aria-label="Fermer les détails"><span data-icon="close"></span></button></div><div id="detail-content"></div></dialog>
   <div id="toast" class="toast" role="status" hidden></div>

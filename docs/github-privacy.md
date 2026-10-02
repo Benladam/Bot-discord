@@ -41,6 +41,13 @@ bases SQLite, les journaux, les archives, les raccourcis, les données Minecraft
 dossiers `ia-privee/`, `models/`, `checkpoints/`, `lora/` et `weights/` sont ignorés et
 également refusés par le garde Git même avec `git add -f`.
 
+`.venv` suit la même séparation : `.venv/README.md` et `.venv/examples/**` sont des
+modèles publics autorisés. `.venv/local-dashboard/`, `.venv/bots/`, les fichiers `.env`,
+les clés, les bases et les journaux restent locaux. Les modèles publics utilisent des
+valeurs fictives et peuvent être envoyés sur GitHub puis récupérés par le serveur du
+bot pour préparer sa configuration privée. Le garde Git inspecte aussi leur contenu et
+bloque une vraie clé même si quelqu'un force son ajout avec `git add -f`.
+
 Le code public de l’intégration IA reste dans `features/ai/`. Seuls les modèles, poids,
 conversations et configurations privées doivent rester dans les dossiers locaux ignorés.
 

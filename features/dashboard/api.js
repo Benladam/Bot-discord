@@ -20,8 +20,11 @@ function publicTrack(track) {
     requesterId: track.requesterId || null };
 }
 
-function createDashboardApi({ client, database, telemetry, env = process.env }) {
+function createDashboardApi({ client, database, telemetry, restartBot, env = process.env }) {
   const token = String(env.DASHBOARD_API_TOKEN || '');
+  const controlToken = String(env.DASHBOARD_CONTROL_TOKEN || '');
+  const canRestart = Buffer.byteLength(controlToken) >= 32 && controlToken !== token && env.BOT_SUPERVISED === '1' && typeof restartBot === 'function';
+  let restartPending = false;
   let cpuAt = performance.now();
   let cpuUsage = process.cpuUsage();
   let cpuPercent = null;
@@ -52,7 +55,7 @@ function createDashboardApi({ client, database, telemetry, env = process.env }) 
       cpuAt = now; cpuUsage = current;
     }
     const guilds = [...client.guilds.cache.values()].map(guildInfo).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-    return { protocolVersion: 1, timestamp: new Date().toISOString(), bot: {
+    return { protocolVersion: 1, timestamp: new Date().toISOString(), capabilities: { restart: canRestart }, bot: {
       id: client.user?.id || null, name: client.user?.username || 'Bot Discord',
       avatar: client.user?.displayAvatarURL?.({ size: 128 }) || null, ready: Boolean(client.isReady?.()),
       uptimeMs: client.uptime || 0, processUptimeSeconds: process.uptime(),
@@ -65,6 +68,22 @@ function createDashboardApi({ client, database, telemetry, env = process.env }) 
 
   async function handle(request, response, pathname) {
     if (!pathname.startsWith('/api/dashboard/')) return false;
+    if (pathname === '/api/dashboard/restart' && request.method === 'POST') {
+      const provided = String(request.headers.authorization || '').replace(/^Bearer /i, '');
+      if (!canRestart || !provided || !equal(provided, controlToken)) {
+        send(response, 403, { error: 'Redémarrage réservé à la clé administrateur distincte, sur un bot lancé avec npm start.' }); return true;
+      }
+      if (restartPending) { send(response, 409, { error: 'Redémarrage déjà demandé.' }); return true; }
+      restartPending = true;
+      telemetry.record({ category: 'system', message: 'Redémarrage demandé par un administrateur via le dashboard local.' });
+      response.once('finish', () => {
+        setTimeout(() => { void Promise.resolve().then(restartBot).catch(() => {
+          restartPending = false;
+          telemetry.record({ level: 'error', category: 'system', message: 'Échec du redémarrage demandé depuis le dashboard.' });
+        }); }, 1500);
+      });
+      send(response, 202, { accepted: true, message: 'Redémarrage accepté. La connexion sera rétablie automatiquement.' }); return true;
+    }
     if (request.method !== 'GET') { send(response, 405, { error: 'API de diagnostic en lecture seule.' }); return true; }
     if (Buffer.byteLength(token) < 32) { send(response, 503, { error: 'DASHBOARD_API_TOKEN doit être configuré sur le bot (32 caractères minimum).' }); return true; }
     const provided = String(request.headers.authorization || '').replace(/^Bearer /i, '');

@@ -1,4 +1,13 @@
 node_modules
+# Le contexte Docker peut recevoir les modèles publics, jamais le stockage local.
+.venv/**
+.venv/local-dashboard/
+.venv/bots/
+.venv/**/.env
+!.venv/README.md
+!.venv/examples/
+!.venv/examples/**
+.venv/examples/**/.env
 .git
 .github
 .autoresearch

@@ -47,8 +47,10 @@ Pour le **dashboard local**, lancez `npm run dashboard` ou `Dashboard-local.bat`
 Windows ouvre automatiquement **http://127.0.0.1:3090** dans le navigateur. L’adresse API et la clé se configurent dans l’interface, avec
 **Déverrouiller / Enregistrer et verrouiller**. Le bot distant doit avoir cette version
 installée et `DASHBOARD_API_TOKEN` configuré. Pour plusieurs bots, les clés saisies sont
-écrites dans `data/local-dashboard/.env` (ignoré par Git) et les métadonnées dans
-`connections.json`. Voir [la configuration détaillée](docs/local-dashboard.md).
+écrites dans `.venv/local-dashboard/.env` (ignoré par Git), avec un dossier par bot et les métadonnées dans
+`connections.json`. Les modèles publics à déployer avec le bot sont dans
+`.venv/examples/`; les clés réelles restent dans `.venv/local-dashboard/`. Voir
+[la configuration détaillée](docs/local-dashboard.md).
 
 ```bash
 git clone <URL HTTPS du dépôt GitHub>

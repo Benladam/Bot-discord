@@ -15,7 +15,7 @@ const SENSITIVE_DIRECTORIES = [
   [/^(?:ia|ia-privee|ai-local)(?:\/|$)/i, 'données IA locales'],
   [/^(?:models?|checkpoints?|lora|weights)(?:\/|$)/i, 'modèles ou poids IA'],
   [/^(?:backups?|secrets?|credentials?)(?:\/|$)/i, 'sauvegarde ou identifiants locaux'],
-  [/^(?:\.venv|node_modules|\.cache)(?:\/|$)/i, 'dépendances ou cache local'],
+  [/^(?:node_modules|\.cache)(?:\/|$)/i, 'dépendances ou cache local'],
 ];
 
 const SENSITIVE_FILENAMES = [
@@ -77,6 +77,14 @@ function isPlaceholder(value) {
 function pathReason(file) {
   const normalised = normalisePath(file);
   if (normalised === '.env.example') return null;
+
+  // `.venv/README.md` et `.venv/examples/**` sont les seuls chemins publics
+  // autorisés. Le contenu est tout de même inspecté par `contentIssues`.
+  const publicVenvPath = normalised === '.venv/README.md'
+    || normalised.startsWith('.venv/examples/');
+  if (normalised.startsWith('.venv/') && !publicVenvPath) {
+    return 'stockage privé .venv';
+  }
 
   for (const [pattern, reason] of SENSITIVE_DIRECTORIES) {
     if (pattern.test(normalised)) return reason;

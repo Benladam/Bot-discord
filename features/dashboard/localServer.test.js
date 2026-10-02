@@ -52,6 +52,11 @@ test('le dashboard stocke plusieurs clés dans son .env privé, jamais dans le J
     const secrets = await fs.readFile(path.join(fixture.root, '.env'), 'utf8');
     assert.match(secrets, new RegExp(TOKEN));
     assert.equal(JSON.stringify(created.data).includes(TOKEN), false);
+    const perBot = await fs.readFile(path.join(fixture.root, 'bots', created.data.id, '.env'), 'utf8');
+    assert.match(perBot, new RegExp(TOKEN));
+    assert.equal(require('dotenv').parse(perBot).DASHBOARD_REMOTE_URL, 'http://127.0.0.1:65534');
+    await jsonRequest(fixture.base, `/api/connections/${created.data.id}`, session.cookie, session.data.csrfToken, {}, 'DELETE');
+    await assert.rejects(fs.stat(path.join(fixture.root, 'bots', created.data.id)), { code: 'ENOENT' });
   } finally {
     await fixture.dashboard.close();
     await fs.rm(fixture.root, { recursive: true, force: true });

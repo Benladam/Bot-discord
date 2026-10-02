@@ -23,9 +23,10 @@ docs/                        documentation et guides d’exploitation
 data/                        données runtime locales ignorées par Git
 ```
 
-Les clés du dashboard local vivent dans `data/local-dashboard/.env`; les métadonnées de
-connexion vivent dans `data/local-dashboard/connections.json`. Le dossier `.venv` n’est pas
-créé ni utilisé : le projet est Node.js et ses dépendances sont dans `node_modules/`.
+Les connexions sont synchronisées dans `.venv/local-dashboard/`, avec un `.env` privé
+par bot dans `bots/<identifiant>/`. Ce stockage est ignoré par Git. Les modèles sans
+secret autorisés au partage sont dans `.venv/examples/`. Le projet reste Node.js :
+`.venv` sert ici au stockage local, ses dépendances sont dans `node_modules/`.
 
 Les scripts racine (`npm start`, `npm run dashboard`, `launch.sh`, `GUI-local.bat` et
 `Dashboard-local.bat`) sont conservés comme façades stables pour les installations existantes.

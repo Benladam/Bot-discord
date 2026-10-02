@@ -14,10 +14,12 @@ const MAX_RESPONSE = 2 * 1024 * 1024;
 
 function openBrowser(url) {
   const windows = process.platform === 'win32';
-  const command = windows ? 'cmd.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-  const args = windows ? ['/d', '/c', 'start', '', url] : [url];
-  const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: windows });
-  child.once('error', () => {});
+  const command = windows ? 'powershell.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = windows ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `Start-Process '${url}'`] : [url];
+  const child = spawn(command, args, { stdio: 'ignore', windowsHide: windows });
+  const fallback = () => console.warn(`[dashboard] Ouverture automatique impossible. Ctrl+clic : ${url}`);
+  child.once('error', fallback);
+  child.once('exit', (code) => { if (code) fallback(); });
   child.unref();
 }
 
@@ -46,11 +48,12 @@ async function readBody(request) {
   } catch (_) { throw Object.assign(new Error('Corps JSON invalide.'), { statusCode: 400 }); }
 }
 
-async function remoteRequest(connection, resource, fetchImpl = fetch) {
+async function remoteRequest(connection, resource, fetchImpl = fetch, options = {}) {
   let response;
   try {
     response = await fetchImpl(`${connection.url}/api/dashboard/${resource}`, {
-      headers: { authorization: `Bearer ${connection.token}`, accept: 'application/json' },
+      method: options.method || 'GET',
+      headers: { authorization: `Bearer ${options.control ? connection.controlToken : connection.token}`, accept: 'application/json' },
       redirect: 'error', signal: AbortSignal.timeout(10000),
     });
   } catch (_) {
@@ -133,10 +136,19 @@ function connectionFromIndexedEnv(item) {
   };
 }
 
-function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollIntervalMs = 3000 } = {}) {
+function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollIntervalMs = 3000, logger = console } = {}) {
   const requestedPort = Number(env.DASHBOARD_LOCAL_PORT ?? 3090);
   if (!Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > 65535) throw new Error('Port local invalide.');
-  const dataDir = path.resolve(env.DASHBOARD_DATA_DIR || path.join(__dirname, '..', '..', 'data', 'local-dashboard'));
+  const root = path.join(__dirname, '..', '..');
+  const dataDir = path.resolve(env.DASHBOARD_DATA_DIR || path.join(root, '.venv', 'local-dashboard'));
+  const legacyDir = path.join(root, 'data', 'local-dashboard');
+  if (!env.DASHBOARD_DATA_DIR && !fs.existsSync(path.join(dataDir, 'connections.json')) && fs.existsSync(path.join(legacyDir, 'connections.json'))) {
+    fs.mkdirSync(dataDir, { recursive: true });
+    for (const name of ['connections.json', '.env']) {
+      if (fs.existsSync(path.join(legacyDir, name))) fs.copyFileSync(path.join(legacyDir, name), path.join(dataDir, name), fs.constants.COPYFILE_EXCL);
+    }
+    logger.info('[dashboard] Connexions existantes importées dans .venv/local-dashboard.');
+  }
   const file = path.join(dataDir, 'connections.json');
   const secretFile = path.resolve(env.DASHBOARD_LOCAL_ENV_FILE || path.join(dataDir, '.env'));
   fs.mkdirSync(dataDir, { recursive: true });
@@ -153,7 +165,8 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
       const legacyToken = String(item.token || '');
       const token = legacyToken || String(dashboardSecrets[secretKey(id)] || '');
       if (legacyToken) { dashboardSecrets[secretKey(id)] = legacyToken; migrateSecrets = true; }
-      return { id, name: String(item.name), url: normalizeRemoteUrl(item.url), token, locked: item.locked !== false };
+      return { id, name: String(item.name), url: normalizeRemoteUrl(item.url), token,
+        controlToken: String(dashboardSecrets[secretKey(id).replace(/_TOKEN$/, '_CONTROL_TOKEN')] || ''), locked: item.locked !== false };
     });
   } else if (env.DASHBOARD_REMOTE_URL && env.DASHBOARD_API_TOKEN) {
     connections = [{ id: crypto.randomUUID(), name: 'Mon bot', url: normalizeRemoteUrl(env.DASHBOARD_REMOTE_URL),
@@ -172,12 +185,23 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
   const streams = new Set();
   const cache = new Map();
   const pending = new Map();
+  const observedLogs = new Map();
   let port = requestedPort;
 
   function save() {
     const nextSecrets = { ...dashboardSecrets };
     for (const key of Object.keys(nextSecrets)) if (key.startsWith(SECRET_PREFIX)) delete nextSecrets[key];
-    for (const item of connections) if (item.token) nextSecrets[secretKey(item.id)] = item.token;
+    for (const item of connections) {
+      if (item.token) nextSecrets[secretKey(item.id)] = item.token;
+      if (item.controlToken) nextSecrets[secretKey(item.id).replace(/_TOKEN$/, '_CONTROL_TOKEN')] = item.controlToken;
+      const directory = path.join(dataDir, 'bots', item.id);
+      fs.mkdirSync(directory, { recursive: true });
+      writePrivateEnv(path.join(directory, '.env'), { DASHBOARD_REMOTE_URL: item.url, DASHBOARD_API_TOKEN: item.token, DASHBOARD_CONTROL_TOKEN: item.controlToken });
+    }
+    const botDir = path.join(dataDir, 'bots');
+    if (fs.existsSync(botDir)) for (const id of fs.readdirSync(botDir)) {
+      if (!connections.some((item) => item.id === id) && /^[\w-]+$/.test(id)) fs.rmSync(path.join(botDir, id), { recursive: true, force: true });
+    }
     const temporary = `${file}.tmp`;
     fs.writeFileSync(temporary, JSON.stringify(connections.map(({ id, name, url, locked }) => ({ id, name, url, locked })), null, 2), { mode: 0o600 });
     writePrivateEnv(secretFile, nextSecrets);
@@ -187,8 +211,9 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
       catch (_) { throw error; }
     }
     dashboardSecrets = nextSecrets;
+    logger.info(`[dashboard] ${connections.length} connexion(s) synchronisée(s) dans le stockage privé.`);
   }
-  function publicConnection(item) { return { id: item.id, name: item.name, url: item.url, locked: item.locked !== false }; }
+  function publicConnection(item) { return { id: item.id, name: item.name, url: item.url, locked: item.locked !== false, controlConfigured: Boolean(item.controlToken) }; }
   function source(id) { return connections.find((item) => item.id === id); }
   function localAllowed(request) {
     const hosts = [`127.0.0.1:${port}`, `localhost:${port}`];
@@ -207,7 +232,7 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
     response.setHeader('cache-control', 'no-store');
   }
 
-  if (migrateSecrets) save();
+  if (migrateSecrets || connections.length) save();
 
   async function snapshot(connection) {
     if (pending.has(connection.id)) return pending.get(connection.id);
@@ -219,9 +244,25 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
         const data = await remoteRequest(connection, 'status', fetchImpl);
         if (data.protocolVersion !== 1 || !Array.isArray(data.guilds) || !data.bot) throw new Error('Version de l’API incompatible.');
         payload = { connected: true, source: publicConnection(connection), data };
+        try {
+          const previous = observedLogs.get(connection.id);
+          const events = await remoteRequest(connection, 'logs?limit=20', fetchImpl);
+          const entries = [...(events.logs || [])].sort((a, b) => Number(a.id) - Number(b.id));
+          for (const entry of entries) {
+            if (previous !== undefined && Number(entry.id) <= previous) continue;
+            let message = String(entry.message || '').replace(/[\r\n\x00-\x1f]/g, ' ').slice(0, 500);
+            for (const secret of [connection.token, connection.controlToken]) if (secret) message = message.split(secret).join('[masqué]');
+            message = message.replace(/https?:\/\/\S+/g, '[adresse masquée]').replace(/(Bearer\s+)\S+/gi, '$1[masqué]');
+            logger.info(`[bot ${connection.id}] ${entry.level || 'info'} · ${entry.category || 'system'} · ${message}`);
+          }
+          if (entries.length) observedLogs.set(connection.id, Math.max(previous || 0, ...entries.map((entry) => Number(entry.id) || 0)));
+        } catch (_) { /* Status remains available even when remote logs are unavailable. */ }
       } catch (error) {
         payload = { connected: false, source: publicConnection(connection), error: error.message,
           lastSeen: cached?.payload.connected ? cached.payload.data.timestamp : cached?.payload.lastSeen || null };
+      }
+      if (!cached || cached.payload.connected !== payload.connected || cached.payload.error !== payload.error) {
+        logger.info(`[dashboard] Bot ${connection.id} : ${payload.connected ? `connecté, ${payload.data.guilds.length} serveur(s) reçu(s)` : payload.error}`);
       }
       if (source(connection.id) === connection) cache.set(connection.id, { checkedAt: Date.now(), payload });
       return payload;
@@ -272,11 +313,15 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
       const input = await readBody(request);
       const name = String(input.name || '').trim().slice(0, 60);
       const token = String(input.token || '');
+      const controlToken = String(input.controlToken || '');
+      if (controlToken && (Buffer.byteLength(controlToken) < 32 || controlToken.length > 512 || /[\r\n]/.test(controlToken))) {
+        send(response, 400, { error: 'Clé administrateur invalide (32 caractères minimum).' }); return;
+      }
       if (!name || Buffer.byteLength(token) < 32 || token.length > 512 || /[\r\n]/.test(token)) {
         send(response, 400, { error: 'Nom et clé de diagnostic (32 caractères minimum) requis.' }); return;
       }
       if (connections.length >= 20) { send(response, 400, { error: 'Limite de 20 bots atteinte.' }); return; }
-      const connection = { id: crypto.randomUUID(), name, url: normalizeRemoteUrl(input.url), token, locked: true };
+      const connection = { id: crypto.randomUUID(), name, url: normalizeRemoteUrl(input.url), token, controlToken, locked: true };
       if (['localhost', '127.0.0.1', '[::1]'].includes(new URL(connection.url).hostname) && Number(new URL(connection.url).port) === port) {
         send(response, 400, { error: 'Indique l’adresse du bot, pas celle du dashboard local.' }); return;
       }
@@ -299,10 +344,14 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
       const input = await readBody(request);
       const name = String(input.name || '').trim().slice(0, 60);
       const token = input.token ? String(input.token) : connection.token;
+      const controlToken = input.controlToken ? String(input.controlToken) : connection.controlToken;
+      if (controlToken && (Buffer.byteLength(controlToken) < 32 || controlToken.length > 512 || /[\r\n]/.test(controlToken))) {
+        send(response, 400, { error: 'Clé administrateur invalide.' }); return;
+      }
       if (!name || Buffer.byteLength(token) < 32 || token.length > 512 || /[\r\n]/.test(token)) {
         send(response, 400, { error: 'Nom ou clé de diagnostic invalide.' }); return;
       }
-      const replacement = { id: connection.id, name, url: normalizeRemoteUrl(input.url), token, locked: true };
+      const replacement = { id: connection.id, name, url: normalizeRemoteUrl(input.url), token, controlToken, locked: true };
       if (['localhost', '127.0.0.1', '[::1]'].includes(new URL(replacement.url).hostname) && Number(new URL(replacement.url).port) === port) {
         send(response, 400, { error: 'Indique l’adresse du bot, pas celle du dashboard local.' }); return;
       }
@@ -319,6 +368,15 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
       if (!connection) { send(response, 404, { error: 'Connexion inconnue.' }); return; }
       await stream(request, response, connection); return;
     }
+    const restart = url.pathname.match(/^\/api\/bots\/([\w-]+)\/restart$/);
+    if (restart && request.method === 'POST') {
+      const connection = source(restart[1]);
+      if (!connection?.controlToken) { send(response, 403, { error: 'Configure la clé administrateur du bot pour redémarrer.' }); return; }
+      logger.info(`[dashboard] Ordre de redémarrage envoyé au bot ${connection.id}.`);
+      const result = await remoteRequest(connection, 'restart', fetchImpl, { method: 'POST', control: true });
+      logger.info(`[dashboard] Bot ${connection.id} : ordre accepté.`);
+      send(response, 202, result); return;
+    }
     const proxy = url.pathname.match(/^\/api\/bots\/([\w-]+)\/(status|logs|history|guilds\/\d{17,20}(?:\/playlists\/[^/]+)?)$/);
     if (proxy && request.method === 'GET') {
       const connection = source(proxy[1]);
@@ -332,6 +390,7 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
 
   const server = http.createServer((request, response) => {
     void handle(request, response).catch((error) => {
+      logger.warn(`[dashboard] Requête refusée : ${error.statusCode || 400}.`);
       if (!response.headersSent) send(response, error.statusCode || 400, { error: error.message || 'Erreur du dashboard.' });
       else response.destroy();
     });
@@ -343,7 +402,11 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
       resolve({ port, url: `http://127.0.0.1:${port}` });
     });
   });
+  const monitor = setInterval(() => { for (const connection of connections) void snapshot(connection); }, pollIntervalMs);
+  monitor.unref();
+  ready.then(() => { for (const connection of connections) void snapshot(connection); }, () => clearInterval(monitor));
   return { server, ready, close: async () => {
+    clearInterval(monitor);
     for (const response of streams) response.end();
     await new Promise((resolve) => { server.close(resolve); server.closeIdleConnections(); });
   } };
@@ -353,10 +416,24 @@ if (require.main === module) {
   require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env'), quiet: true });
   const dashboard = createLocalDashboard();
   dashboard.ready.then(({ url }) => {
-    console.log(`Dashboard local : ${url}\nLecture seule · aucun client Discord lancé.`);
-    if (process.env.DASHBOARD_OPEN_BROWSER === '1') openBrowser(url);
+    console.log(`Dashboard local : ${url}\nCtrl+clic sur le lien pour ouvrir le navigateur.\nJournaux du serveur local · Ctrl+C pour arrêter.`);
+    if (process.env.DASHBOARD_OPEN_BROWSER !== '0') openBrowser(url);
   })
-    .catch((error) => { console.error(`Dashboard indisponible : ${error.message}`); process.exitCode = 1; });
+    .catch(async (error) => {
+      const url = `http://127.0.0.1:${process.env.DASHBOARD_LOCAL_PORT || 3090}`;
+      if (error.code === 'EADDRINUSE') {
+        try {
+          const response = await fetch(`${url}/api/bootstrap`, { signal: AbortSignal.timeout(2000) });
+          const data = await response.json();
+          if (response.ok && typeof data.csrfToken === 'string' && Array.isArray(data.connections)) {
+            console.log(`Dashboard déjà lancé : ${url}\nCtrl+clic pour ouvrir le navigateur. Les logs restent dans sa fenêtre d'origine.`);
+            if (process.env.DASHBOARD_OPEN_BROWSER !== '0') openBrowser(url);
+            return;
+          }
+        } catch (_) {}
+      }
+      console.error(`Dashboard indisponible : ${error.message}\nLien : ${url}`); process.exitCode = 1;
+    });
   process.once('SIGINT', () => { void dashboard.close(); });
   process.once('SIGTERM', () => { void dashboard.close(); });
 }
