@@ -9,7 +9,8 @@ Avec Node.js 22.5+ et les dépendances du projet installées, double-cliquez sur
 npm run dashboard
 ```
 
-Ouvrez **http://127.0.0.1:3090**. Le service écoute uniquement sur cet ordinateur.
+`Dashboard-local.bat` ouvre automatiquement **http://127.0.0.1:3090** dans le navigateur.
+Avec `npm run dashboard`, ouvrez cette adresse manuellement. Le service écoute uniquement sur cet ordinateur.
 Il ne démarre aucun bot Discord : le bot peut continuer de tourner sur son hébergeur.
 Le port peut être modifié avec `DASHBOARD_LOCAL_PORT`.
 

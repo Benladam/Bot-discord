@@ -43,8 +43,8 @@ Avant tout commit ou push, activez la protection locale avec `npm run security:i
 données Minecraft, les modèles IA, les journaux et les fichiers privés. Voir
 [la procédure de protection GitHub](docs/github-privacy.md).
 
-Pour le **dashboard local**, lancez `npm run dashboard` ou `Dashboard-local.bat`, puis ouvrez
-**http://127.0.0.1:3090**. L’adresse API et la clé se configurent dans l’interface, avec
+Pour le **dashboard local**, lancez `npm run dashboard` ou `Dashboard-local.bat`. Le lanceur
+Windows ouvre automatiquement **http://127.0.0.1:3090** dans le navigateur. L’adresse API et la clé se configurent dans l’interface, avec
 **Déverrouiller / Enregistrer et verrouiller**. Le bot distant doit avoir cette version
 installée et `DASHBOARD_API_TOKEN` configuré. Pour plusieurs bots, les clés saisies sont
 écrites dans `data/local-dashboard/.env` (ignoré par Git) et les métadonnées dans

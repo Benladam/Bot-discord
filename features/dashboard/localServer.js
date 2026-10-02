@@ -4,12 +4,22 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { spawn } = require('node:child_process');
 const dotenv = require('dotenv');
 const { send } = require('./api');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY = 8192;
 const MAX_RESPONSE = 2 * 1024 * 1024;
+
+function openBrowser(url) {
+  const windows = process.platform === 'win32';
+  const command = windows ? 'cmd.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = windows ? ['/d', '/c', 'start', '', url] : [url];
+  const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: windows });
+  child.once('error', () => {});
+  child.unref();
+}
 
 function normalizeRemoteUrl(input) {
   let url;
@@ -342,7 +352,10 @@ function createLocalDashboard({ env = process.env, fetchImpl = fetch, pollInterv
 if (require.main === module) {
   require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env'), quiet: true });
   const dashboard = createLocalDashboard();
-  dashboard.ready.then(({ url }) => console.log(`Dashboard local : ${url}\nLecture seule · aucun client Discord lancé.`))
+  dashboard.ready.then(({ url }) => {
+    console.log(`Dashboard local : ${url}\nLecture seule · aucun client Discord lancé.`);
+    if (process.env.DASHBOARD_OPEN_BROWSER === '1') openBrowser(url);
+  })
     .catch((error) => { console.error(`Dashboard indisponible : ${error.message}`); process.exitCode = 1; });
   process.once('SIGINT', () => { void dashboard.close(); });
   process.once('SIGTERM', () => { void dashboard.close(); });

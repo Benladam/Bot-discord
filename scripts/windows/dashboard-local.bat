@@ -8,7 +8,8 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo Ouvrez l'adresse affichee ci-dessous dans votre navigateur.
+echo Le navigateur va ouvrir automatiquement l'adresse affichee ci-dessous.
 echo Fermez cette fenetre pour arreter le dashboard local.
+set "DASHBOARD_OPEN_BROWSER=1"
 node features\dashboard\localServer.js
 if errorlevel 1 pause
