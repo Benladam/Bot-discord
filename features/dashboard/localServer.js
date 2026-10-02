@@ -14,10 +14,28 @@ const MAX_RESPONSE = 2 * 1024 * 1024;
 
 function openBrowser(url) {
   const windows = process.platform === 'win32';
-  const command = windows ? 'powershell.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-  const args = windows ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `Start-Process '${url}'`] : [url];
+  const command = windows ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = [url];
+  let fallbackStarted = false;
+  const fallback = () => {
+    if (fallbackStarted) return;
+    fallbackStarted = true;
+    if (!windows) {
+      console.warn(`[dashboard] Ouverture automatique impossible. Ctrl+clic : ${url}`);
+      return;
+    }
+    // `Start-Process` peut être refusé lorsque le dashboard est lancé depuis
+    // un raccourci ou une console protégée. Le gestionnaire Windows est plus
+    // fiable et ce second mécanisme reste sans fenêtre supplémentaire.
+    const fallbackChild = spawn('rundll32.exe', ['url.dll,FileProtocolHandler', url], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    fallbackChild.once('error', () => console.warn(`[dashboard] Ouverture automatique impossible. Ctrl+clic : ${url}`));
+    fallbackChild.once('exit', (code) => { if (code) console.warn(`[dashboard] Ouverture automatique impossible. Ctrl+clic : ${url}`); });
+    fallbackChild.unref();
+  };
   const child = spawn(command, args, { stdio: 'ignore', windowsHide: windows });
-  const fallback = () => console.warn(`[dashboard] Ouverture automatique impossible. Ctrl+clic : ${url}`);
   child.once('error', fallback);
   child.once('exit', (code) => { if (code) fallback(); });
   child.unref();
