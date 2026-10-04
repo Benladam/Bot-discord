@@ -182,8 +182,10 @@ async function resolveDeezerTracks(tracks, {
       const query = [artist, title].filter(Boolean).join(' - ');
       let media;
       try {
-        const results = await search(query, { limit: 1 });
-        const video = Array.isArray(results) ? results[0] : null;
+        const results = await search(query, { limit: 5, timeoutMs: 6_000 });
+        const video = (Array.isArray(results) ? results : []).map(candidate => ({ candidate,
+          score: soundCloudMatchScore(candidate, { query, expectedTitle: title, expectedDuration: track.durationInSec || track.duration }),
+        })).filter(item => item.score > 0).sort((a, b) => b.score - a.score)[0]?.candidate;
         if (video?.url && youtubeVideoId(video.url)) media = video;
       } catch (error) {
         try { onSearchError(query, error); } catch (_) { /* garder la recherche indépendante du logger */ }

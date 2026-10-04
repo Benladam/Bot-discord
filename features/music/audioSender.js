@@ -7,10 +7,11 @@ const ffmpegStatic = require('ffmpeg-static');
 const play = require('play-dl');
 const { ensureManagedYtDlp, getDataDirectory } = require('./ytDlp');
 const { configureSoundCloud } = require('./providers/soundcloud');
-const { matchesRequestedTrack, candidateTitle, candidateArtist, fallbackSearchQuery } = require('./trackMatching');
+const { candidateTitle, candidateArtist, fallbackSearchQuery } = require('./trackMatching');
 const { PcmVolume } = require('./pcmVolume');
 const { readCookieFile } = require('./youtubeCookies');
 const { soundCloudMatchScore, soundCloudSearchQueries } = require('./soundCloudMatching');
+const { startRecoveringPlayback } = require('./playbackRecovery');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
@@ -265,6 +266,7 @@ async function soundCloudSearchStream(query, {
   openTrack = soundCloudStream,
   isConfigured = configureSoundCloud,
   timeoutMs = 12_000,
+  excludedUrls = [],
 } = {}) {
   const queries = soundCloudSearchQueries(query, expectedTitle);
   if (!queries.length) throw new Error('Recherche SoundCloud trop courte.');
@@ -284,7 +286,7 @@ async function soundCloudSearchStream(query, {
     for (const track of (Array.isArray(tracks) ? tracks : []).slice(0, 25)) {
       if (!track) continue;
       const url = track.permalink || track.webpage_url || track.url;
-      if (!url || !isSoundCloudUrl(url) || opened.has(url)) continue;
+      if (!url || !isSoundCloudUrl(url) || opened.has(url) || excludedUrls.includes(url)) continue;
       const duration = Number(track.durationInSec ?? track.duration);
       const score = soundCloudMatchScore(track, { query, expectedTitle, expectedDuration });
       // Une autre source peut fournir des métadonnées plus complètes pour la
@@ -307,6 +309,7 @@ async function soundCloudSearchStream(query, {
       attemptedFullTracks++;
       try {
         const stream = await openTrack(url);
+        if (stream && typeof stream === 'object') stream.musicSource = { sourceUrl: url, provider: 'SoundCloud' };
         console.info(`[audio] repli SoundCloud validé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || queries[0]))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))} durée=${duration || 0}s score=${score.toFixed(1)}`);
         return stream;
       } catch (error) { lastError = error; }
@@ -357,21 +360,23 @@ async function youtubeSearchStream(query, {
   guildId,
   searchCandidates = searchYouTubeCandidates,
   openTrack = streamYtDlp,
+  excludedUrls = [],
 } = {}) {
   const normalized = fallbackSearchQuery(query, expectedTitle);
   if (normalized.length < 2) throw new Error('Recherche YouTube trop courte.');
-  const videos = await searchCandidates(normalized, { limit: 10 });
+  const videos = await searchCandidates(normalized, { limit: 5, timeoutMs: 6_000 });
   let lastError = null;
   let attempted = 0;
   for (const video of videos.slice(0, 10)) {
-    if (!video.url || !isYouTubeUrl(video.url)) continue;
-    if (!matchesRequestedTrack(video, { query, expectedTitle, expectedDuration })) {
+    if (!video.url || !isYouTubeUrl(video.url) || excludedUrls.includes(video.url)) continue;
+    if (!soundCloudMatchScore(video, { query, expectedTitle, expectedDuration })) {
       console.info(`[audio] résultat YouTube refusé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(video)))}`);
       continue;
     }
     attempted++;
     try {
       const stream = await openTrack(video.url);
+      if (stream && typeof stream === 'object') stream.musicSource = { sourceUrl: video.url, provider: 'YouTube' };
       console.info(`[audio] repli YouTube validé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || normalized))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(video)))}`);
       return stream;
     } catch (error) {
@@ -429,6 +434,7 @@ function buildYtDlpArgs(preArgs, url, {
     ? 'bestaudio[format_id!*=preview]/best[format_id!*=preview]'
     : 'bestaudio/best';
   args.push('--no-playlist', '-f', formatSelector);
+  args.push('--socket-timeout', '10', '--retries', '2', '--fragment-retries', '3', '--abort-on-unavailable-fragments');
   if (outputToStdout) args.push('-o', '-');
   else args.push('-g');
   args.push(url);
@@ -1069,15 +1075,29 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
   const searchSoundCloudStream = providerOverrides.searchSoundCloudStream || soundCloudSearchStream;
   const normalizedQuery = String(fallbackQuery || '').trim().slice(0, 200);
   const asMedia = (source, options = {}) => {
-    if (source && typeof source.pipe === 'function') return { stream: source, ...options };
+    if (source && typeof source.pipe === 'function') return { stream: source, ...source.musicSource, ...options };
     if (source && typeof source === 'object' && source.stream?.pipe) return { ...source, ...options };
     if (typeof source === 'string' && isAudioUrl(source)) return { url: source, ...options };
     throw new Error('Le fournisseur n’a pas retourné de flux audio exploitable.');
   };
 
+  if ((providerOverrides.recoverySearch || providerOverrides.requiresSearch) && normalizedQuery) {
+    const options = {
+      expectedDuration: providerOverrides.expectedDuration, expectedTitle: providerOverrides.expectedTitle,
+      guildId: providerOverrides.guildId, excludedUrls: providerOverrides.excludedUrls || [],
+    };
+    try {
+      return asMedia(await searchYouTubeStream(normalizedQuery, options), { fallback: !!providerOverrides.recoverySearch, fallbackProvider: 'YouTube' });
+    } catch (youtubeError) {
+      try {
+        return asMedia(await searchSoundCloudStream(normalizedQuery, options), { fallback: true, fallbackProvider: 'SoundCloud' });
+      } catch (soundCloudError) { throw providerFailure('YouTube', youtubeError, 'SoundCloud', soundCloudError); }
+    }
+  }
+
   if (isSoundCloudUrl(url)) {
     try {
-      return asMedia(await getSoundCloudStream(url), { fallback: false });
+      return asMedia(await getSoundCloudStream(url), { fallback: false, sourceUrl: url, provider: 'SoundCloud' });
     } catch (soundCloudError) {
       if (!normalizedQuery) throw soundCloudError;
       try {
@@ -1093,7 +1113,7 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
   }
 
   try {
-    return asMedia(await getYouTubeStream(url), { fallback: false });
+    return asMedia(await getYouTubeStream(url), { fallback: false, sourceUrl: url, provider: 'YouTube' });
   } catch (youtubeError) {
     if (!normalizedQuery || !isYouTubeUrl(url)) throw youtubeError;
     console.warn(`[audio] source YouTube indisponible serveur=${providerOverrides.guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(providerOverrides.expectedTitle || normalizedQuery))} cause=${JSON.stringify(sanitizeYtDlpDiagnostic(youtubeError.message))}`);
@@ -1110,10 +1130,36 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
 }
 
 async function start(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies = {}) {
+  if (dependencies.recovery === false || !(dependencies.requiresSearch || isYouTubeUrl(url) || isSoundCloudUrl(url))) {
+    return startAttempt(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies);
+  }
+  const prepare = dependencies.prepareInput || prepareInput;
+  const failedUrls = new Set();
+  return startRecoveringPlayback({
+    shouldStart: dependencies.shouldStart, initialVolume: dependencies.initialVolume,
+    onStart, onEnd, onError,
+    onRecovery: ({ attempt, position, code }) => console.info(`[audio] reprise même titre serveur=${dependencies.guildId || '?'} tentative=${attempt}/2 position=${position.toFixed(2)}s cause=${code}`),
+    prepareRecovery: (error, attempt) => {
+      const sourceUrl = error.sourceUrl || url;
+      failedUrls.add(sourceUrl);
+      return prepare(attempt === 1 ? sourceUrl : url, fallbackQuery, {
+        expectedDuration: dependencies.expectedDuration, expectedTitle: dependencies.expectedTitle,
+        guildId: dependencies.guildId, recoverySearch: attempt > 1 || sourceUrl === url && dependencies.requiresSearch,
+        excludedUrls: [...failedUrls],
+      });
+    },
+    startAttempt: options => startAttempt(connection, url, options.onStart, options.onEnd, options.onError, fallbackQuery, {
+      ...dependencies, ...options, preparedMedia: options.preparedMedia || (options.resumeAt === 0 ? dependencies.preparedMedia : undefined),
+    }),
+  });
+}
+
+async function startAttempt(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies = {}) {
   const media = dependencies.preparedMedia || await (dependencies.prepareInput || prepareInput)(url, fallbackQuery, {
     expectedDuration: dependencies.expectedDuration,
     expectedTitle: dependencies.expectedTitle,
     guildId: dependencies.guildId,
+    requiresSearch: dependencies.requiresSearch,
   });
   if (dependencies.shouldStart && !dependencies.shouldStart()) {
     try { media.stream?.cleanup?.(); } catch (_) {}
@@ -1130,9 +1176,13 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
   let ffmpeg;
   let decoder;
   const gain = new PcmVolume(dependencies.initialVolume ?? 1);
+  const resumeAt = Math.max(0, Number(dependencies.resumeAt) || 0);
   try {
     decoder = (dependencies.spawn || spawn)(bin('ffmpeg', 'FFMPEG_PATH'), [
-      '-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-i', media.stream ? 'pipe:0' : media.url, '-vn',
+      '-hide_banner', '-loglevel', 'error', '-nostdin',
+      ...(resumeAt ? (media.stream ? [] : ['-ss', String(resumeAt)]) : ['-re']),
+      '-i', media.stream ? 'pipe:0' : media.url,
+      ...(resumeAt && media.stream ? ['-ss', String(resumeAt)] : []), '-vn',
       '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11', '-ar', '48000', '-ac', '2',
       '-c:a', 'pcm_s16le', '-f', 's16le', 'pipe:1',
     ], { windowsHide: true });
@@ -1151,11 +1201,15 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
   const parser = new OggParser(); let frames = []; let paused = false; let started = false; let stopped = false;
   let ffmpegError = ''; let errorReported = false;
   let totalAudioFrames = 0;
+  let sentAudioFrames = 0;
   let readinessTimer = null;
   let drainTimer = null;
+  let watchdog = null;
+  let lastProgress = Date.now();
   const cleanup = () => {
     clearInterval(tick);
     clearInterval(drainTimer);
+    clearInterval(watchdog);
     clearTimeout(readinessTimer);
     try { media.stream?.cleanup?.(); } catch (_) {}
     try { media.stream?.destroy(); } catch (_) {}
@@ -1166,6 +1220,8 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
   const reportFfmpegError = (error) => {
     if (stopped || errorReported) return;
     errorReported = true;
+    error.playbackPosition = resumeAt + sentAudioFrames * 0.02;
+    Object.defineProperty(error, 'sourceUrl', { value: media.sourceUrl || url, configurable: true });
     stopped = true;
     cleanup();
     onError?.(error);
@@ -1179,10 +1235,20 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
     catch (error) { reportFfmpegError(error); return; }
     if (!ok) return;
     frames.shift();
+    sentAudioFrames++;
+    lastProgress = Date.now();
     if (frames.length <= RESUME_OPUS_BUFFER_FRAMES && ffmpeg.stdout.isPaused()) ffmpeg.stdout.resume();
     if (readinessTimer) { clearTimeout(readinessTimer); readinessTimer = null; }
     if (!started) { started = true; onStart?.(); }
   }, 20);
+  watchdog = setInterval(() => {
+    if (paused || connection.daveRequired && !connection.dave?.ready) { lastProgress = Date.now(); return; }
+    if (!stopped && Date.now() - lastProgress > (dependencies.stallTimeoutMs || 20_000)) {
+      const error = new Error('Le flux audio ne progresse plus.');
+      error.code = 'AUDIO_STALLED';
+      reportFfmpegError(error);
+    }
+  }, 1000);
   readinessTimer = setTimeout(() => {
     if (connection.daveRequired && (!connection.dave || !connection.dave.ready)) {
       reportFfmpegError(new Error('La session DAVE de Discord ne s’est pas initialisée. Réessaie de rejoindre le vocal.'));
@@ -1239,8 +1305,9 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
       return;
     }
     const expectedDuration = Number(dependencies.expectedDuration);
-    const streamedDuration = totalAudioFrames * 0.02;
-    if (totalAudioFrames < 50 || (Number.isFinite(expectedDuration) && expectedDuration >= 45 && streamedDuration < expectedDuration * 0.65)) {
+    const streamedDuration = resumeAt + totalAudioFrames * 0.02;
+    const endTolerance = Math.min(15, Math.max(5, expectedDuration * 0.06));
+    if (totalAudioFrames < 50 || (Number.isFinite(expectedDuration) && expectedDuration >= 45 && streamedDuration < expectedDuration - endTolerance)) {
       const error = new Error(totalAudioFrames < 50
         ? 'Le fournisseur a fermé le flux avant que la musique ne commence réellement.'
         : `Le flux audio s’est terminé prématurément (${Math.floor(streamedDuration)} s reçues sur environ ${Math.floor(expectedDuration)} s).`);

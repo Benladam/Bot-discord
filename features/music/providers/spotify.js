@@ -12,36 +12,39 @@
 
 const play = require('play-dl');
 const { searchYouTubeCandidates } = require('../audioSender');
+const { getPublicPlaylist } = require('./spotifyPublic');
 const MAX_SPOTIFY_TRACKS = 100;
 
-let spotifySearchApi = null;
-let spotifySearchClientId = null;
-let spotifySearchTokenExpiresAt = 0;
-let spotifySearchTokenRequest = null;
+const tokenCaches = new Map();
 
-async function getSpotifyApi() {
+async function getSpotifyApi({ userAccess = false, forceRefresh = false } = {}) {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
   if (!clientId || !clientSecret) return null;
 
   const SpotifyWebApi = require('spotify-web-api-node');
-  if (!spotifySearchApi || spotifySearchClientId !== clientId) {
-    spotifySearchApi = new SpotifyWebApi({ clientId, clientSecret });
-    spotifySearchClientId = clientId;
-    spotifySearchTokenExpiresAt = 0;
+  const refreshToken = userAccess ? process.env.SPOTIFY_REFRESH_TOKEN || '' : '';
+  const mode = userAccess ? 'user' : 'app';
+  const credentials = JSON.stringify([clientId, clientSecret, refreshToken]);
+  let cache = tokenCaches.get(mode);
+  if (!cache || cache.credentials !== credentials) {
+    cache = { api: new SpotifyWebApi({ clientId, clientSecret }), credentials, expiresAt: 0, request: null };
+    if (refreshToken) cache.api.setRefreshToken(refreshToken);
+    tokenCaches.set(mode, cache);
   }
-  if (Date.now() < spotifySearchTokenExpiresAt - 60_000) return spotifySearchApi;
-
-  if (!spotifySearchTokenRequest) {
-    spotifySearchTokenRequest = spotifySearchApi.clientCredentialsGrant()
+  if (!forceRefresh && Date.now() < cache.expiresAt - 60_000) return cache.api;
+  if (!cache.request) {
+    cache.request = (refreshToken ? cache.api.refreshAccessToken() : cache.api.clientCredentialsGrant())
       .then(({ body }) => {
-        spotifySearchApi.setAccessToken(body.access_token);
-        spotifySearchTokenExpiresAt = Date.now() + (body.expires_in || 3600) * 1000;
-        return spotifySearchApi;
+        if (!body.access_token) throw new Error('Spotify n’a pas délivré de jeton d’accès.');
+        cache.api.setAccessToken(body.access_token);
+        if (body.refresh_token) cache.api.setRefreshToken(body.refresh_token);
+        cache.expiresAt = Date.now() + (body.expires_in || 3600) * 1000;
+        return cache.api;
       })
-      .finally(() => { spotifySearchTokenRequest = null; });
+      .finally(() => { cache.request = null; });
   }
-  return spotifySearchTokenRequest;
+  return cache.request;
 }
 
 /** Résultats de recherche Spotify pour les suggestions de /play. */
@@ -207,32 +210,41 @@ async function resolveTrack(api, track) {
 }
 
 async function resolveTracks(api, tracks) {
-  const resolved = [];
-  for (let offset = 0; offset < tracks.length && resolved.length < MAX_SPOTIFY_TRACKS; offset += 4) {
-    const batch = tracks.slice(offset, offset + 4);
-    const songs = await Promise.all(batch.map((track) =>
-      resolveTrack(api, track).catch((error) => {
-        console.warn(`[spotify] piste ignorée (${track?.name || 'sans titre'}): ${error.message}`);
-        return null;
-      })
-    ));
-    resolved.push(...songs.filter(Boolean).slice(0, MAX_SPOTIFY_TRACKS - resolved.length));
-  }
-  return resolved;
+  // La recherche audio se fait au démarrage de chaque piste, pas pour toute
+  // la playlist avant sa mise en file. Aucun flux partagé ou persisté.
+  return tracks.filter(track => track?.name && track.id && !track.is_local && (!track.type || track.type === 'track'))
+    .slice(0, MAX_SPOTIFY_TRACKS).map(track => {
+      const artists = (track.artists || []).map(artist => artist.name).filter(Boolean).join(', ');
+      return { title: `${track.name}${artists ? ` - ${artists}` : ''}`,
+        url: `https://open.spotify.com/track/${track.id}`, source: 'spotify', requiresSearch: true,
+        fallbackQuery: `${artists} - ${track.name}`, duration: Math.round((Number(track.duration_ms) || 0) / 1000),
+        thumbnail: track.album?.images?.[0]?.url || null };
+    });
 }
 
-async function getSpotifyPlaylistItems(api, playlistId, limit, offset) {
+async function getSpotifyPlaylistItems(api, playlistId, limit, offset, retry = true) {
   const params = new URLSearchParams({
-    limit: String(limit), offset: String(offset),
+    limit: String(Math.min(50, limit)), offset: String(offset),
     market: process.env.MUSIC_MARKET || 'FR', additional_types: 'track',
   });
   const response = await fetch(`https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/items?${params}`, {
     headers: { Authorization: `Bearer ${api.getAccessToken()}` },
+    signal: AbortSignal.timeout(8_000),
   });
-  if (response.status === 403) {
-    throw new Error('Spotify ne permet de lire cette playlist qu’avec le compte propriétaire ou un collaborateur autorisé.');
+  if (response.status === 401 && retry) {
+    const refreshed = await getSpotifyApi({ userAccess: true, forceRefresh: true });
+    return getSpotifyPlaylistItems(refreshed, playlistId, limit, offset, false);
   }
-  if (!response.ok) throw new Error(`Spotify refuse la lecture de la playlist (HTTP ${response.status}).`);
+  if (response.status === 403) {
+    const error = new Error('Spotify ne permet de lire cette playlist qu’avec le compte propriétaire ou un collaborateur autorisé. Configure SPOTIFY_REFRESH_TOKEN avec son autorisation OAuth.');
+    error.statusCode = 403;
+    throw error;
+  }
+  if (!response.ok) {
+    const error = new Error(`Spotify refuse la lecture de la playlist (HTTP ${response.status}). Pour un accès complet, configure SPOTIFY_REFRESH_TOKEN avec l’autorisation du propriétaire.`);
+    error.statusCode = response.status;
+    throw error;
+  }
   return response.json();
 }
 
@@ -242,6 +254,39 @@ async function getSpotifyPlaylistItems(api, playlistId, limit, offset) {
  * @returns {Promise<Array<{title,url,duration,thumbnail,source}>>}
  */
 async function resolveSpotifyLink(url) {
+  const { type, id } = parseSpotifyUrl(url);
+  if (type === 'unknown') throw new Error('Lien Spotify non supporté. Utilisez un lien piste (track), album ou playlist.');
+  // Le catalogue public reste accessible si les droits API ont changé.
+  if (type === 'playlist') {
+    let apiError;
+    try {
+      const api = await getSpotifyApi({ userAccess: true });
+      if (!api) throw new Error('Configure SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET et SPOTIFY_REFRESH_TOKEN pour accéder à une playlist privée.');
+      let offset = 0;
+      const tracks = [];
+      while (offset < 1000 && tracks.length < MAX_SPOTIFY_TRACKS) {
+        const page = await getSpotifyPlaylistItems(api, id, Math.min(50, MAX_SPOTIFY_TRACKS - tracks.length), offset);
+        tracks.push(...(page.items || []).map(entry => entry?.item || entry?.track).filter(track => track?.name && !track.is_local && (!track.type || track.type === 'track')));
+        if (!page.next || !page.items?.length) break;
+        offset += page.items.length;
+      }
+      const songs = await resolveTracks(api, tracks);
+      if (!songs.length) throw new Error('Aucune musique correspondante accessible pour cette playlist Spotify.');
+      return songs;
+    } catch (error) {
+      apiError = error;
+      if (error.statusCode && ![401, 403].includes(error.statusCode)) throw error;
+      if (/Aucune musique correspondante/.test(error.message)) throw error;
+    }
+    try {
+      const tracks = await getPublicPlaylist(id);
+      const songs = await resolveTracks(null, tracks);
+      if (!songs.length) throw apiError;
+      songs[0].playlistNotice = `Aperçu public Spotify : ${songs.length} titres accessibles, pas nécessairement la playlist complète. Pour l’accès complet, configure l’autorisation Spotify du propriétaire.`;
+      console.info(`[spotify] playlist publique ${id}: ${songs.length} titres importés depuis l’aperçu, liste potentiellement partielle.`);
+      return songs;
+    } catch (_) { throw apiError; }
+  }
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 
@@ -255,7 +300,6 @@ async function resolveSpotifyLink(url) {
 
   const api = await getSpotifyApi();
 
-  const { type, id } = parseSpotifyUrl(url);
   const songs = [];
 
   if (type === 'track') {
@@ -271,17 +315,6 @@ async function resolveSpotifyLink(url) {
       tracks.push(...(body.items || []));
       if (!body.next || !body.items?.length) break;
       offset += body.items.length;
-    }
-    songs.push(...await resolveTracks(api, tracks));
-  } else if (type === 'playlist') {
-    let offset = 0;
-    const tracks = [];
-    while (tracks.length < MAX_SPOTIFY_TRACKS) {
-      const limit = Math.min(100, MAX_SPOTIFY_TRACKS - tracks.length);
-      const page = await getSpotifyPlaylistItems(api, id, limit, offset);
-      tracks.push(...(page.items || []).map((entry) => entry.item || entry.track).filter(Boolean));
-      if (!page.next || !page.items?.length) break;
-      offset += page.items.length;
     }
     songs.push(...await resolveTracks(api, tracks));
   } else {
@@ -316,5 +349,5 @@ async function resolveTrackWithoutApi(url) {
 }
 
 module.exports = {
-  isSpotifyUrl, parseSpotifyUrl, resolveSpotifyLink, searchSpotify, searchSpotifyCatalog, getSpotifyArtistAlbums, searchYouTube,
+  isSpotifyUrl, parseSpotifyUrl, resolveSpotifyLink, searchSpotify, searchSpotifyCatalog, getSpotifyArtistAlbums, searchYouTube, getSpotifyApi,
 };

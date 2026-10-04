@@ -487,9 +487,9 @@ module.exports = {
       }));
       const { queued, player } = await queueSongs(ctx, deps, songs);
       loggerCall(deps, 'info', `[play] lecture ${queued ? 'ajoutée à la file' : 'lancée'} titre=${JSON.stringify(cleanLogText(songs[0]?.title, 160))} pistes=${songs.length}`);
-      if (isSlash(ctx)) return edit({ content: `${songs.length} titre${songs.length === 1 ? '' : 's'} ${queued ? 'ajouté(s) à la file' : 'ajouté(s) · lecture lancée'}.`, embeds: [], components: [] });
-      if (queued) return edit(withProviderIcons({ embeds: [embeds.addedEmbed(songs[0], player.queue.length, player.queue.length, lang)] }));
-      return edit(withProviderIcons({ embeds: [embeds.playingEmbed(songs[0], player, lang)] }));
+      if (isSlash(ctx)) return edit({ content: `${songs.length} titre${songs.length === 1 ? '' : 's'} ${queued ? 'ajouté(s) à la file' : 'ajouté(s) · lecture lancée'}.${songs[0]?.playlistNotice ? `\n${songs[0].playlistNotice}` : ''}`, embeds: [], components: [] });
+      if (queued) return edit(withProviderIcons({ content: songs[0]?.playlistNotice || '', embeds: [embeds.addedEmbed(songs[0], player.queue.length, player.queue.length, lang)] }));
+      return edit(withProviderIcons({ content: songs[0]?.playlistNotice || '', embeds: [embeds.playingEmbed(songs[0], player, lang)] }));
     } catch (error) {
       loggerCall(deps, 'error', `[play] échec code=${error?.code || 'n/a'} plateforme=${inputInfo.providerLabel || 'recherche'} terme=${JSON.stringify(cleanLogText(searchTerm, 160))} détail=${sanitizeDiagnosticText(error.message)}`);
       if (error?.code === 'VOCAL_UNAVAILABLE') return edit({ embeds: [embeds.notFoundEmbed(lang)] });

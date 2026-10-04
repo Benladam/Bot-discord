@@ -150,7 +150,7 @@ test('le repli YouTube refuse aussi une autre piste ou un remix', async () => {
     searchCandidates: async () => [
       { title: 'Niska - Réseaux', url: 'https://youtu.be/wrong' },
       { title: 'Niska - Chasse à l’homme Remix', url: 'https://youtu.be/remix' },
-      { title: 'Niska - Chasse à l’homme (Clip Officiel)', url: 'https://youtu.be/correct' },
+      { title: 'Niska - Chasse à l’homme (Clip Officiel)', duration: 164, url: 'https://youtu.be/correct' },
     ],
     openTrack: async url => { opened.push(url); return new PassThrough(); },
   });
@@ -281,4 +281,16 @@ test('ne lance pas une recherche de repli sans métadonnées de requête', async
     searchSoundCloudStream: async () => { attemptedSoundCloud = true; return new PassThrough(); },
   }), /YouTube indisponible/);
   assert.equal(attemptedSoundCloud, false);
+});
+
+test('une piste de playlist Spotify cherche YouTube avant SoundCloud, sans lire l’URL Spotify', async () => {
+  const calls = [];
+  const stream = new PassThrough();
+  const media = await prepareInput('https://open.spotify.com/track/track123', 'Jul - Je suis love', {
+    requiresSearch: true, expectedDuration: 222, expectedTitle: 'Je suis love - Jul',
+    getYouTubeStream: async () => assert.fail('Pas d’extraction audio d’une URL Spotify'),
+    searchYouTubeStream: async (_query, options) => { calls.push('YouTube'); assert.equal(options.expectedDuration, 222); throw new Error('source inaccessible'); },
+    searchSoundCloudStream: async () => { calls.push('SoundCloud'); return stream; },
+  });
+  assert.deepEqual(calls, ['YouTube', 'SoundCloud']); assert.equal(media.stream, stream); stream.destroy();
 });

@@ -4,7 +4,8 @@ const { PassThrough } = require('node:stream');
 const { spawn } = require('node:child_process');
 const { OpusSender } = require('./audioSender');
 
-test('la chaîne réelle FFmpeg → gain PCM → Opus finit proprement et encode le volume demandé', { timeout: 15000 }, async () => {
+for (const resumeAt of [0, 1]) {
+test(`la chaîne réelle FFmpeg → gain PCM → Opus finit proprement (reprise=${resumeAt}s)`, { timeout: 15000 }, async () => {
   const source = new PassThrough();
   const rate = 48000;
   const pcm = Buffer.alloc(rate * 2 * 2 * 2); // 2 s, stéréo, 16 bits
@@ -26,7 +27,7 @@ test('la chaîne réelle FFmpeg → gain PCM → Opus finit proprement et encode
   let reject;
   const ended = new Promise((resolve, fail) => { finish = resolve; reject = fail; });
   const sender = await OpusSender.start({ connected: true, sendOpus: () => { packets++; return true; } }, '', null, finish, reject, '', {
-    preparedMedia: { stream: source }, initialVolume: 0,
+    preparedMedia: { stream: source }, initialVolume: 0, resumeAt,
     spawn: (binary, args, options) => {
       const child = spawn(binary, args, options);
       if (args.includes('libopus')) {
@@ -44,7 +45,9 @@ test('la chaîne réelle FFmpeg → gain PCM → Opus finit proprement et encode
   try {
     await ended;
     assert.ok(packets >= 50);
+    if (resumeAt) assert.ok(packets <= 55, 'la reprise ne renvoie que la seconde restante');
     assert.ok(encodedSamples > 10000);
     assert.equal(nonZero, false, 'le mode muet doit encoder du silence, pas seulement afficher 0%');
   } finally { clearTimeout(timeout); sender.stop(); }
 });
+}

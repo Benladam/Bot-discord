@@ -369,6 +369,7 @@ class MusicPlayer {
         this.isPlaying = false;
         preparedMedia = await OpusSender.prepare(song.url, song.fallbackQuery, {
           expectedDuration: song.duration, expectedTitle: song.title, guildId: this.guildId,
+          requiresSearch: song.requiresSearch,
         });
         if (generation !== this._generation) {
           preparedMedia.stream?.cleanup?.(); preparedMedia.stream?.destroy?.();
@@ -399,6 +400,7 @@ class MusicPlayer {
       }, failTrack, song.fallbackQuery, {
         expectedDuration: song.duration,
         expectedTitle: song.title,
+        requiresSearch: song.requiresSearch,
         guildId: this.guildId,
         preparedMedia,
         initialVolume: this.volume,

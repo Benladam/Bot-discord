@@ -59,7 +59,7 @@ test('une recherche YouTube Deezer mal formée ignore la piste et conserve les r
       if (query.endsWith('Piste indisponible')) {
         throw new TypeError("Cannot read properties of undefined (reading 'browseId')");
       }
-      return [{ url: 'https://www.youtube.com/watch?v=good123', durationInSec: 201 }];
+      return [{ title: 'Artiste - Piste lisible', url: 'https://www.youtube.com/watch?v=good123', durationInSec: 201 }];
     },
     onSearchError: (trackName, error) => failures.push({ trackName, error }),
     searchSoundCloud: async () => [],
@@ -113,4 +113,18 @@ test('le repli Deezer ne prend jamais le premier SoundCloud sans vérifier son i
   });
   assert.equal(songs[0].url, 'https://soundcloud.com/koba/original');
   assert.equal(songs[0].duration, 200);
+});
+
+test('Jul : refuse un extrait YouTube 126 s et choisit la version complète 222 s', async () => {
+  const songs = await resolveDeezerTracks([{ title: 'Je suis love', artist: { name: 'Jul' }, duration: 222 }], {
+    search: async (_query, options) => {
+      assert.equal(options.limit, 5); assert.equal(options.timeoutMs, 6000);
+      return [
+        { title: 'Jul - Je suis love', duration: 126, url: 'https://www.youtube.com/watch?v=short123' },
+        { title: 'Jul - Je suis love (Official Audio)', duration: 222, url: 'https://www.youtube.com/watch?v=full123' },
+      ];
+    }, searchSoundCloud: async () => { assert.fail('YouTube complet trouvé : pas de recherche SoundCloud'); },
+  });
+  assert.equal(songs[0].url, 'https://www.youtube.com/watch?v=full123');
+  assert.equal(songs[0].duration, 222);
 });
