@@ -20,6 +20,7 @@ const {
   searchSoundCloudCandidates,
   soundCloudSearchStream,
   streamUrl,
+  streamYtDlp,
 } = require('./audioSender');
 const { getSoundCloudClientId } = require('./providers/soundcloud');
 
@@ -48,8 +49,9 @@ test('sélectionne le binaire yt-dlp officiel pour les plateformes courantes', (
 
 test('active explicitement le runtime JavaScript Node de yt-dlp', () => {
   const args = buildYtDlpArgs([], 'https://youtube.com/watch?v=test');
-  assert.deepEqual(args.slice(0, 2), ['--js-runtimes', `node:${process.execPath}`]);
-  assert.deepEqual(args.slice(2, 4), ['--remote-components', 'ejs:github']);
+  assert.equal(args[0], '--ignore-config');
+  assert.deepEqual(args.slice(1, 3), ['--js-runtimes', `node:${process.execPath}`]);
+  assert.deepEqual(args.slice(3, 5), ['--remote-components', 'ejs:github']);
   assert.ok(args.includes('--no-playlist'));
 });
 
@@ -62,7 +64,8 @@ test('construit une recherche yt-dlp avec limite et cookies locaux', () => {
   });
   assert.ok(args.includes('--dump-single-json'));
   assert.ok(args.includes('--flat-playlist'));
-  assert.deepEqual(args.slice(2, 4), ['--remote-components', 'ejs:github']);
+  assert.equal(args[0], '--ignore-config');
+  assert.deepEqual(args.slice(3, 5), ['--remote-components', 'ejs:github']);
   assert.ok(args.includes('--playlist-end'));
   assert.ok(args.includes('3'));
   assert.ok(args.includes('ytsearch3:Artiste - Titre'));
@@ -468,7 +471,7 @@ test('journalise la cause du repli YouTube en masquant cookies, jetons et URLs',
       child.stdout.end();
       child.stderr.end(attempt === 1
         ? 'Sign in to confirm you are not a bot'
-        : 'ERROR: challenge solver failed https://example.test/path?token=private-token\nCookie: SID=private-cookie');
+        : 'Sign in to confirm you are not a bot; ERROR: challenge solver failed https://example.test/path?token=private-token\nCookie: SID=private-cookie');
       setImmediate(() => child.emit('close', 1));
     });
     return child;
@@ -557,9 +560,9 @@ test('ne renvoie pas un cookie refusé dans le dernier essai YouTube sans compte
       spawnImpl: fakeSpawn,
     });
     assert.equal(audioUrl, 'https://audio.example/stream');
-    assert.equal(calls.length, 3, 'cookie, sans cookie, puis client intégré sans cookie');
-    assert.ok(calls[0].includes('--cookies'));
-    assert.ok(!calls[1].includes('--cookies'));
+    assert.equal(calls.length, 3, 'sans cookie, cookie de secours, puis client intégré sans cookie');
+    assert.ok(!calls[0].includes('--cookies'));
+    assert.ok(calls[1].includes('--cookies'));
     assert.ok(calls[2].includes('youtube:player_client=web_embedded'));
     assert.ok(!calls[2].includes('--cookies'));
   } finally {
@@ -585,10 +588,10 @@ test('essaie le deuxième fichier cookies quand le premier compte est refusé', 
     child.kill = () => true;
     setImmediate(() => {
       const cookieIndex = args.indexOf('--cookies');
-      const workingPath = args[cookieIndex + 1];
-      const workingContents = fsSync.readFileSync(workingPath, 'utf8');
+      const workingPath = cookieIndex >= 0 ? args[cookieIndex + 1] : '';
+      const workingContents = workingPath ? fsSync.readFileSync(workingPath, 'utf8') : '';
       const accepted = workingContents === secondContents;
-      fsSync.writeFileSync(workingPath, '# yt-dlp rewrote its working cookie jar\n');
+      if (workingPath) fsSync.writeFileSync(workingPath, '# yt-dlp rewrote its working cookie jar\n');
       child.stdout.end(accepted ? 'https://audio.example/stream\n' : '');
       child.stderr.end(accepted ? '' : 'Sign in to confirm you are not a bot');
       setImmediate(() => child.emit('close', accepted ? 0 : 1));
@@ -605,9 +608,10 @@ test('essaie le deuxième fichier cookies quand le premier compte est refusé', 
       spawnImpl: fakeSpawn,
     });
     assert.equal(audioUrl, 'https://audio.example/stream');
-    assert.equal(calls.length, 2);
-    assert.notEqual(calls[0].args[calls[0].args.indexOf('--cookies') + 1], first);
-    assert.notEqual(calls[1].args[calls[1].args.indexOf('--cookies') + 1], second);
+    assert.equal(calls.length, 3);
+    assert.ok(!calls[0].args.includes('--cookies'));
+    assert.notEqual(calls[1].args[calls[1].args.indexOf('--cookies') + 1], first);
+    assert.notEqual(calls[2].args[calls[2].args.indexOf('--cookies') + 1], second);
     assert.equal(await fs.readFile(first, 'utf8'), firstContents);
     assert.equal(await fs.readFile(second, 'utf8'), secondContents);
   } finally {
@@ -619,6 +623,76 @@ test('lit uniquement le checksum de l’asset demandé', () => {
   const digest = 'a'.repeat(64);
   assert.equal(parseChecksum(`${'b'.repeat(64)}  autre-fichier\n${digest} *yt-dlp_linux`, 'yt-dlp_linux'), digest);
   assert.throws(() => parseChecksum(`${digest}  autre-fichier`, 'yt-dlp_linux'), /absent/);
+});
+
+test('un titre public ne lit jamais le fichier de cookies invalide, dans les deux modes audio', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-public-audio-'));
+  const invalidCookies = path.join(directory, 'cookies.txt');
+  await fs.writeFile(invalidCookies, '{"invalid":"not-a-cookie-export"}');
+  try {
+    for (const open of [streamUrl, streamYtDlp]) {
+      const calls = [];
+      const result = await open('https://youtube.com/watch?v=test', {
+        candidates: [['test-yt-dlp', []]], cookiesPaths: [invalidCookies],
+        cookieTempDirectory: path.join(directory, 'should-not-exist'),
+        spawnImpl: (_command, args) => {
+          calls.push(args);
+          const child = new EventEmitter();
+          child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => true;
+          setImmediate(() => {
+            child.stdout.end(open === streamUrl ? 'https://audio.example/stream\n' : Buffer.from('test-audio'));
+            child.stderr.end(); setImmediate(() => child.emit('close', 0));
+          });
+          return child;
+        },
+        install: async () => assert.fail('Un binaire disponible ne doit pas être réinstallé'),
+      });
+      assert.equal(calls.length, 1);
+      assert.ok(calls[0].includes('--ignore-config'));
+      assert.ok(!calls[0].includes('--cookies'));
+      if (typeof result !== 'string') {
+        assert.equal(result.youtubeAuthentication, 'anonymous');
+        result.cleanup(); result.destroy();
+      }
+    }
+    assert.equal(fsSync.existsSync(path.join(directory, 'should-not-exist')), false);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('la lecture stdout tente les cookies seulement après le refus sans compte', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-pipe-cookies-'));
+  const cookies = path.join(directory, 'cookies.txt');
+  const contents = '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\ttest-only-session\n';
+  await fs.writeFile(cookies, contents);
+  const calls = [];
+  let stream;
+  try {
+    stream = await streamYtDlp('https://youtube.com/watch?v=test', {
+      candidates: [['test-yt-dlp', []]], cookiesPaths: [cookies],
+      cookieTempDirectory: path.join(directory, 'working'),
+      spawnImpl: (_command, args) => {
+        calls.push(args);
+        const child = new EventEmitter();
+        child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => true;
+        setImmediate(() => {
+          const accepted = args.includes('--cookies');
+          child.stdout.end(accepted ? Buffer.from('test-audio') : undefined);
+          child.stderr.end(accepted ? '' : 'Sign in to confirm your age');
+          setImmediate(() => child.emit('close', accepted ? 0 : 1));
+        });
+        return child;
+      },
+    });
+    assert.equal(calls.length, 2);
+    assert.ok(!calls[0].includes('--cookies'));
+    assert.ok(calls[1].includes('--cookies'));
+    assert.equal(stream.youtubeAuthentication, 'cookies');
+    assert.equal(await fs.readFile(cookies, 'utf8'), contents);
+  } finally {
+    stream?.cleanup?.(); stream?.destroy?.();
+    await new Promise(resolve => setImmediate(resolve));
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('télécharge le binaire, vérifie SHA-256 et le met en cache dans le dossier de données', async () => {

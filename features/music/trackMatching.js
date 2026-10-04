@@ -1,4 +1,5 @@
 /** Valide les métadonnées avant de remplacer un fournisseur audio. */
+const { canonicalArtistText } = require('./artistAliases');
 const STOP_WORDS = new Set(['a', 'au', 'aux', 'de', 'des', 'du', 'en', 'et', 'l', 'la', 'le', 'les', 'the', 'of']);
 const VERSION_PATTERNS = [
   /\bremix\b/, /\blive\b/, /\bcover\b/, /\binstrumental\b/, /\bkaraoke\b/,
@@ -7,10 +8,11 @@ const VERSION_PATTERNS = [
 ];
 
 function normalizedText(value) {
-  return String(value || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+  return canonicalArtistText(String(value || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+    .replace(/\.(?:mp3|wav|flac|m4a|ogg|opus)\b/g, ' ')
     .replace(/#[\p{L}\p{N}_]+(?:\s+\d+)?/gu, ' ')
     .replace(/\b(?:official|officiel(?:le)?|audio|video|clip|lyrics|paroles|visualizer|vevo|topic|hd|hq|4k)\b/g, ' ')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim());
 }
 
 function tokens(value) {

@@ -30,6 +30,9 @@ async function musicCheck(input = '', { log = console.info, getPaths = getYouTub
   let stream;
   try {
     stream = await probe(url);
+    if (['anonymous', 'cookies'].includes(stream?.youtubeAuthentication)) {
+      log(`[musiccheck] Mode YouTube : ${stream.youtubeAuthentication === 'anonymous' ? 'sans compte, aucun cookie transmis' : 'cookies de secours'}.`);
+    }
     log('[musiccheck] YouTube a fourni des octets audio. Aucun vocal rejoint; écoute Discord non vérifiée.');
     return { probed: true, available: true };
   } catch (error) {

@@ -10,7 +10,32 @@ l'ordre d'origine. La source audio de chaque piste est recherchée au moment de
 la lecture, sans rechercher les 100 pistes avant de commencer. Les flux ne sont
 ni persistés ni partagés entre serveurs.
 
-## Coupure audio
+## Cookies YouTube facultatifs
+
+La lecture essaie YouTube sans compte avant les fichiers de cookies configurés.
+Une session absente ou expirée ne bloque donc pas un flux public accessible sans
+compte. Les configurations externes de yt-dlp sont ignorées afin qu'elles ne
+puissent pas réintroduire des cookies ou changer le morceau sélectionné.
+Si YouTube refuse toutes les tentatives, le bot recherche le même morceau sur
+SoundCloud, avec les mêmes contrôles d'identité, version et durée.
+La console `musiccheck <lien vidéo YouTube>` indique si les premiers octets reçus
+proviennent d'une lecture sans compte ou d'un essai avec cookies de secours.
+Ce diagnostic ne rejoint pas Discord et ne prouve pas une lecture complète.
+
+Un refus de correspondance musicale n'est pas un refus d'authentification : le
+message ne demande plus de cookies dans ce cas. Les alias d'artiste doivent être
+vérifiés dans `features/music/artistAliases.js`; aucun nom approchant n'est accepté
+automatiquement. Mari Froes / Mariana Froes sont reconnus comme une même identité.
+Un suffixe de fichier audio tel que `.mp3` ne fait plus échouer un titre autrement
+identique; artiste, version et durée doivent toujours correspondre.
+
+Il n'existe pas de cookie permanent garanti. La session peut être révoquée et
+YouTube peut refuser l'hébergeur même avec une session valide. Le bot ne génère pas
+de faux cookies et n'automatise pas de connexion Google. Les fichiers de cookies
+restent privés et ne sont jamais publiés ni modifiés par yt-dlp (copie temporaire).
+Voir [la documentation yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies).
+
+## Reprise d'un flux interrompu
 
 Le lecteur tente au maximum deux reprises d'un flux interrompu : d'abord une
 réouverture de sa source, puis une recherche du même titre sur YouTube/SoundCloud,

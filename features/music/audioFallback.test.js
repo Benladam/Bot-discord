@@ -269,7 +269,7 @@ test('explique les deux échecs et les réglages serveur manquants', async () =>
     assert.equal(error.code, 'MUSIC_PROVIDERS_FAILED');
     assert.match(error.message, /YouTube bloqué/);
     assert.match(error.message, /SOUNDCLOUD_CLIENT_ID/);
-    assert.match(error.message, /YOUTUBE_COOKIES_PATH/);
+    assert.doesNotMatch(error.message, /YOUTUBE_COOKIES_PATH/);
     return true;
   });
 });
@@ -293,4 +293,33 @@ test('une piste de playlist Spotify cherche YouTube avant SoundCloud, sans lire 
     searchSoundCloudStream: async () => { calls.push('SoundCloud'); return stream; },
   });
   assert.deepEqual(calls, ['YouTube', 'SoundCloud']); assert.equal(media.stream, stream); stream.destroy();
+});
+
+test('une erreur de correspondance ne conseille pas de remplacer les cookies', async () => {
+  const mismatch = () => Object.assign(new Error('Aucun morceau correspondant'), { code: 'MUSIC_TRACK_MISMATCH' });
+  await assert.rejects(prepareInput('https://open.spotify.com/track/test', 'Mari Froes - Moça', {
+    requiresSearch: true,
+    searchYouTubeStream: async () => { throw mismatch(); },
+    searchSoundCloudStream: async () => { throw mismatch(); },
+  }), error => {
+    assert.equal(error.code, 'MUSIC_PROVIDERS_FAILED');
+    assert.equal(error.cause.code, 'MUSIC_TRACK_MISMATCH');
+    assert.doesNotMatch(error.message, /cookie|authentification|SOUNDCLOUD_CLIENT_ID/i);
+    return true;
+  });
+});
+
+test('Moça : accepte l’alias vérifié, mais pas les versions live ni les autres chansons', async () => {
+  const opened = [];
+  const stream = await youtubeSearchStream('Mari Froes - Moça', {
+    expectedTitle: 'Moça - Mari Froes', expectedDuration: 180,
+    searchCandidates: async () => [
+      { title: 'Mariana Froes - Moça (Remix)', duration: 180, url: 'https://youtu.be/remix' },
+      { title: 'Mari Froes - Figa de Guiné', duration: 180, url: 'https://youtu.be/wrong' },
+      { title: 'moça - mariana froes (audio)', duration: 180, url: 'https://youtu.be/correct' },
+    ],
+    openTrack: async url => { opened.push(url); return new PassThrough(); },
+  });
+  assert.deepEqual(opened, ['https://youtu.be/correct']);
+  stream.destroy();
 });

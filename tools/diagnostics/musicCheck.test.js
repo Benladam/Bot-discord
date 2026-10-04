@@ -59,3 +59,16 @@ test('musiccheck ne publie ni chemin privé ni erreur brute et ferme son flux sa
   assert.deepEqual(await musicCheck('https://youtube.com/watch?v=v2o3in-Aud0', dependencies), { probed: true, available: false });
   assert.ok(!logs.join(' ').includes('secret'));
 });
+
+test('musiccheck distingue flux public sans compte et cookies de secours sans divulgation', async () => {
+  for (const mode of ['anonymous', 'cookies', 'SID=test-secret']) {
+    const logs = [];
+    const stream = new PassThrough(); stream.youtubeAuthentication = mode;
+    await musicCheck('https://youtube.com/watch?v=v2o3in-Aud0', {
+      getPaths: () => [], log: line => logs.push(line), probe: async () => stream,
+    });
+    assert.doesNotMatch(logs.join(' '), /test-secret/);
+    if (mode === 'anonymous') assert.match(logs.join(' '), /aucun cookie transmis/);
+    if (mode === 'cookies') assert.match(logs.join(' '), /cookies de secours/);
+  }
+});

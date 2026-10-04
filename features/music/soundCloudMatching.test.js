@@ -4,6 +4,17 @@ const { soundCloudMatchScore, soundCloudSearchQueries } = require('./soundCloudM
 
 const rr = { query: 'Koba LaD - RR 9.1', expectedTitle: 'RR 9.1 - Koba LaD', expectedDuration: 200 };
 
+test('alias vérifié Mari/Mariana Froes : identité équivalente, titre et durée toujours stricts', () => {
+  const request = { query: 'Mari Froes - Moça', expectedTitle: 'Moça - Mari Froes', expectedDuration: 180 };
+  const track = { title: 'Mariana Froes - Moça (audio)', artist: 'Mariana Froes', duration: 180 };
+  assert.ok(soundCloudMatchScore(track, request) > 0);
+  assert.ok(soundCloudMatchScore({ ...track, title: 'Mariana Froes - Moça .mp3', artist: undefined, uploader: 'upload-anonyme' }, request) > 0);
+  for (const changes of [
+    { title: 'Mariana Froes - Moça remix' }, { title: 'Mariana Froes - Figa de Guiné' },
+    { artist: 'Mariana Fernandes' }, { duration: 30 }, { duration: 300 }, { title: 'Mariana Froes - Moça remix.mp3' },
+  ]) assert.equal(soundCloudMatchScore({ ...track, ...changes }, request), 0);
+});
+
 test('RR 9.1 : accepte ponctuation, espaces et collaboration créditée dans le titre', () => {
   for (const artist of ['Koba LaD', 'Koba La D', 'Koba Lad Official']) {
     for (const title of ['RR91 (feat. Niska)', 'Koba La D - RR 9.1 (Official Audio)', 'RR9 1']) {

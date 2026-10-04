@@ -423,7 +423,7 @@ function buildYtDlpArgs(preArgs, url, {
   env = process.env,
   outputToStdout = false,
 } = {}) {
-  const args = [...preArgs, '--js-runtimes', `node:${process.execPath}`];
+  const args = [...preArgs, '--ignore-config', '--js-runtimes', `node:${process.execPath}`];
   args.push('--remote-components', 'ejs:github');
   const resolvedCookiesPath = cookiesPath === undefined
     ? getYouTubeCookiesPath({ env, projectRoot })
@@ -455,6 +455,7 @@ function buildYtDlpSearchArgs(preArgs, query, {
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 5));
   const args = [
     ...preArgs,
+    '--ignore-config',
     '--js-runtimes', `node:${process.execPath}`,
     '--remote-components', 'ejs:github',
     '--no-warnings', '--flat-playlist', '--dump-single-json', '--skip-download',
@@ -809,7 +810,7 @@ async function streamUrl(url, {
       .flatMap((entry) => splitCookiesPaths(entry))
       .map((entry) => normalizeCookiesPath(entry, projectRoot));
   const cookieAttempts = youtubeUrl
-    ? [...new Set(configuredCookiesPaths.filter(Boolean)), '']
+    ? ['', ...new Set(configuredCookiesPaths.filter(Boolean))]
     : [''];
   for (const [command, args] of candidates) {
     for (const cookiesPath of cookieAttempts) {
@@ -818,11 +819,12 @@ async function streamUrl(url, {
       if (result.resourceExhausted) throw ytDlpResourceError(result.error, result.code);
       errors.push(result.error);
       if (!result.missing && !result.skipped) missingOnly = false;
-      if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) {
+      if (youtubeUrl && (!authCandidate || cookiesPath) && needsYouTubeAuthentication(result.error)) {
         authCandidate = [command, args, cookiesPath, result.error];
       }
       if (result.missing) break;
     }
+    if (authCandidate) break;
   }
 
   if (missingOnly) {
@@ -833,7 +835,7 @@ async function streamUrl(url, {
         if (result.audioUrl) return result.audioUrl;
         if (result.resourceExhausted) throw ytDlpResourceError(result.error, result.code);
         errors.push(result.error);
-        if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.error)) {
+        if (youtubeUrl && (!authCandidate || cookiesPath) && needsYouTubeAuthentication(result.error)) {
           authCandidate = [managed, [], cookiesPath, result.error];
         }
         if (result.missing) break;
@@ -864,8 +866,8 @@ async function streamUrl(url, {
     errors.push(embedded.error);
     console.warn(`[yt-dlp] Repli YouTube refusé; binaire=${path.basename(command)}; ${describeCookiesFile(rejectedCookiesPath)}; réponse avec cookies: ${sanitizeYtDlpDiagnostic(cookieAttemptError) || 'aucun détail'}; client intégré sans cookies: ${sanitizeYtDlpDiagnostic(embedded.error) || 'aucun détail fourni'}`);
     const error = new Error(rejectedCookiesPath
-      ? 'YouTube réclame toujours une authentification alors que le fichier de cookies configuré est lisible. La session peut être expirée ou renouvelée par Google, ou le compte peut ne pas avoir accès à cette vidéo. Remplace le fichier par une nouvelle exportation Netscape depuis un navigateur connecté à YouTube.'
-      : 'YouTube réclame une authentification depuis cet hébergeur et aucun fichier de cookies utilisable n’a été fourni. Configure YOUTUBE_COOKIES_PATH avec une exportation Netscape récente depuis un navigateur connecté à YouTube, ou choisis un autre titre.');
+      ? 'YouTube réclame toujours une authentification malgré les essais sans compte et avec cookies. Cela peut être une restriction du contenu, du compte ou de l’hébergeur; ce refus ne prouve pas que les cookies sont expirés.'
+      : 'YouTube réclame une authentification depuis cet hébergeur malgré les essais sans compte. Aucun cookie utilisable n’a été accepté; une autre source du même morceau sera recherchée si ses métadonnées sont disponibles.');
     error.code = 'YOUTUBE_AUTH_BLOCKED';
     error.cookiesConfigured = Boolean(rejectedCookiesPath);
     throw error;
@@ -982,7 +984,8 @@ async function streamYtDlp(url, {
     : (Array.isArray(cookiesPaths) ? cookiesPaths : [cookiesPaths])
       .flatMap((entry) => splitCookiesPaths(entry))
       .map((entry) => normalizeCookiesPath(entry, projectRoot));
-  const cookieAttempts = youtubeUrl ? [...new Set(configuredCookiesPaths.filter(Boolean)), ''] : [''];
+  // Les titres publics ne doivent pas dépendre d'une session Google exportée.
+  const cookieAttempts = youtubeUrl ? ['', ...new Set(configuredCookiesPaths.filter(Boolean))] : [''];
   const errors = [];
   let missingOnly = true;
   let authCandidate = null;
@@ -996,11 +999,14 @@ async function streamYtDlp(url, {
       projectRoot,
       env,
     });
-    if (result.stream) return result.stream;
+    if (result.stream) {
+      if (youtubeUrl) result.stream.youtubeAuthentication = cookiesPath ? 'cookies' : 'anonymous';
+      return result.stream;
+    }
     if (result.resourceExhausted) throw ytDlpResourceError(result.error, result.code);
     errors.push(result.error);
     if (!result.missing) missingOnly = false;
-    if (youtubeUrl && !authCandidate && needsYouTubeAuthentication(result.diagnostic || result.error)) {
+    if (youtubeUrl && (!authCandidate || cookiesPath) && needsYouTubeAuthentication(result.diagnostic || result.error)) {
       authCandidate = [command, args, cookiesPath, result.diagnostic || result.error];
     }
     return null;
@@ -1038,8 +1044,8 @@ async function streamYtDlp(url, {
     const embedded = await attempt(command, args, '', 'web_embedded');
     if (embedded) return embedded;
     const error = new Error(rejectedCookiesPath
-      ? 'YouTube réclame toujours une authentification alors que le fichier de cookies est lisible. La session peut être expirée ou le compte ne pas avoir accès à cette vidéo; remplace le fichier par une nouvelle exportation Netscape.'
-      : 'YouTube réclame une authentification depuis cet hébergeur et aucun fichier de cookies utilisable n’a été fourni. Configure YOUTUBE_COOKIES_PATH avec une exportation Netscape récente ou choisis un autre titre.');
+      ? 'YouTube réclame toujours une authentification malgré les essais sans compte et avec cookies. Cela peut être une restriction du contenu, du compte ou de l’hébergeur; ce refus ne prouve pas que les cookies sont expirés.'
+      : 'YouTube réclame une authentification depuis cet hébergeur malgré les essais sans compte. Aucun cookie utilisable n’a été accepté; une autre source du même morceau sera recherchée si ses métadonnées sont disponibles.');
     error.code = 'YOUTUBE_AUTH_BLOCKED';
     error.cookiesConfigured = Boolean(rejectedCookiesPath);
     throw error;
@@ -1050,12 +1056,12 @@ async function streamYtDlp(url, {
 
 function providerFailure(primaryProvider, primaryError, alternateProvider, alternateError) {
   const detail = (error) => String(error?.message || error || 'échec inconnu').replace(/[\r\n]+/g, ' ').slice(0, 300);
-  const soundCloudNeedsClientId = /SOUNDCLOUD_CLIENT_ID/i.test(String(alternateError?.message || alternateError || ''));
-  const youtubeAdvice = primaryError?.code === 'YOUTUBE_AUTH_BLOCKED'
-    ? (primaryError.cookiesConfigured
-      ? 'Le fichier de cookies est déjà configuré mais n’est pas accepté par YouTube; renouvelle son exportation.'
-      : 'Configure YOUTUBE_COOKIES_PATH avec une exportation de cookies YouTube récente, si ce titre exige un compte.')
-    : 'Si YouTube exige un compte, configure YOUTUBE_COOKIES_PATH avec un fichier de cookies YouTube local.';
+  const youtubeError = primaryProvider === 'YouTube' ? primaryError : alternateError;
+  const soundCloudError = primaryProvider === 'SoundCloud' ? primaryError : alternateError;
+  const soundCloudNeedsClientId = /SOUNDCLOUD_CLIENT_ID/i.test(String(soundCloudError?.message || soundCloudError || ''));
+  const youtubeAdvice = youtubeError?.code === 'YOUTUBE_AUTH_BLOCKED'
+    ? 'Une session valide peut être nécessaire pour un contenu réservé à un compte; aucun renouvellement automatique ne garantit l’accès depuis cet hébergeur.'
+    : '';
   const soundCloudAdvice = soundCloudNeedsClientId
     ? 'Configure SOUNDCLOUD_CLIENT_ID dans le .env du bot pour activer le repli SoundCloud.'
     : '';

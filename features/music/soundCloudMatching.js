@@ -1,5 +1,6 @@
 /** Comparaison SoundCloud stricte, indépendante de l'ordre des résultats. */
 const { candidateTitle, candidateArtist, fallbackSearchQuery } = require('./trackMatching');
+const { canonicalArtistText } = require('./artistAliases');
 
 const VERSIONS = [
   /\bremix\b|\bbootleg\b|\brework\b/, /\blive\b|\bconcert\b/,
@@ -13,12 +14,13 @@ const VERSIONS = [
 ];
 
 function text(value) {
-  return String(value || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+  return canonicalArtistText(String(value || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+    .replace(/\.(?:mp3|wav|flac|m4a|ogg|opus)\b/g, ' ')
     .replace(/#[\p{L}\p{N}_]+(?:\s+\d+)?/gu, ' ')
     .replace(/\b(?:official|officiel(?:le)?|audio|video|clip|lyrics|paroles|visualizer|vevo|topic|hd|hq|4k)\b/g, ' ')
     .replace(/(\d)[.\s]+(?=\d)/g, '$1')
     .replace(/([a-z])(\d)/g, '$1 $2')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim());
 }
 
 function artistPattern(artist) {
