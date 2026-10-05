@@ -8,7 +8,40 @@ n'est pas un remplacement acceptable. Une recherche YouTube est limitée à 6 s.
 Les playlists Spotify sont mises en file à partir de leurs métadonnées, dans
 l'ordre d'origine. La source audio de chaque piste est recherchée au moment de
 la lecture, sans rechercher les 100 pistes avant de commencer. Les flux ne sont
-ni persistés ni partagés entre serveurs.
+ni partagés entre serveurs ni réutilisés après un redémarrage.
+
+## Audio temporaire complet avant lecture
+
+Par défaut (`MUSIC_CACHE_ENABLED=true`), chaque morceau accessible est préparé
+en **Opus stéréo 128 kb/s VBR** sous `BOT_DATA_DIR/.cache/audio-playback-v1/`.
+Ce format compact ne rétablit pas la qualité d'une mauvaise source. La lecture
+attend le téléchargement/encodage complet avant de rejoindre le vocal; cela
+ajoute un temps de préparation, mais évite les coupures du fournisseur pendant
+la lecture du fichier. Aucune vidéo ni fichier PCM volumineux n'est conservé.
+
+Limites : 32 Mio par lecture, 128 Mio de cache total, réserve disque de 64 Mio,
+90 secondes de préparation et 20 minutes par morceau. Avec une durée catalogue,
+la durée audio réellement encodée est vérifiée (tolérance 3 %, entre 2 et 12 s).
+Sans durée connue, la fin du flux et les limites sont contrôlées, sans pouvoir
+prouver sa complétude par comparaison. Les morceaux annoncés de plus de 20 min
+restent en streaming. Un cache interrompu est refusé; une seule recherche du
+même morceau sur une autre source est permise avant lecture.
+
+Un fichier unique est créé pour chaque lecteur et supprimé en fin de lecture,
+Stop, skip, annulation ou erreur. Les sessions abandonnées après un crash sont
+nettoyées à la préparation suivante après 2 h; aucun ancien fichier n'est rejoué.
+Les permissions sont privées (0700/0600 sous Linux), aucun chemin ni titre ne
+sert de nom de fichier et le cache n'est pas publié dans GitHub.
+
+Si le disque est plein ou le quota atteint avant téléchargement, le flux intact
+reste en streaming avec reprises. `MUSIC_CACHE_ENABLED=false` désactive le cache.
+Ce cache **ne contourne pas** un refus d'authentification et ne génère aucun cookie.
+Il n'est utilisé que sur un flux auquel l'hôte a déjà accès.
+
+Console de diagnostic, sans rejoindre Discord :
+`soundcloudcheck --cache=148 Ninho - Coco` cherche ce titre, compare sa durée,
+prépare l'audio complet puis vérifie la suppression du fichier. Ce n'est pas
+une preuve d'écoute réelle dans un salon vocal.
 
 ## Cookies YouTube facultatifs
 

@@ -4,6 +4,18 @@ const { soundCloudMatchScore, soundCloudSearchQueries } = require('./soundCloudM
 
 const rr = { query: 'Koba LaD - RR 9.1', expectedTitle: 'RR 9.1 - Koba LaD', expectedDuration: 200 };
 
+test('Coco : artiste principal attribué avec séparateur compact, durée et version conservées', () => {
+  // Deezer 2884049982 : Coco, Ninho, durée 148 s (contributeur Niska).
+  const request = { query: 'Ninho - Coco', expectedTitle: 'Coco - Ninho', expectedDuration: 148 };
+  const upload = { title: 'Ninho & Niska-COCO', uploader: 'isq', duration: 148 };
+  assert.ok(soundCloudMatchScore(upload, request) > 0);
+  for (const changes of [
+    { title: 'Coco', uploader: 'Niska' }, { title: 'Ninho & Niska-COCO remix' },
+    { title: 'Ninho & Niska-COCO Dance For Me' }, { title: 'Ninho & Niska-COCO', duration: 30 },
+    { duration: 260 }, { metadata_artist: 'Autre artiste' }, { title: 'Ninhox & Niska-COCO' },
+  ]) assert.equal(soundCloudMatchScore({ ...upload, ...changes }, request), 0);
+});
+
 test('alias vérifié Mari/Mariana Froes : identité équivalente, titre et durée toujours stricts', () => {
   const request = { query: 'Mari Froes - Moça', expectedTitle: 'Moça - Mari Froes', expectedDuration: 180 };
   const track = { title: 'Mariana Froes - Moça (audio)', artist: 'Mariana Froes', duration: 180 };

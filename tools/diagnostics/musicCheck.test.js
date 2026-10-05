@@ -3,6 +3,21 @@ const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
 const { musicCheck, diagnosticUrl, soundCloudCheck } = require('./musicCheck');
 
+test('soundcloudcheck --cache=148 transmet la durée, prépare tout le morceau et nettoie', async () => {
+  const logs = []; const stream = new PassThrough(); let cleaned = 0;
+  const result = await soundCloudCheck('--cache=148 Ninho - Coco', {
+    log: line => logs.push(line),
+    probe: async (query, options) => { assert.equal(query, 'Ninho - Coco'); assert.equal(options.expectedDuration, 148); return stream; },
+    cache: async (media, options) => {
+      assert.equal(options.expectedDuration, 148); assert.equal(media.stream, stream);
+      return { cached: true, url: 'nonexistent-test.opus', cleanup() { cleaned++; } };
+    },
+  });
+  assert.deepEqual(result, { available: true }); assert.equal(cleaned, 1); assert.equal(stream.destroyed, true);
+  assert.match(logs.join(' '), /durée vérifiée/); assert.match(logs.join(' '), /temporaire supprimé/);
+  for (const duration of [0, 2000]) await assert.rejects(soundCloudCheck(`--cache=${duration} Ninho - Coco`), /Durée/);
+});
+
 test('musiccheck refuse les URL arbitraires et nettoie le lien vidéo sans paramètres privés', () => {
   assert.equal(diagnosticUrl('https://youtu.be/v2o3in-Aud0?si=secret'), 'https://www.youtube.com/watch?v=v2o3in-Aud0');
   for (const url of ['http://youtube.com/watch?v=v2o3in-Aud0', 'https://example.com/secret', 'https://youtube.com@127.0.0.1/watch?v=v2o3in-Aud0', 'https://youtube.com/playlist?list=private']) assert.throws(() => diagnosticUrl(url));

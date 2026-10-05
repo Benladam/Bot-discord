@@ -40,7 +40,9 @@ function requestArtist(query, expectedTitle) {
 
 function coreTitle(value, artist) {
   const identity = artistPattern(artist);
-  const parts = String(value || '').split(/\s+[-–—]\s+/u);
+  // Des titres attribués tels que « Ninho & Niska-COCO » ont un séparateur
+  // sans espaces. Seul le segment portant l'identité exacte est retiré.
+  const parts = String(value || '').split(/[-–—]/u);
   const title = parts.length > 1
     ? parts.filter(part => !identity?.test(text(part))).join(' ')
     : value;

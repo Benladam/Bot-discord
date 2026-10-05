@@ -12,6 +12,7 @@ const { PcmVolume } = require('./pcmVolume');
 const { readCookieFile } = require('./youtubeCookies');
 const { soundCloudMatchScore, soundCloudSearchQueries } = require('./soundCloudMatching');
 const { startRecoveringPlayback } = require('./playbackRecovery');
+const { cacheAudio, closeMedia } = require('./temporaryAudio');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
@@ -1135,11 +1136,31 @@ async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
   }
 }
 
+async function preparePlaybackInput(url, fallbackQuery, options = {}) {
+  const prepare = options.resolveInput || prepareInput;
+  const cache = options.cacheAudio || cacheAudio;
+  let media = await prepare(url, fallbackQuery, options);
+  try {
+    return await cache(media, options);
+  } catch (error) {
+    closeMedia(media);
+    // Un cache interrompu n'est jamais remis au lecteur. Une seule recherche
+    // alternative du même titre est autorisée avant la connexion vocale.
+    if (error.code === 'AUDIO_CANCELLED' || options.shouldStart && !options.shouldStart()
+        || !fallbackQuery || !['AUDIO_PREMATURE_END', 'AUDIO_STALLED', 'YOUTUBE_AUTH_BLOCKED', 'AUDIO_HTTP_FORBIDDEN'].includes(error.code)) throw error;
+    console.warn(`[audio-cache] Source incomplète serveur=${options.guildId || '?'}; recherche du même titre sur une autre source.`);
+    media = await prepare(url, fallbackQuery, { ...options, recoverySearch: true,
+      excludedUrls: [...new Set([...(options.excludedUrls || []), media.sourceUrl || url])],
+    });
+    return cache(media, options);
+  }
+}
+
 async function start(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies = {}) {
   if (dependencies.recovery === false || !(dependencies.requiresSearch || isYouTubeUrl(url) || isSoundCloudUrl(url))) {
     return startAttempt(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies);
   }
-  const prepare = dependencies.prepareInput || prepareInput;
+  const prepare = dependencies.prepareInput || preparePlaybackInput;
   const failedUrls = new Set();
   return startRecoveringPlayback({
     shouldStart: dependencies.shouldStart, initialVolume: dependencies.initialVolume,
@@ -1152,6 +1173,7 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
         expectedDuration: dependencies.expectedDuration, expectedTitle: dependencies.expectedTitle,
         guildId: dependencies.guildId, recoverySearch: attempt > 1 || sourceUrl === url && dependencies.requiresSearch,
         excludedUrls: [...failedUrls],
+        shouldStart: dependencies.shouldStart,
       });
     },
     startAttempt: options => startAttempt(connection, url, options.onStart, options.onEnd, options.onError, fallbackQuery, {
@@ -1161,15 +1183,15 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
 }
 
 async function startAttempt(connection, url, onStart, onEnd, onError, fallbackQuery, dependencies = {}) {
-  const media = dependencies.preparedMedia || await (dependencies.prepareInput || prepareInput)(url, fallbackQuery, {
+  const media = dependencies.preparedMedia || await (dependencies.prepareInput || preparePlaybackInput)(url, fallbackQuery, {
     expectedDuration: dependencies.expectedDuration,
     expectedTitle: dependencies.expectedTitle,
     guildId: dependencies.guildId,
     requiresSearch: dependencies.requiresSearch,
+    shouldStart: dependencies.shouldStart,
   });
   if (dependencies.shouldStart && !dependencies.shouldStart()) {
-    try { media.stream?.cleanup?.(); } catch (_) {}
-    try { media.stream?.destroy(); } catch (_) {}
+    closeMedia(media);
     const error = new Error('Lecture annulée pendant la préparation du flux.');
     error.code = 'AUDIO_CANCELLED';
     throw error;
@@ -1200,8 +1222,7 @@ async function startAttempt(connection, url, onStart, onEnd, onError, fallbackQu
     ], { windowsHide: true });
   } catch (error) {
     decoder?.kill(); gain.destroy();
-    try { media.stream?.cleanup?.(); } catch (_) {}
-    try { media.stream?.destroy(); } catch (_) {}
+    closeMedia(media);
     throw error;
   }
   const parser = new OggParser(); let frames = []; let paused = false; let started = false; let stopped = false;
@@ -1217,10 +1238,9 @@ async function startAttempt(connection, url, onStart, onEnd, onError, fallbackQu
     clearInterval(drainTimer);
     clearInterval(watchdog);
     clearTimeout(readinessTimer);
-    try { media.stream?.cleanup?.(); } catch (_) {}
-    try { media.stream?.destroy(); } catch (_) {}
     try { ffmpeg.kill(); } catch (_) {}
     try { decoder.kill(); } catch (_) {}
+    closeMedia(media);
     gain.destroy();
   };
   const reportFfmpegError = (error) => {
@@ -1346,7 +1366,7 @@ class OggParser {
   }
 }
 module.exports = {
-  OpusSender: { start, prepare: prepareInput },
+  OpusSender: { start, prepare: preparePlaybackInput },
   streamUrl,
   streamYtDlp,
   buildYtDlpArgs,
@@ -1355,6 +1375,7 @@ module.exports = {
   getYouTubeCookiesPaths,
   parseYtDlpSearch,
   prepareInput,
+  preparePlaybackInput,
   searchYouTubeCandidates,
   searchYouTubePlaylists,
   searchSoundCloudCandidates,

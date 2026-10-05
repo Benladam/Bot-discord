@@ -1,6 +1,7 @@
 /** Lecteur vocal maison : WebSocket vocal + UDP/RTP + Opus. */
 const { VoiceConnection } = require('./voice');
 const { OpusSender } = require('./audioSender');
+const { closeMedia } = require('./temporaryAudio');
 const { createThemedEmbed } = require('../../shared/discord/embedTheme');
 const { musicArtwork } = require('./artwork');
 const { normalizeProviderUrl } = require('../../shared/discord/providerPresentation');
@@ -370,14 +371,15 @@ class MusicPlayer {
         preparedMedia = await OpusSender.prepare(song.url, song.fallbackQuery, {
           expectedDuration: song.duration, expectedTitle: song.title, guildId: this.guildId,
           requiresSearch: song.requiresSearch,
+          shouldStart: () => generation === this._generation,
         });
         if (generation !== this._generation) {
-          preparedMedia.stream?.cleanup?.(); preparedMedia.stream?.destroy?.();
+          closeMedia(preparedMedia);
           return null;
         }
         await this.ensureConnection(voiceChannel);
         if (generation !== this._generation) {
-          preparedMedia.stream?.cleanup?.(); preparedMedia.stream?.destroy?.();
+          closeMedia(preparedMedia);
           if (!this.current && !this.isPlaying) await this.leave();
           return null;
         }
@@ -413,7 +415,7 @@ class MusicPlayer {
       this.sender = sender;
       if (this.isPaused) this.sender?.pause?.();
     } catch (error) {
-      preparedMedia?.stream?.cleanup?.(); preparedMedia?.stream?.destroy?.();
+      closeMedia(preparedMedia);
       if (generation !== this._generation) return null;
       // L'extraction du flux peut échouer avant que le processus audio existe.
       // Réinitialiser l'état évite qu'une tentative ratée bloque toute la file.

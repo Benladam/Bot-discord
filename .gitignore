@@ -35,6 +35,8 @@ npm-debug.log
 .DS_Store
 queue_state.json
 data/
+# Cache audio privé, y compris si BOT_DATA_DIR pointe vers un autre dossier.
+**/.cache/audio-playback-v1/
 # Identifiants du dashboard local (noms/adresses dans connections.json, clés dans .env)
 data/local-dashboard/
 .env.dashboard.local

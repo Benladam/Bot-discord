@@ -3,6 +3,33 @@ const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
 const { spawn } = require('node:child_process');
 const { OpusSender } = require('./audioSender');
+const { cacheAudio, ffmpegBinary } = require('./temporaryAudio');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+test('FFmpeg réel : cache Opus compact puis lecture complète et suppression naturelle', { timeout: 15000 }, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-opus-cache-integration-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const binary = ffmpegBinary();
+  const generator = spawn(binary, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3', '-f', 'wav', 'pipe:1'], { windowsHide: true });
+  generator.on('error', error => generator.stdout.destroy(error));
+  generator.stdout.on('error', () => {});
+  const media = await cacheAudio({ stream: generator.stdout, sourceUrl: 'synthetic' }, {
+    root, ffmpeg: binary, expectedDuration: 3, env: {}, freeSpace: () => Infinity, log() {},
+  });
+  assert.equal(media.cached, true);
+  assert.ok(fs.statSync(media.url).size < 100000);
+  assert.ok(fs.readFileSync(media.url).includes(Buffer.from('OpusHead')));
+  let resolve; let reject; let frames = 0;
+  const ended = new Promise((yes, no) => { resolve = yes; reject = no; });
+  const sender = await OpusSender.start({ connected: true, sendOpus() { frames++; return true; } }, '', null, resolve, reject, '', { preparedMedia: media, expectedDuration: 3 });
+  const timer = setTimeout(() => reject(new Error('lecture synthétique bloquée')), 10000);
+  try {
+    await ended; assert.ok(frames >= 145); assert.ok(frames <= 160);
+    assert.equal(fs.existsSync(media.url), false);
+  } finally { clearTimeout(timer); sender.stop(); generator.kill(); media.cleanup(); }
+});
 
 for (const resumeAt of [0, 1]) {
 test(`la chaîne réelle FFmpeg → gain PCM → Opus finit proprement (reprise=${resumeAt}s)`, { timeout: 15000 }, async () => {

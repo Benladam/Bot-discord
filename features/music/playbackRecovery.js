@@ -1,10 +1,6 @@
 /** Reprises bornées du même morceau, indépendantes de la file et de la guilde. */
 const RECOVERABLE = new Set(['AUDIO_PREMATURE_END', 'AUDIO_HTTP_FORBIDDEN', 'AUDIO_STALLED', 'FFMPEG_FAILED', 'YOUTUBE_AUTH_BLOCKED']);
-
-function closeMedia(media) {
-  try { media?.stream?.cleanup?.(); } catch (_) {}
-  try { media?.stream?.destroy?.(); } catch (_) {}
-}
+const { closeMedia } = require('./temporaryAudio');
 
 async function startRecoveringPlayback({ startAttempt, prepareRecovery, shouldStart = () => true,
   onStart, onEnd, onError, onRecovery = () => {}, initialVolume = 1, maxRecoveries = 2 }) {
