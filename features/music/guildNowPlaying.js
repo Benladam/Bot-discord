@@ -10,6 +10,7 @@ const { providerPresentation } = require('../../shared/discord/providerPresentat
 const { withProviderIcons } = require('../../shared/discord/providerIcons');
 const { getWebPanelPublicUrl } = require('../web/server');
 const { musicArtwork } = require('./artwork');
+const { FILTERS } = require('./audioFilters');
 
 const SETTING_KEY = 'musicNowPlayingMessage';
 const LOOP_LABELS = ['Désactivée', 'Titre', 'File'];
@@ -39,6 +40,7 @@ function statusEmbed(state, guildName = '') {
   fields.push({ name: '🔉 Volume', value: `${Math.max(0, Math.min(100, Number(state.volume) || 0))}%`, inline: true });
   fields.push({ name: '🔁 Répétition', value: loop, inline: true });
   if (Number(song.duration) > 0) fields.push({ name: '⏱️ Durée', value: formatDuration(song.duration), inline: true });
+  if (state.filter && state.filter !== 'none' && FILTERS[state.filter]) fields.push({ name: '🎚️ Filtre audio', value: FILTERS[state.filter], inline: false });
   embed.addFields(fields);
   const artwork = musicArtwork(song);
   if (artwork) embed.setThumbnail(artwork);

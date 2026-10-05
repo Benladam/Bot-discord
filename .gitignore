@@ -79,3 +79,5 @@ credentials/
 *.nbt
 *.jar
 *.lnk
+# Automatic YouTube attestation helper, installed privately on each host
+**/.cache/youtube-pot/

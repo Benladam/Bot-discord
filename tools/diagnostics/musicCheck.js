@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const { cacheAudio, closeMedia } = require('../../features/music/temporaryAudio');
 const { readCookieFile } = require('../../features/music/youtubeCookies');
 const { getYouTubeCookiesPaths, streamYtDlp, soundCloudSearchStream } = require('../../features/music/audioSender');
+const { ensurePoToken, poTokenStatus } = require('../../features/music/youtubePoToken');
 
 function diagnosticUrl(input) {
   const url = new URL(input);
@@ -15,6 +16,14 @@ function diagnosticUrl(input) {
 }
 
 async function musicCheck(input = '', { log = console.info, getPaths = getYouTubeCookiesPaths, readCookies = readCookieFile, probe = streamYtDlp } = {}) {
+  if (input.trim() === 'setup-pot') {
+    await require('../setup/installPoToken').installPoToken({ log });
+    const ready = await ensurePoToken();
+    log(ready ? '[musiccheck] PO token : helper prêt; tester une vidéo pour vérifier YouTube.' : '[musiccheck] PO token : helper non disponible.');
+    return { installed: true, ready: Boolean(ready) };
+  }
+  const po = poTokenStatus();
+  log(`[musiccheck] PO token : ${po.enabled ? po.ready ? 'helper prêt' : 'installé, démarrage à la lecture' : 'non installé ou désactivé'}.`);
   // Aucun accès Discord : lecture de la configuration et essai d'extraction seulement.
   const url = input.trim() ? diagnosticUrl(input.trim()) : null;
   const paths = getPaths();

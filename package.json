@@ -9,6 +9,7 @@
     "node": ">=22.5.0"
   },
   "scripts": {
+    "music:pot:install": "node tools/setup/installPoToken.js",
     "start": "node supervisor.js",
     "dashboard": "node features/dashboard/localServer.js",
     "security:install": "node tools/security/installGitGuard.js",

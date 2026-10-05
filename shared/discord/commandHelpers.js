@@ -5,7 +5,7 @@ function isSlash(ctx) {
 }
 
 function sendReply(ctx, content, { ephemeral = true, embeds } = {}) {
-  const payload = { content, embeds };
+  const payload = { content, embeds, allowedMentions: { parse: [], repliedUser: false } };
   if (isSlash(ctx)) {
     if (ctx.deferred || ctx.replied) return ctx.editReply(payload);
     return ctx.reply(ephemeral ? { ...payload, flags: MessageFlags.Ephemeral } : payload);

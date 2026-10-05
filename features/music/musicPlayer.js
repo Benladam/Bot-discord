@@ -5,6 +5,7 @@ const { closeMedia } = require('./temporaryAudio');
 const { createThemedEmbed } = require('../../shared/discord/embedTheme');
 const { musicArtwork } = require('./artwork');
 const { normalizeProviderUrl } = require('../../shared/discord/providerPresentation');
+const { validateFilter } = require('./audioFilters');
 
 const VOICE_REQUEST_TIMEOUT_MS = 15_000;
 const configuredIdleMinutes = Number(process.env.VOICE_IDLE_TIMEOUT_MINUTES);
@@ -38,10 +39,37 @@ class MusicPlayer {
     this._enqueueOperation = Promise.resolve();
     this._queueEpoch = 0;
     this.onQueueEnd = null;
+    this.history = [];
+    this.filter = 'none';
   }
   addToQueue(song) { this._clearIdleTimer(); this.queue.push(song); }
   getNextSong() { if (this.loopMode === 2 && this.current) this.queue.push(this.current); return this.queue.shift(); }
   clearQueue() { this.queue = []; }
+  removeTrack(position) {
+    if (!Number.isInteger(position) || position < 1 || position > this.queue.length) throw new Error('Position absente de la file d’attente.');
+    const [song] = this.queue.splice(position - 1, 1); this._activity(); return song;
+  }
+  moveTrack(from, to) {
+    if (![from, to].every(value => Number.isInteger(value) && value >= 1 && value <= this.queue.length)) throw new Error('Positions absentes de la file d’attente.');
+    const [song] = this.queue.splice(from - 1, 1); this.queue.splice(to - 1, 0, song); this._activity(); return song;
+  }
+  _rememberCurrent() {
+    if (this.current) this.history.push(this.current);
+    if (this.history.length > 20) this.history.shift();
+  }
+  previous() {
+    if (!this.history.length) throw new Error('Aucun titre précédent dans cette session.');
+    const previous = this.history.pop();
+    ++this._generation;
+    this.sender?.stop(); this.sender = null;
+    if (this.current) this.queue.unshift(this.current);
+    this.queue.unshift(previous);
+    this.current = null; this.isPlaying = false; this.isPaused = false;
+    return this.playNext();
+  }
+  setFilter(name) {
+    this.filter = validateFilter(name); this.sender?.setFilter?.(name); this._activity(); return name;
+  }
   shuffleQueue() {
     for (let index = this.queue.length - 1; index > 0; index--) {
       const other = Math.floor(Math.random() * (index + 1));
@@ -391,6 +419,7 @@ class MusicPlayer {
       console.info(`[audio] démarrage serveur=${this.guildId} session=${generation} titre=${JSON.stringify(song.title)} file=${this.queue.length}`);
       const sender = await OpusSender.start(this.connection, song.url, () => console.log(`🔊 SON ÉMIS — lecture maison active serveur=${this.guildId}.`), async () => {
         if (generation === this._generation && this.isPlaying) {
+          this._rememberCurrent();
           this.sender = null;
           try { await this.playNext(undefined, { notifyWhenEmpty: true }); }
           catch (error) {
@@ -406,6 +435,7 @@ class MusicPlayer {
         guildId: this.guildId,
         preparedMedia,
         initialVolume: this.volume,
+        initialFilter: this.filter,
         shouldStart: () => generation === this._generation && this.isPlaying,
       });
       if (generation !== this._generation) {
@@ -442,6 +472,7 @@ class MusicPlayer {
     ++this._generation;
     this.sender?.stop();
     this.sender = null;
+    this._rememberCurrent();
     this.current = null;
     this.isPlaying = false;
     this.isPaused = false;
@@ -449,6 +480,7 @@ class MusicPlayer {
   }
   stop() {
     ++this._queueEpoch;
+    this.history = [];
     ++this._generation; this._clearIdleTimer(); this.clearQueue(); this.sender?.stop();
     this.sender = null; this.current = null; this.isPlaying = false; this.isPaused = false;
     const update = this._activity();
@@ -489,6 +521,7 @@ class MusicPlayer {
       voiceChannelName: this.voiceChannelName,
       lang: this.nowPlayingLang || 'fr',
       loopMode: this.loopMode,
+      filter: this.filter,
       playbackId: this._generation,
     };
     try {

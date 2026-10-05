@@ -3,13 +3,14 @@ const RECOVERABLE = new Set(['AUDIO_PREMATURE_END', 'AUDIO_HTTP_FORBIDDEN', 'AUD
 const { closeMedia } = require('./temporaryAudio');
 
 async function startRecoveringPlayback({ startAttempt, prepareRecovery, shouldStart = () => true,
-  onStart, onEnd, onError, onRecovery = () => {}, initialVolume = 1, maxRecoveries = 2 }) {
+  onStart, onEnd, onError, onRecovery = () => {}, initialVolume = 1, initialFilter = 'none', maxRecoveries = 2 }) {
   let sender = null;
   let generation = 0;
   let finished = false;
   let announced = false;
   let paused = false;
   let volume = initialVolume;
+  let filter = initialFilter;
   let recoveries = 0;
   let position = 0;
   const alive = () => !finished && shouldStart();
@@ -22,7 +23,7 @@ async function startRecoveringPlayback({ startAttempt, prepareRecovery, shouldSt
   };
   const launch = async (preparedMedia, resumeAt = 0) => {
     const attempt = ++generation;
-    const result = await startAttempt({ preparedMedia, resumeAt, initialVolume: volume,
+    const result = await startAttempt({ preparedMedia, resumeAt, initialVolume: volume, initialFilter: filter,
       shouldStart: () => alive() && attempt === generation,
       onStart: () => { if (alive() && attempt === generation && !announced) { announced = true; onStart?.(); } },
       onEnd: () => {
@@ -39,6 +40,7 @@ async function startRecoveringPlayback({ startAttempt, prepareRecovery, shouldSt
     if (!alive() || attempt !== generation) { result?.stop?.(); return; }
     sender = result;
     sender?.setVolume?.(volume);
+    sender?.setFilter?.(filter);
     if (paused) sender?.pause?.();
   };
   const recover = async error => {
@@ -75,6 +77,7 @@ async function startRecoveringPlayback({ startAttempt, prepareRecovery, shouldSt
     pause() { paused = true; sender?.pause?.(); },
     resume() { paused = false; sender?.resume?.(); },
     setVolume(value) { volume = value; sender?.setVolume?.(value); },
+    setFilter(name) { filter = name; sender?.setFilter?.(name); },
     stop() { finished = true; generation++; sender?.stop?.(); sender = null; },
   };
 }

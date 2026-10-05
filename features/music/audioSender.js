@@ -13,6 +13,7 @@ const { readCookieFile } = require('./youtubeCookies');
 const { soundCloudMatchScore, soundCloudSearchQueries } = require('./soundCloudMatching');
 const { startRecoveringPlayback } = require('./playbackRecovery');
 const { cacheAudio, closeMedia } = require('./temporaryAudio');
+const { ensurePoToken, currentPoTokenConfig, poTokenArgs } = require('./youtubePoToken');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
@@ -444,9 +445,11 @@ function buildYtDlpArgs(preArgs, url, {
   projectRoot = PROJECT_ROOT,
   env = process.env,
   outputToStdout = false,
+  poToken = currentPoTokenConfig(),
 } = {}) {
   const args = [...preArgs, '--ignore-config', '--js-runtimes', `node:${process.execPath}`];
   args.push('--remote-components', 'ejs:github');
+  if (isYouTubeUrl(url)) args.push(...poTokenArgs(poToken, playerClient));
   const resolvedCookiesPath = cookiesPath === undefined
     ? getYouTubeCookiesPath({ env, projectRoot })
     : normalizeCookiesPath(cookiesPath, projectRoot);
@@ -472,6 +475,7 @@ function buildYtDlpSearchArgs(preArgs, query, {
   provider = 'youtube',
   searchPrefix = provider === 'soundcloud' ? 'scsearch' : 'ytsearch',
   inputMode = 'search',
+  poToken = currentPoTokenConfig(),
 } = {}) {
   const normalized = String(query || '').trim().slice(0, inputMode === 'direct' ? 2_048 : 200);
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 5));
@@ -484,6 +488,7 @@ function buildYtDlpSearchArgs(preArgs, query, {
     '--playlist-end', String(safeLimit),
   ];
   if (provider === 'youtube') {
+    args.push(...poTokenArgs(poToken, playerClient));
     const resolvedCookiesPath = cookiesPath === undefined
       ? getYouTubeCookiesPath({ env, projectRoot })
       : normalizeCookiesPath(cookiesPath, projectRoot);
@@ -822,6 +827,7 @@ async function streamUrl(url, {
   projectRoot = PROJECT_ROOT,
   env = process.env,
 } = {}) {
+  if (isYouTubeUrl(url) && spawnImpl === spawn) await ensurePoToken();
   const errors = [];
   let missingOnly = true;
   let authCandidate = null;
@@ -1001,6 +1007,7 @@ async function streamYtDlp(url, {
   env = process.env,
 } = {}) {
   const youtubeUrl = isYouTubeUrl(url);
+  if (youtubeUrl && spawnImpl === spawn) await ensurePoToken();
   const configuredCookiesPaths = !youtubeUrl ? [] : cookiesPaths === undefined
     ? getYouTubeCookiesPaths({ env, projectRoot })
     : (Array.isArray(cookiesPaths) ? cookiesPaths : [cookiesPaths])
@@ -1226,7 +1233,7 @@ async function start(connection, url, onStart, onEnd, onError, fallbackQuery, de
   const prepare = dependencies.prepareInput || preparePlaybackInput;
   const failedUrls = new Set();
   return startRecoveringPlayback({
-    shouldStart: dependencies.shouldStart, initialVolume: dependencies.initialVolume,
+    shouldStart: dependencies.shouldStart, initialVolume: dependencies.initialVolume, initialFilter: dependencies.initialFilter,
     onStart, onEnd, onError,
     onRecovery: ({ attempt, position, code }) => console.info(`[audio] reprise même titre serveur=${dependencies.guildId || '?'} tentative=${attempt}/2 position=${position.toFixed(2)}s cause=${code}`),
     prepareRecovery: (error, attempt) => {
@@ -1266,7 +1273,7 @@ async function startAttempt(connection, url, onStart, onEnd, onError, fallbackQu
     : 160_000;
   let ffmpeg;
   let decoder;
-  const gain = new PcmVolume(dependencies.initialVolume ?? 1);
+  const gain = new PcmVolume(dependencies.initialVolume ?? 1, dependencies.initialFilter || 'none');
   const resumeAt = Math.max(0, Number(dependencies.resumeAt) || 0);
   try {
     decoder = (dependencies.spawn || spawn)(bin('ffmpeg', 'FFMPEG_PATH'), [
@@ -1411,7 +1418,7 @@ async function startAttempt(connection, url, onStart, onEnd, onError, fallbackQu
       onEnd?.();
     }, 100);
   });
-  return { pause() { paused = true; }, resume() { paused = false; }, setVolume(value) { gain.setVolume(value); }, stop() { stopped = true; cleanup(); } };
+  return { pause() { paused = true; }, resume() { paused = false; }, setVolume(value) { gain.setVolume(value); }, setFilter(name) { gain.setFilter(name); }, stop() { stopped = true; cleanup(); } };
 }
 
 class OggParser {
