@@ -1,20 +1,26 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { PoTokenProvider, poTokenArgs, helperEnvironment } = require('./youtubePoToken');
+const { PoTokenProvider, poTokenArgs, helperEnvironment, PUBLIC_PLAYER_CLIENTS } = require('./youtubePoToken');
 const { buildYtDlpArgs, buildYtDlpSearchArgs } = require('./audioSender');
 
 test('helper receives no bot/account secret or Node injection options', () => {
   assert.deepEqual(helperEnvironment({ PATH: 'bin', HOME: 'home', DISCORD_TOKEN: 'fake', YOUTUBE_TOKEN: 'fake', NODE_OPTIONS: '--require evil' }), { PATH: 'bin', HOME: 'home' });
 });
-test('PO plugin applies to YouTube only, with mweb by default and explicit fallback preserved', () => {
+test('PO plugin tries public clients in one invocation; explicit fallback and SoundCloud remain unchanged', () => {
   const poToken = { ready: true, plugins: 'private-plugins' };
   const options = { poToken, cookiesPath: '', env: {} };
-  assert.ok(buildYtDlpArgs([], 'https://youtube.com/watch?v=abcdefghijk', options).includes('youtube:player_client=mweb'));
+  const args = buildYtDlpArgs([], 'https://youtube.com/watch?v=abcdefghijk', options);
+  assert.ok(args.includes(`youtube:player_client=${PUBLIC_PLAYER_CLIENTS}`));
+  assert.equal(PUBLIC_PLAYER_CLIENTS, 'mweb,tv,web_safari,android_vr');
+  assert.ok(!args.includes('--cookies'));
   assert.ok(buildYtDlpSearchArgs([], 'artist', options).includes('private-plugins'));
   assert.ok(!buildYtDlpArgs([], 'https://soundcloud.com/artist/song', options).includes('private-plugins'));
   assert.ok(!buildYtDlpSearchArgs([], 'artist', { ...options, provider: 'soundcloud' }).includes('private-plugins'));
-  assert.ok(!poTokenArgs(poToken, 'web_embedded').includes('youtube:player_client=mweb'));
+  assert.ok(!poTokenArgs(poToken, 'web_embedded').includes(`youtube:player_client=${PUBLIC_PLAYER_CLIENTS}`));
+  const embedded = buildYtDlpArgs([], 'https://youtube.com/watch?v=abcdefghijk', { ...options, playerClient: 'web_embedded' });
+  assert.equal(embedded.filter(arg => arg.startsWith('youtube:player_client=')).length, 1);
+  assert.ok(embedded.includes('youtube:player_client=web_embedded'));
   assert.deepEqual(poTokenArgs(null), []);
 });
 test('disabled/not installed never forks or fetches', async () => {

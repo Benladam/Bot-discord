@@ -5,6 +5,9 @@ const { fork } = require('node:child_process');
 const { getDataDirectory } = require('./ytDlp');
 
 const VERSION = '2.0.1';
+// One bounded yt-dlp invocation can try other public clients when mweb fails
+// before requesting a PO token. Explicit authenticated/embedded retries win.
+const PUBLIC_PLAYER_CLIENTS = 'mweb,tv,web_safari,android_vr';
 const COMMIT = '2df09aeaa71a4eec1e31901e84fbddbf0c7c54a9';
 const PLUGIN_SHA256 = '6fc9d757578949ba3cad2f561f57dfbc16142dbf8d485fe1bf9f0733f23bf9e3';
 function installationPaths(env = process.env) {
@@ -28,7 +31,7 @@ function poTokenArgs(config, playerClient) {
   if (!config?.ready) return [];
   return ['--no-plugin-dirs', '--plugin-dirs', config.plugins,
     '--extractor-args', 'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416',
-    ...(!playerClient ? ['--extractor-args', 'youtube:player_client=mweb'] : [])];
+    ...(!playerClient ? ['--extractor-args', `youtube:player_client=${PUBLIC_PLAYER_CLIENTS}`] : [])];
 }
 
 class PoTokenProvider {
@@ -83,6 +86,6 @@ class PoTokenProvider {
 }
 const provider = new PoTokenProvider();
 process.once('exit', () => provider.stop());
-module.exports = { VERSION, COMMIT, PLUGIN_SHA256, installationPaths, installed, helperEnvironment,
+module.exports = { VERSION, PUBLIC_PLAYER_CLIENTS, COMMIT, PLUGIN_SHA256, installationPaths, installed, helperEnvironment,
   poTokenArgs, PoTokenProvider, ensurePoToken: () => provider.ensure(), poTokenStatus: () => provider.status(),
   currentPoTokenConfig: () => provider.ready ? { ready: true, plugins: installationPaths().plugins } : null };

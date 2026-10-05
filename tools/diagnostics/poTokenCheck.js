@@ -8,6 +8,9 @@ function classifyPoDiagnostic(text) {
     pluginLoaded: /PO Token Providers[^\r\n]*bgutil|\[pot:bgutil/i.test(text),
     generationRequested: /Generating (?:a )?gvs PO Token/i.test(text),
     loginRequired: /LOGIN_REQUIRED|Sign in to confirm|authentication|cookies.*no longer valid/i.test(text),
+    unavailable: /Video unavailable|not available in your country|This video is private|Video has been removed|This video has been removed/i.test(text),
+    noFormats: /Requested format is not available|No video formats found|Only images are available/i.test(text),
+    solverFailed: /challenge solver failed|No supported JavaScript runtime|Failed to extract any player response/i.test(text),
     version: text.match(/yt-dlp version[^\r\n]*?(\d{4}\.\d{2}\.\d{2})/)?.[1] || 'unknown',
   };
 }
@@ -23,7 +26,7 @@ async function poTokenCheck(url, { log = console.info, ensure = ensurePoToken, b
     const finish = code => {
       if (finished) return; finished = true; clearTimeout(timer);
       const result = { ready: true, ...classifyPoDiagnostic(diagnostic), extracted: code === 0 };
-      log(`[potcheck] yt-dlp=${result.version}; plugin chargé=${result.pluginLoaded}; génération GVS demandée=${result.generationRequested}; authentification exigée=${result.loginRequired}; extraction=${result.extracted}. Aucun cookie transmis, aucun vocal rejoint.`);
+      log(`[potcheck] yt-dlp=${result.version}; plugin chargé=${result.pluginLoaded}; génération GVS demandée=${result.generationRequested}; authentification exigée=${result.loginRequired}; vidéo indisponible=${result.unavailable}; aucun format=${result.noFormats}; solveur échoué=${result.solverFailed}; extraction=${result.extracted}. Aucun cookie transmis, aucun vocal rejoint.`);
       resolve(result);
     };
     const timer = setTimeout(() => { child.kill(); finish(-1); }, 45_000);

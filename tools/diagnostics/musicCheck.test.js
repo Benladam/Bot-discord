@@ -87,3 +87,19 @@ test('musiccheck distingue flux public sans compte et cookies de secours sans di
     if (mode === 'cookies') assert.match(logs.join(' '), /cookies de secours/);
   }
 });
+
+test('musiccheck anonymous ignores even an old configured cookie and cleans the public stream', async () => {
+  const stream = new PassThrough(); let cleanups = 0; const logs = [];
+  stream.cleanup = () => cleanups++;
+  const result = await musicCheck('anonymous https://youtu.be/v2o3in-Aud0?si=private', {
+    getPaths: assert.fail, readCookies: assert.fail, log: line => logs.push(line),
+    probe: async (url, options) => {
+      assert.equal(url, 'https://www.youtube.com/watch?v=v2o3in-Aud0');
+      assert.deepEqual(options, { cookiesPaths: [] }); return stream;
+    },
+  });
+  assert.deepEqual(result, { probed: true, available: true });
+  assert.equal(cleanups, 1); assert.equal(stream.destroyed, true);
+  assert.match(logs.join(' '), /aucun fichier de cookies lu ou transmis/);
+  assert.doesNotMatch(logs.join(' '), /private/);
+});

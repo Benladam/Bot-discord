@@ -20,3 +20,11 @@ test('PO diagnostics distinguish loaded plugin from requested generation and nev
   assert.ok(!logs.join().includes('private-secret'));
   assert.equal(classifyPoDiagnostic('Generating a gvs PO Token').generationRequested, true);
 });
+
+test('PO diagnostics distinguish unavailable video and missing formats from login rejection', () => {
+  const unavailable = classifyPoDiagnostic('Video unavailable; token=private');
+  assert.equal(unavailable.unavailable, true); assert.equal(unavailable.loginRequired, false);
+  const formats = classifyPoDiagnostic('Requested format is not available');
+  assert.equal(formats.noFormats, true); assert.equal(formats.loginRequired, false);
+  assert.equal(classifyPoDiagnostic('challenge solver failed').solverFailed, true);
+});

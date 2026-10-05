@@ -28,9 +28,12 @@ async function musicCheck(input = '', { log = console.info, getPaths = getYouTub
   const po = poTokenStatus();
   log(`[musiccheck] PO token : ${po.enabled ? po.ready ? 'helper prêt' : 'installé, démarrage à la lecture' : 'non installé ou désactivé'}.`);
   // Aucun accès Discord : lecture de la configuration et essai d'extraction seulement.
-  const url = input.trim() ? diagnosticUrl(input.trim()) : null;
-  const paths = getPaths();
-  if (!paths.length) log('[musiccheck] Aucun fichier de cookies configuré.');
+  const anonymousOnly = input.trim().startsWith('anonymous ');
+  const requestedUrl = anonymousOnly ? input.trim().slice(10).trim() : input.trim();
+  const url = requestedUrl ? diagnosticUrl(requestedUrl) : null;
+  const paths = anonymousOnly ? [] : getPaths();
+  if (anonymousOnly) log('[musiccheck] Diagnostic sans compte : aucun fichier de cookies lu ou transmis.');
+  else if (!paths.length) log('[musiccheck] Aucun fichier de cookies configuré.');
   paths.forEach((file, index) => {
     try {
       const { summary } = readCookies(file);
@@ -43,7 +46,7 @@ async function musicCheck(input = '', { log = console.info, getPaths = getYouTub
   if (!url) return { probed: false };
   let stream;
   try {
-    stream = await probe(url);
+    stream = anonymousOnly ? await probe(url, { cookiesPaths: [] }) : await probe(url);
     if (['anonymous', 'cookies'].includes(stream?.youtubeAuthentication)) {
       log(`[musiccheck] Mode YouTube : ${stream.youtubeAuthentication === 'anonymous' ? 'sans compte, aucun cookie transmis' : 'cookies de secours'}.`);
     }

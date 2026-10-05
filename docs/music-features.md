@@ -65,13 +65,20 @@ DISCORD_TOKEN, ni secret du dashboard, ni cookie de compte via son environnement
 `YOUTUBE_PO_TOKEN_MODE=off` désactive son utilisation sans effacer les fichiers.
 Le mode auto n’installe rien à chaque démarrage ni à chaque morceau.
 
-La lecture YouTube utilise alors mweb et le plugin automatique. Les cookies
+La lecture YouTube utilise alors le plugin automatique et tente les clients
+`mweb,tv,web_safari,android_vr` dans une même invocation bornée de yt-dlp.
+Les essais spécifiques authentifiés ou intégrés gardent leur client explicite.
+Les cookies
 restent un secours séparé. Un helper prêt n’est **pas une preuve** qu’un PO token
 a été accepté : exécuter `musiccheck https://www.youtube.com/watch?v=VIDEO_ID`
 sur le serveur, puis contrôler une lecture complète dans Discord.
 `musiccheck pot-info https://www.youtube.com/watch?v=VIDEO_ID` vérifie aussi
 si yt-dlp a chargé le plugin et demandé une génération GVS. Il ne publie que
 des indicateurs, jamais les sorties brutes, tokens ou URLs signées.
+`musiccheck anonymous https://www.youtube.com/watch?v=VIDEO_ID` vérifie la
+réception d'octets audio sans lire ni transmettre **aucun** fichier de cookies,
+même lorsqu'un ancien fichier est configuré. Le flux est fermé après ce contrôle.
+Cela ne vérifie pas encore une écoute complète dans Discord.
 
 YouTube peut encore exiger une connexion, refuser une IP d’hébergement ou limiter
 un contenu. Aucun fournisseur ne garantit des cookies éternels ou zéro blocage.
