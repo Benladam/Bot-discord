@@ -65,10 +65,10 @@ async function soundCloudCheck(input, { log = console.info, probe = soundCloudSe
   let media;
   try {
     stream = await probe(query, { expectedTitle: query, guildId: 'diagnostic', timeoutMs: 12_000,
-      ...(fullCache ? { expectedDuration } : {}),
+      ...(fullCache ? { expectedDuration, validateStream: source => cache({ stream: source, ...source.musicSource }, { expectedDuration, log }) } : {}),
     });
     if (fullCache) {
-      media = await cache({ stream, ...stream.musicSource }, { expectedDuration, log });
+      media = stream.cached ? stream : await cache({ stream, ...stream.musicSource }, { expectedDuration, log });
       if (!media.cached) throw Object.assign(new Error('Cache indisponible'), { code: 'AUDIO_CACHE_UNAVAILABLE' });
       log('[soundcloudcheck] Audio complet préparé et durée vérifiée. Aucun vocal rejoint; contenu audible non vérifié.');
     }

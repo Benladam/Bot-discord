@@ -65,7 +65,7 @@ async function cacheAudio(media, {
     const stat = fs.statfsSync(directory); return Number(stat.bavail) * Number(stat.bsize);
   }, log = console.info,
 } = {}) {
-  if (String(env.MUSIC_CACHE_ENABLED || 'true').toLowerCase() === 'false' || !media?.stream) return media;
+  if (media?.cached || String(env.MUSIC_CACHE_ENABLED || 'true').toLowerCase() === 'false' || !media?.stream) return media;
   const expected = Number(expectedDuration);
   const knownDuration = Number.isFinite(expected) && expected > 0;
   if (knownDuration && expected > 20 * 60) return media;
@@ -156,6 +156,7 @@ async function cacheAudio(media, {
     if (!shouldStart()) throw failure('AUDIO_CANCELLED', 'Préparation audio annulée.');
     const tolerance = Math.min(12, Math.max(2, expected * 0.03));
     if (bytes < 100 || duration < 1 || duration > 20 * 60 || knownDuration && Math.abs(duration - expected) > tolerance) {
+      log(`[audio-cache] Durée refusée : audio=${duration.toFixed(2)}s, catalogue=${knownDuration ? expected : 'inconnu'}s.`);
       throw failure('AUDIO_PREMATURE_END', knownDuration
         ? `Audio incomplet ou durée différente : ${Math.floor(duration)} s préparées sur ${Math.floor(expected)} s attendues.`
         : 'Le téléchargement ne fournit pas un morceau fini de 1 seconde à 20 minutes.');

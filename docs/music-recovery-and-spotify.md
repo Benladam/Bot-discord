@@ -25,7 +25,10 @@ la durée audio réellement encodée est vérifiée (tolérance 3 %, entre 2 et 
 Sans durée connue, la fin du flux et les limites sont contrôlées, sans pouvoir
 prouver sa complétude par comparaison. Les morceaux annoncés de plus de 20 min
 restent en streaming. Un cache interrompu est refusé; une seule recherche du
-même morceau sur une autre source est permise avant lecture.
+même morceau sur une autre source est permise avant lecture. Les candidats
+YouTube/SoundCloud sont validés avant leur sélection définitive (au plus cinq
+candidats YouTube et trois SoundCloud); une correspondance dont le téléchargement
+est incomplet n'empêche pas l'essai du candidat suivant.
 
 Un fichier unique est créé pour chaque lecteur et supprimé en fin de lecture,
 Stop, skip, annulation ou erreur. Les sessions abandonnées après un crash sont

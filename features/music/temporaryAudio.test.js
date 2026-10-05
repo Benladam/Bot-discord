@@ -6,7 +6,46 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { cacheAudio, closeMedia } = require('./temporaryAudio');
-const { preparePlaybackInput } = require('./audioSender');
+const { preparePlaybackInput, soundCloudSearchStream, prepareInput } = require('./audioSender');
+
+test('SoundCloud valide le fichier complet de chaque candidat avant de le sélectionner', async () => {
+  const sources = []; const opened = [];
+  const result = await soundCloudSearchStream('Ninho - Coco', {
+    expectedDuration: 148, isConfigured: () => false,
+    searchCandidates: async () => [
+      { title: 'Ninho - Coco', duration: 148, url: 'https://soundcloud.com/artist/short' },
+      { title: 'Ninho - Coco', duration: 149, url: 'https://soundcloud.com/artist/full' },
+    ],
+    openTrack: async url => { opened.push(url); const stream = new PassThrough(); sources.push(stream); return stream; },
+    validateStream: async stream => {
+      if (opened.length === 1) throw Object.assign(new Error('audio trop court'), { code: 'AUDIO_PREMATURE_END' });
+      return { cached: true, url: 'private-cache', sourceUrl: stream.musicSource.sourceUrl, cleanup() {} };
+    },
+  });
+  assert.deepEqual(opened, ['https://soundcloud.com/artist/short', 'https://soundcloud.com/artist/full']);
+  assert.equal(sources[0].destroyed, true); assert.equal(result.sourceUrl, opened[1]);
+  sources[1].destroy(); closeMedia(result);
+});
+
+test('validation cache annulée : pas de repli réseau après Stop', async () => {
+  await assert.rejects(prepareInput('https://youtu.be/example', 'Ninho - Coco', {
+    getYouTubeStream: async () => new PassThrough(),
+    searchSoundCloudStream: assert.fail,
+    validateMedia: async media => { closeMedia(media); throw Object.assign(new Error('cancel'), { code: 'AUDIO_CANCELLED' }); },
+  }), { code: 'AUDIO_CANCELLED' });
+});
+
+test('un lien SoundCloud incomplet cherche une autre source complète si YouTube est bloqué', async () => {
+  const stream = new PassThrough(); let options;
+  const media = await prepareInput('https://soundcloud.com/uploader/short', 'Ninho - Coco', {
+    getSoundCloudStream: async () => { throw Object.assign(new Error('short'), { code: 'AUDIO_PREMATURE_END' }); },
+    searchYouTubeStream: async () => { throw Object.assign(new Error('auth'), { code: 'YOUTUBE_AUTH_BLOCKED' }); },
+    searchSoundCloudStream: async (_query, received) => { options = received; return stream; },
+    validateMedia: async media => media,
+  });
+  assert.deepEqual(options.excludedUrls, ['https://soundcloud.com/uploader/short']);
+  assert.equal(media.stream, stream); closeMedia(media);
+});
 
 function fixture(t, { duration = 150, size = 1000, hang = false, code = 0 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-audio-cache-test-'));
