@@ -32,7 +32,8 @@ soustraction stéréo, pas une séparation de stems par IA.
   timeout, warn, unwarn, warnings, clear). Les permissions Discord restent exigées.
 
 Les tickets sont privés vis-à-vis des membres ordinaires. Les administrateurs
-Discord gardent leur accès inhérent. Le bot doit pouvoir gérer les salons.
+Discord gardent leur accès inhérent. Le bot doit pouvoir gérer les salons et les
+rôles (pour gérer les permissions privées).
 La configuration est sauvegardée par serveur dans la base privée, jamais dans Git.
 
 ## Fournisseur automatique PO token YouTube
@@ -68,6 +69,9 @@ La lecture YouTube utilise alors mweb et le plugin automatique. Les cookies
 restent un secours séparé. Un helper prêt n’est **pas une preuve** qu’un PO token
 a été accepté : exécuter `musiccheck https://www.youtube.com/watch?v=VIDEO_ID`
 sur le serveur, puis contrôler une lecture complète dans Discord.
+`musiccheck pot-info https://www.youtube.com/watch?v=VIDEO_ID` vérifie aussi
+si yt-dlp a chargé le plugin et demandé une génération GVS. Il ne publie que
+des indicateurs, jamais les sorties brutes, tokens ou URLs signées.
 
 YouTube peut encore exiger une connexion, refuser une IP d’hébergement ou limiter
 un contenu. Aucun fournisseur ne garantit des cookies éternels ou zéro blocage.

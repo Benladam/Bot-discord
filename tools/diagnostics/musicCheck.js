@@ -16,6 +16,9 @@ function diagnosticUrl(input) {
 }
 
 async function musicCheck(input = '', { log = console.info, getPaths = getYouTubeCookiesPaths, readCookies = readCookieFile, probe = streamYtDlp } = {}) {
+  if (input.trim().startsWith('pot-info ')) {
+    return require('./poTokenCheck').poTokenCheck(diagnosticUrl(input.trim().slice(9)), { log });
+  }
   if (input.trim() === 'setup-pot') {
     await require('../setup/installPoToken').installPoToken({ log });
     const ready = await ensurePoToken();

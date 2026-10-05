@@ -8,7 +8,7 @@ async function openTicket(guild, userId, settings) {
   const work = (async () => {
     const role = await guild.roles.fetch(settings.supportRoleId);
     if (!role || role.id === guild.id) throw new Error('Le rôle de support est introuvable ou public.');
-    if (!guild.members.me?.permissions.has(P.ManageChannels)) throw new Error('Le bot doit avoir Gérer les salons.');
+    if (!guild.members.me?.permissions.has(P.ManageChannels) || !guild.members.me?.permissions.has(P.ManageRoles)) throw new Error('Le bot doit avoir Gérer les salons et Gérer les rôles pour gérer les permissions privées.');
     const channels = await guild.channels.fetch();
     const existing = channels.find(channel => channel?.topic === marker(guild.id, userId) && !channel.name.startsWith('closed-'));
     if (existing) return existing;

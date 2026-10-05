@@ -461,6 +461,7 @@ class MusicPlayer {
       throw error;
     }
     this.sender.setVolume(this.volume);
+    this.sender.setFilter?.(this.filter);
     if (onEmbed) await onEmbed(song);
     this._activity(); return song;
   }
