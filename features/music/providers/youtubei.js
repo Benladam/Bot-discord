@@ -25,6 +25,20 @@ function secondsFromTrack(track) {
   return parts.reduce((seconds, value) => seconds * 60 + value, 0);
 }
 
+function summarizeProviderError(value) {
+  if (!value || typeof value !== 'object') return null;
+  const name = String(value.name || 'Error').replace(/[^A-Za-z0-9_$.-]/g, '').slice(0, 60) || 'Error';
+  const code = /^[A-Z0-9_]{1,60}$/.test(String(value.code || '')) ? String(value.code) : '';
+  const message = String(value.message || '')
+    .replace(/https?:\/\/[^\s]+/gi, '[URL]')
+    .replace(/\b(cookie|authorization|token|signature|sig)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180);
+  return { name, code, message };
+}
+
 function withTimeout(promise, timeoutMs, code, description, onLateValue) {
   const safeTimeout = Math.max(100, Math.min(30_000, Number(timeoutMs) || DEFAULT_SEARCH_TIMEOUT_MS));
   let timer;
@@ -46,10 +60,21 @@ function createRuntime() {
   // Charge les dépendances seulement au premier recours YouTubei.
   const { YoutubeExtractor } = require('discord-player-youtubei');
   const { QueryType } = require('discord-player');
-  const extractor = new YoutubeExtractor({ player: { debug() {} } }, {
+  let lastStreamError = null;
+  const extractor = new YoutubeExtractor({ player: { debug(...values) {
+    for (const value of values) {
+      const summary = summarizeProviderError(value);
+      if (summary) lastStreamError = summary;
+    }
+  } } }, {
     downloads: { trialOrder: ['adaptive', 'sabr'] },
   });
-  return extractor.activate().then(() => ({ extractor, searchType: QueryType.YOUTUBE_SEARCH }));
+  return extractor.activate().then(() => ({
+    extractor,
+    searchType: QueryType.YOUTUBE_SEARCH,
+    clearStreamError() { lastStreamError = null; },
+    getStreamError() { return lastStreamError; },
+  }));
 }
 
 function createYoutubeiProvider({ loadRuntime = createRuntime } = {}) {
@@ -93,7 +118,9 @@ function createYoutubeiProvider({ loadRuntime = createRuntime } = {}) {
 
   async function stream(value, { timeoutMs = DEFAULT_STREAM_TIMEOUT_MS } = {}) {
     const url = canonicalYouTubeUrl(value);
-    const { extractor } = await runtime();
+    const state = await runtime();
+    const { extractor } = state;
+    state.clearStreamError?.();
     const output = await withTimeout(
       extractor.stream({ url, title: '', live: false }),
       timeoutMs,
@@ -104,7 +131,9 @@ function createYoutubeiProvider({ loadRuntime = createRuntime } = {}) {
     const audio = output && typeof output.pipe === 'function' ? output : output?.stream;
     if (!audio || typeof audio.pipe !== 'function') {
       try { output?.destroy?.(); } catch (_) {}
-      throw Object.assign(new Error('YouTubei n’a pas fourni de flux audio.'), { code: 'YOUTUBEI_NO_STREAM' });
+      const error = Object.assign(new Error('YouTubei n’a pas fourni de flux audio exploitable.'), { code: 'YOUTUBEI_NO_STREAM' });
+      error.providerReason = state.getStreamError?.() || null;
+      throw error;
     }
     audio.musicSource = { sourceUrl: url, provider: 'YouTube' };
     return audio;
@@ -118,6 +147,7 @@ const youtubei = createYoutubeiProvider();
 module.exports = {
   canonicalYouTubeUrl,
   createYoutubeiProvider,
+  summarizeProviderError,
   searchYouTubei: youtubei.search,
   streamYouTubei: youtubei.stream,
 };

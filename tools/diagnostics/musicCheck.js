@@ -102,6 +102,14 @@ async function youtubeiCheck(input, {
   } catch (error) {
     const code = /^[A-Z0-9_]+$/.test(error?.code || '') ? error.code : 'EXTRACTION_FAILED';
     log(`[youtubei-check] Échec du test complet (${code}); aucun morceau n’a été lancé.`);
+    if (error?.providerReason) {
+      const reason = error.providerReason;
+      const summary = `${reason.name || 'Error'}${reason.code ? `/${reason.code}` : ''}: ${reason.message || ''}`
+        .replace(/https?:\/\/[^\s]+/gi, '[URL]')
+        .replace(/\b(cookie|authorization|token|signature|sig)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+        .replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+      if (summary) log(`[youtubei-check] Détail expurgé du fournisseur: ${summary}`);
+    }
     return { available: false, code };
   } finally {
     if (media) {

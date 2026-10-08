@@ -1124,7 +1124,11 @@ async function streamYouTubeAudio(url, { primary = streamYtDlp, fallback = strea
       return stream;
     } catch (youtubeiError) {
       const code = /^[A-Z0-9_]+$/.test(youtubeiError?.code || '') ? youtubeiError.code : 'STREAM_FAILED';
-      console.warn(`[audio] Repli YouTubei indisponible (${code}); conservation de l’erreur yt-dlp.`);
+      const reason = youtubeiError?.providerReason;
+      const reasonText = reason
+        ? ` cause=${sanitizeYtDlpDiagnostic(`${reason.name || 'Error'}${reason.code ? `/${reason.code}` : ''}: ${reason.message || ''}`)}`
+        : '';
+      console.warn(`[audio] Repli YouTubei indisponible (${code})${reasonText}; conservation de l’erreur yt-dlp.`);
       throw ytDlpError;
     }
   }
