@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
-const { musicCheck, diagnosticUrl, soundCloudCheck } = require('./musicCheck');
+const { musicCheck, diagnosticUrl, soundCloudCheck, youtubeiCheck } = require('./musicCheck');
 
 test('soundcloudcheck --cache=148 transmet la durée, prépare tout le morceau et nettoie', async () => {
   const logs = []; const stream = new PassThrough(); let cleaned = 0;
@@ -102,4 +102,28 @@ test('musiccheck anonymous ignores even an old configured cookie and cleans the 
   assert.equal(cleanups, 1); assert.equal(stream.destroyed, true);
   assert.match(logs.join(' '), /aucun fichier de cookies lu ou transmis/);
   assert.doesNotMatch(logs.join(' '), /private/);
+});
+
+test('youtubei-check valide le titre, la durée complète et nettoie le flux sans rejoindre un vocal', async () => {
+  const logs = [];
+  const stream = new PassThrough();
+  stream.musicSource = { sourceUrl: 'https://www.youtube.com/watch?v=abc12345678', provider: 'YouTube' };
+  let cleaned = 0;
+  const result = await youtubeiCheck('--cache=210 Niska - Réseaux', {
+    log: line => logs.push(line),
+    search: async (query, options) => {
+      assert.equal(query, 'niska reseaux'); assert.equal(options.limit, 5);
+      return [{ title: 'Niska - Réseaux (Clip Officiel)', url: 'https://youtube.com/watch?v=abc12345678', duration: 210, durationInSec: 210, channel: { name: 'Niska Officiel' } }];
+    },
+    open: async url => { assert.equal(url, 'https://youtube.com/watch?v=abc12345678'); return stream; },
+    cache: async (media, options) => {
+      assert.equal(media.stream, stream); assert.equal(options.expectedDuration, 210);
+      return { cached: true, url: 'test-cache.opus', cleanup() { cleaned++; } };
+    },
+  });
+  assert.deepEqual(result, { available: true, cached: true });
+  assert.equal(cleaned, 1); assert.equal(stream.destroyed, true);
+  assert.match(logs.join(' '), /morceau complet.*aucun cookie ni vocal/);
+  await assert.rejects(youtubeiCheck('Niska - Chasse à l’homme'), /--cache/);
+  await assert.rejects(youtubeiCheck('--cache=181 https://youtu.be/abc12345678'), /Artiste - Titre/);
 });

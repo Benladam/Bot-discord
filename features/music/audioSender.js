@@ -14,6 +14,7 @@ const { soundCloudMatchScore, soundCloudSearchQueries } = require('./soundCloudM
 const { startRecoveringPlayback } = require('./playbackRecovery');
 const { cacheAudio, closeMedia } = require('./temporaryAudio');
 const { ensurePoToken, currentPoTokenConfig, poTokenArgs } = require('./youtubePoToken');
+const { searchYouTubei, streamYouTubei } = require('./providers/youtubei');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
@@ -201,7 +202,8 @@ function configuredCookiesPath(options = {}) {
 }
 
 function ytDlpSpawnOptions(options = {}) {
-  const env = options.env || process.env;
+  const env = { ...process.env, ...(options.env || {}) };
+  env.PATH ||= env.Path || process.env.Path || '';
   const runtimeTempDirectory = options.runtimeTempDirectory || path.join(
     getDataDirectory({ env }), '.cache', 'yt-dlp', 'runtime',
   );
@@ -377,7 +379,7 @@ async function youtubeSearchStream(query, {
   expectedTitle,
   guildId,
   searchCandidates = searchYouTubeCandidates,
-  openTrack = streamYtDlp,
+  openTrack = streamYouTubeAudio,
   excludedUrls = [],
   validateStream,
 } = {}) {
@@ -719,9 +721,37 @@ async function searchYtDlpCandidates(query, {
   throw new Error(bestYtDlpError(errors, `Aucun résultat ${provider === 'soundcloud' ? 'SoundCloud' : 'YouTube'} trouvé.`));
 }
 
-function searchYouTubeCandidates(query, options = {}) {
+async function searchYouTubeCandidates(query, options = {}) {
   // Les recherches publiques n'ont pas besoin des cookies d'un compte.
-  return searchYtDlpCandidates(query, { cookiesPaths: [], ...options, provider: 'youtube', searchPrefix: 'ytsearch', inputMode: 'search' });
+  const {
+    youtubeiFallback = true,
+    youtubeiSearch = searchYouTubei,
+    ...ytDlpOptions
+  } = options;
+  const hasInjectedYtDlp = Boolean(options.candidates || options.spawnImpl || options.install);
+  try {
+    return await searchYtDlpCandidates(query, {
+      cookiesPaths: [], ...ytDlpOptions, provider: 'youtube', searchPrefix: 'ytsearch', inputMode: 'search',
+    });
+  } catch (ytDlpError) {
+    // Les tests/injections gardent leur isolation réseau. En production, le
+    // catalogue YouTubei contourne aussi les erreurs d'espace temporaire yt-dlp.
+    if (!youtubeiFallback || hasInjectedYtDlp && !options.youtubeiSearch || isPreparationAbort(ytDlpError)) throw ytDlpError;
+    try {
+      const tracks = await youtubeiSearch(query, {
+        limit: options.limit || 5,
+        timeoutMs: Math.min(12_000, Number(options.timeoutMs) || 6_000),
+      });
+      if (tracks?.length) {
+        console.info('[catalogue] Résultats YouTubei utilisés après l’échec de la recherche yt-dlp.');
+        return tracks;
+      }
+    } catch (youtubeiError) {
+      const code = /^[A-Z0-9_]+$/.test(youtubeiError?.code || '') ? youtubeiError.code : 'SEARCH_FAILED';
+      console.warn(`[catalogue] Repli YouTubei indisponible (${code}); conservation de l’erreur yt-dlp.`);
+    }
+    throw ytDlpError;
+  }
 }
 
 function searchYouTubePlaylists(query, options = {}) {
@@ -1083,6 +1113,23 @@ async function streamYtDlp(url, {
   throw new Error(bestYtDlpError(errors, 'yt-dlp n’a pas réussi à ouvrir un flux audio.'));
 }
 
+async function streamYouTubeAudio(url, { primary = streamYtDlp, fallback = streamYouTubei } = {}) {
+  try {
+    return await primary(url);
+  } catch (ytDlpError) {
+    if (isPreparationAbort(ytDlpError)) throw ytDlpError;
+    try {
+      const stream = await fallback(url);
+      console.info('[audio] Flux YouTubei ouvert après l’échec de yt-dlp; la durée sera vérifiée avant lecture.');
+      return stream;
+    } catch (youtubeiError) {
+      const code = /^[A-Z0-9_]+$/.test(youtubeiError?.code || '') ? youtubeiError.code : 'STREAM_FAILED';
+      console.warn(`[audio] Repli YouTubei indisponible (${code}); conservation de l’erreur yt-dlp.`);
+      throw ytDlpError;
+    }
+  }
+}
+
 function providerFailure(primaryProvider, primaryError, alternateProvider, alternateError) {
   const detail = (error) => String(error?.message || error || 'échec inconnu').replace(/[\r\n]+/g, ' ').slice(0, 300);
   const youtubeError = primaryProvider === 'YouTube' ? primaryError : alternateError;
@@ -1104,7 +1151,7 @@ function providerFailure(primaryProvider, primaryError, alternateProvider, alter
 }
 
 async function prepareInput(url, fallbackQuery, providerOverrides = {}) {
-  const getYouTubeStream = providerOverrides.getYouTubeStream || streamYtDlp;
+  const getYouTubeStream = providerOverrides.getYouTubeStream || streamYouTubeAudio;
   const searchYouTubeStream = providerOverrides.searchYouTubeStream || youtubeSearchStream;
   const getSoundCloudStream = providerOverrides.getSoundCloudStream || soundCloudStream;
   const searchSoundCloudStream = providerOverrides.searchSoundCloudStream || soundCloudSearchStream;
@@ -1439,6 +1486,9 @@ module.exports = {
   OpusSender: { start, prepare: preparePlaybackInput },
   streamUrl,
   streamYtDlp,
+  streamYouTubeAudio,
+  searchYouTubei,
+  streamYouTubei,
   buildYtDlpArgs,
   buildYtDlpSearchArgs,
   getYouTubeCookiesPath,

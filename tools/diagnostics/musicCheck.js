@@ -2,7 +2,10 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { cacheAudio, closeMedia } = require('../../features/music/temporaryAudio');
 const { readCookieFile } = require('../../features/music/youtubeCookies');
-const { getYouTubeCookiesPaths, streamYtDlp, soundCloudSearchStream } = require('../../features/music/audioSender');
+const {
+  getYouTubeCookiesPaths, streamYtDlp, soundCloudSearchStream, youtubeSearchStream,
+} = require('../../features/music/audioSender');
+const { searchYouTubei, streamYouTubei } = require('../../features/music/providers/youtubei');
 const { ensurePoToken, poTokenStatus } = require('../../features/music/youtubePoToken');
 
 function diagnosticUrl(input) {
@@ -16,6 +19,9 @@ function diagnosticUrl(input) {
 }
 
 async function musicCheck(input = '', { log = console.info, getPaths = getYouTubeCookiesPaths, readCookies = readCookieFile, probe = streamYtDlp } = {}) {
+  if (String(input).trim().startsWith('youtubei ')) {
+    return youtubeiCheck(String(input).trim().slice('youtubei '.length), { log });
+  }
   if (input.trim().startsWith('pot-info ')) {
     return require('./poTokenCheck').poTokenCheck(diagnosticUrl(input.trim().slice(9)), { log });
   }
@@ -59,6 +65,52 @@ async function musicCheck(input = '', { log = console.info, getPaths = getYouTub
   } finally {
     try { stream?.cleanup?.(); } catch (_) {}
     stream?.destroy?.();
+  }
+}
+
+async function youtubeiCheck(input, {
+  log = console.info,
+  search = searchYouTubei,
+  open = streamYouTubei,
+  cache = cacheAudio,
+} = {}) {
+  const request = String(input || '').trim();
+  const match = request.match(/^--cache=(\d{1,4})\s+(.+)$/u);
+  if (!match) throw new Error('Utilise musiccheck youtubei --cache=durée Artiste - Titre pour valider tout le morceau.');
+  const expectedDuration = Number(match[1]);
+  const query = match[2].trim();
+  if (!(expectedDuration >= 1 && expectedDuration <= 1200)
+      || query.length < 3 || query.length > 200
+      || /https?:\/\/|[\r\n\x00-\x1f]/i.test(query)
+      || !/\S\s+[-–—]\s+\S/u.test(query)) {
+    throw new Error('Indique une durée de 1 à 1200 secondes et une recherche Artiste - Titre, sans lien.');
+  }
+  let stream;
+  let media;
+  try {
+    stream = await youtubeSearchStream(query, {
+      expectedDuration,
+      expectedTitle: query,
+      guildId: 'diagnostic',
+      searchCandidates: search,
+      openTrack: open,
+    });
+    media = await cache({ stream, ...stream.musicSource }, { expectedDuration, log });
+    if (!media?.cached) throw Object.assign(new Error('Le cache audio complet n’a pas été validé.'), { code: 'AUDIO_CACHE_UNAVAILABLE' });
+    log('[youtubei-check] YouTubei a fourni le bon candidat et le morceau complet a passé la vérification de durée; aucun cookie ni vocal utilisé.');
+    return { available: true, cached: true };
+  } catch (error) {
+    const code = /^[A-Z0-9_]+$/.test(error?.code || '') ? error.code : 'EXTRACTION_FAILED';
+    log(`[youtubei-check] Échec du test complet (${code}); aucun morceau n’a été lancé.`);
+    return { available: false, code };
+  } finally {
+    if (media) {
+      closeMedia(media);
+      if (media.cached) log(fs.existsSync(media.url)
+        ? '[youtubei-check] Suppression du cache en attente.'
+        : '[youtubei-check] Fichier audio temporaire supprimé.');
+    }
+    closeMedia({ stream });
   }
 }
 
@@ -107,4 +159,4 @@ async function soundCloudCheck(input, { log = console.info, probe = soundCloudSe
   }
 }
 
-module.exports = { musicCheck, diagnosticUrl, soundCloudCheck };
+module.exports = { musicCheck, diagnosticUrl, soundCloudCheck, youtubeiCheck };

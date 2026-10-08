@@ -625,6 +625,24 @@ test('lit uniquement le checksum de l’asset demandé', () => {
   assert.throws(() => parseChecksum(`${digest}  autre-fichier`, 'yt-dlp_linux'), /absent/);
 });
 
+test('recherche YouTubei prend le relais si la recherche yt-dlp échoue sur le serveur', async () => {
+  const results = await searchYouTubeCandidates('Niska - Chasse à l’homme', {
+    cookiesPaths: [], candidates: [['fake-yt-dlp', []]],
+    install: async () => { throw new Error('yt-dlp already attempted'); },
+    spawnImpl: () => {
+      const child = new EventEmitter();
+      child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => true;
+      setImmediate(() => { child.stderr.end('ENOSPC'); child.emit('close', 1); });
+      return child;
+    },
+    youtubeiSearch: async (query, options) => {
+      assert.equal(query, 'Niska - Chasse à l’homme'); assert.equal(options.limit, 5);
+      return [{ title: 'Niska - Chasse à l’homme #KeDuSal 2', url: 'https://youtu.be/abcdefghijk', duration: 181 }];
+    },
+  });
+  assert.equal(results[0].url, 'https://youtu.be/abcdefghijk');
+});
+
 test('un titre public ne lit jamais le fichier de cookies invalide, dans les deux modes audio', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-discord-public-audio-'));
   const invalidCookies = path.join(directory, 'cookies.txt');

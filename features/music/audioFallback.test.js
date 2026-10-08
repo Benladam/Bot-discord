@@ -1,7 +1,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
-const { prepareInput, soundCloudStream, buildYtDlpArgs, soundCloudSearchStream, youtubeSearchStream } = require('./audioSender');
+const {
+  prepareInput, soundCloudStream, buildYtDlpArgs, soundCloudSearchStream,
+  youtubeSearchStream, streamYouTubeAudio,
+} = require('./audioSender');
 
 test('SoundCloud examine les résultats au-delà des dix premiers et classe avant de jouer', async () => {
   const opened = [];
@@ -281,6 +284,18 @@ test('ne lance pas une recherche de repli sans métadonnées de requête', async
     searchSoundCloudStream: async () => { attemptedSoundCloud = true; return new PassThrough(); },
   }), /YouTube indisponible/);
   assert.equal(attemptedSoundCloud, false);
+});
+
+test('essaie YouTubei sur la même vidéo après l’échec yt-dlp et garde le flux vérifiable', async () => {
+  const stream = new PassThrough();
+  let attempted = '';
+  const result = await streamYouTubeAudio('https://youtube.com/watch?v=abcdefghijk', {
+    primary: async () => { throw Object.assign(new Error('auth required'), { code: 'YOUTUBE_AUTH_BLOCKED' }); },
+    fallback: async url => { attempted = url; return stream; },
+  });
+  assert.equal(attempted, 'https://youtube.com/watch?v=abcdefghijk');
+  assert.equal(result, stream);
+  stream.destroy();
 });
 
 test('une piste de playlist Spotify cherche YouTube avant SoundCloud, sans lire l’URL Spotify', async () => {
