@@ -173,6 +173,18 @@ function helperFailureCode(stderr, exitCode, signal) {
   return 'YOUTUBE_CIPHER_HELPER_UNAVAILABLE';
 }
 
+function helperFailureDetail(stderr) {
+  const lines = String(stderr || '').replace(/\u001b\[[0-9;]*m/g, '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const candidate = [...lines].reverse().find(line => /error|uncaught|permission|notcapable|failed|cannot/i.test(line)) || '';
+  return candidate
+    .replace(/https?:\/\/[^\s"'<>]+/gi, '[URL]')
+    .replace(/\b(?:[a-z0-9_-]*(?:api[_-]?token|refresh[_-]?token|authorization|cookie|password|secret)[a-z0-9_-]*)\s*[:=]\s*[^\s,;]+/gi, '[credential redacted]')
+    .replace(/\b[a-z0-9_-]{32,}\b/gi, '[redacted]')
+    .replace(/(?:file:\/\/)?\/[^\s:]+/g, '[path]')
+    .replace(/[^A-Za-z0-9_.: -]/g, ' ')
+    .replace(/\s+/g, ' ').trim().slice(0, 140);
+}
+
 module.exports = { VERSION, EJS_COMMIT, DENO_VERSION, PORT, URL, installationPaths, safeRoot, lavalinkConfigPath,
   readConnection, installed, canConfigureLavalinkCipher, enableLavalinkRemoteCipher, isConfigured,
-  runtimeEnvironment, runtimeArgs, helperFailureCode };
+  runtimeEnvironment, runtimeArgs, helperFailureCode, helperFailureDetail };

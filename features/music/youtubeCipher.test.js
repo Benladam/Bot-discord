@@ -77,3 +77,9 @@ test('les diagnostics du résolveur classifient la cause sans exposer la sortie 
   assert.equal(cipher.helperFailureCode('', null, 'SIGKILL'), 'YOUTUBE_CIPHER_RESOURCE_LIMIT');
   assert.equal(cipher.helperFailureCode('unexpected failure', 1), 'YOUTUBE_CIPHER_PROCESS_EXIT');
 });
+
+test('le détail de démarrage est expurgé avant son apparition dans la console', () => {
+  const detail = cipher.helperFailureDetail('error: API_TOKEN=private https://youtube.com/watch?v=private\n    at file:///home/container/private.ts:10:2');
+  assert.match(detail, /error/);
+  assert.doesNotMatch(detail, /private|youtube\.com|home\/container/);
+});

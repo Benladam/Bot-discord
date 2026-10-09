@@ -80,7 +80,9 @@ class LavalinkRuntime {
           return;
         }
         if (message?.type === 'diagnostic' && /^[A-Z0-9_ :.-]{1,120}$/.test(message.text || '')) {
-          this.log(`[lavalink] ${message.text}`);
+          const detail = typeof message.detail === 'string'
+            && /^[A-Za-z0-9_.: -]{1,140}$/.test(message.detail) ? `: ${message.detail}` : '';
+          this.log(`[lavalink] ${message.text}${detail}`);
         }
       });
     }

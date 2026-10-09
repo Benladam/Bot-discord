@@ -77,7 +77,8 @@ async function start() {
         cipher = null;
         if (!stopping) {
           cipherFailure = cipherRuntime.helperFailureCode(cipherStderr, code, signal);
-          process.send?.({ type: 'diagnostic', text: cipherFailure });
+          process.send?.({ type: 'diagnostic', text: cipherFailure,
+            detail: cipherRuntime.helperFailureDetail(cipherStderr) });
           stop(1);
         }
       }
