@@ -65,7 +65,9 @@ test('worker Deno a des droits limités, écoute en loopback et ne reçoit aucun
     assert.equal(env.DISCORD_TOKEN, undefined);
     assert.equal(args.includes('--cached-only'), true);
     assert.ok(args.includes('--allow-net=127.0.0.1:8001,www.youtube.com'));
-    assert.ok(args.some(value => value === '--allow-env=API_TOKEN,HOST,PORT,MAX_THREADS,PREPROCESSED_CACHE_SIZE,SOLVER_CACHE_SIZE,OVERRIDE_SCRIPT_VARIANT,IGNORE_SCRIPT_REGION,XDG_CACHE_HOME,DENO_DIR'));
+    const envPermission = args.find(value => value.startsWith('--allow-env='));
+    assert.ok(envPermission);
+    assert.deepEqual(envPermission.slice('--allow-env='.length).split(','), cipher.DENO_ENV_ALLOWLIST);
     assert.ok(args.some(value => value.startsWith('--allow-write=') && value.endsWith(`${path.sep}cache`)));
     assert.ok(!args.some(value => value.includes('cipher.kikkia.dev')));
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }

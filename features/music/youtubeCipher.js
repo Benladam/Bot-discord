@@ -8,6 +8,10 @@ const EJS_COMMIT = 'cd4e87f52e87ab6d8b318fd3a817adda6fafa8dc';
 const DENO_VERSION = '2.9.7';
 const PORT = 8001;
 const URL = `http://127.0.0.1:${PORT}`;
+const DENO_ENV_ALLOWLIST = Object.freeze([
+  'API_TOKEN', 'HOST', 'PORT', 'MAX_THREADS', 'PREPROCESSED_CACHE_SIZE', 'SOLVER_CACHE_SIZE', 'STS_CACHE_SIZE',
+  'OVERRIDE_SCRIPT_VARIANT', 'OVERRIDE_PLAYER_ID', 'OVERRIDE_PLAYER_VARIANT', 'IGNORE_SCRIPT_REGION', 'XDG_CACHE_HOME', 'DENO_DIR',
+]);
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 const LAVALINK_VERSION = '4.2.2';
 
@@ -150,7 +154,7 @@ function runtimeArgs(root) {
   const paths = installationPaths({ BOT_DATA_DIR: path.resolve(resolved, '..', '..', '..') });
   return ['run', '--cached-only', `--allow-net=127.0.0.1:${PORT},www.youtube.com`,
     `--allow-read=${paths.source},${paths.denoCache},${paths.cache}`, `--allow-write=${paths.cache}`,
-    '--allow-env=API_TOKEN,HOST,PORT,MAX_THREADS,PREPROCESSED_CACHE_SIZE,SOLVER_CACHE_SIZE,OVERRIDE_SCRIPT_VARIANT,IGNORE_SCRIPT_REGION,XDG_CACHE_HOME,DENO_DIR',
+    `--allow-env=${DENO_ENV_ALLOWLIST.join(',')}`,
     'server.ts'];
 }
 
@@ -185,6 +189,6 @@ function helperFailureDetail(stderr) {
     .replace(/\s+/g, ' ').trim().slice(0, 140);
 }
 
-module.exports = { VERSION, EJS_COMMIT, DENO_VERSION, PORT, URL, installationPaths, safeRoot, lavalinkConfigPath,
+module.exports = { VERSION, EJS_COMMIT, DENO_VERSION, PORT, URL, DENO_ENV_ALLOWLIST, installationPaths, safeRoot, lavalinkConfigPath,
   readConnection, installed, canConfigureLavalinkCipher, enableLavalinkRemoteCipher, isConfigured,
   runtimeEnvironment, runtimeArgs, helperFailureCode, helperFailureDetail };
