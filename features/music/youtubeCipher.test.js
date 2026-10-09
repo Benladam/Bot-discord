@@ -69,3 +69,11 @@ test('worker Deno a des droits limités, écoute en loopback et ne reçoit aucun
     assert.ok(!args.some(value => value.includes('cipher.kikkia.dev')));
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
+
+test('les diagnostics du résolveur classifient la cause sans exposer la sortie brute', () => {
+  assert.equal(cipher.helperFailureCode('error: Could not find "astring" in a node_modules folder', 1), 'YOUTUBE_CIPHER_DEPENDENCY_MISSING');
+  assert.equal(cipher.helperFailureCode('PermissionDenied: Requires net access', 1), 'YOUTUBE_CIPHER_PERMISSION_DENIED');
+  assert.equal(cipher.helperFailureCode('Address already in use', 1), 'YOUTUBE_CIPHER_PORT_IN_USE');
+  assert.equal(cipher.helperFailureCode('', null, 'SIGKILL'), 'YOUTUBE_CIPHER_RESOURCE_LIMIT');
+  assert.equal(cipher.helperFailureCode('unexpected failure', 1), 'YOUTUBE_CIPHER_PROCESS_EXIT');
+});

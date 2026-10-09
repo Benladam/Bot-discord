@@ -154,6 +154,25 @@ function runtimeArgs(root) {
     'server.ts'];
 }
 
+function helperFailureCode(stderr, exitCode, signal) {
+  const output = String(stderr || '');
+  if (/out of memory|memory allocation failed|heap out of memory/i.test(output) || signal === 'SIGKILL') {
+    return 'YOUTUBE_CIPHER_RESOURCE_LIMIT';
+  }
+  if (/address already in use|EADDRINUSE/i.test(output)) return 'YOUTUBE_CIPHER_PORT_IN_USE';
+  if (/PermissionDenied|permission denied|requires (?:read|write|net) access/i.test(output)) {
+    return 'YOUTUBE_CIPHER_PERMISSION_DENIED';
+  }
+  if (/not found in cache|cached-only|node_modules folder|module not found|could not find .*package/i.test(output)) {
+    return 'YOUTUBE_CIPHER_DEPENDENCY_MISSING';
+  }
+  if (/error sending request|connection refused|dns error|failed to connect/i.test(output)) {
+    return 'YOUTUBE_CIPHER_NETWORK_UNAVAILABLE';
+  }
+  if (Number.isInteger(exitCode) && exitCode !== 0) return 'YOUTUBE_CIPHER_PROCESS_EXIT';
+  return 'YOUTUBE_CIPHER_HELPER_UNAVAILABLE';
+}
+
 module.exports = { VERSION, EJS_COMMIT, DENO_VERSION, PORT, URL, installationPaths, safeRoot, lavalinkConfigPath,
   readConnection, installed, canConfigureLavalinkCipher, enableLavalinkRemoteCipher, isConfigured,
-  runtimeEnvironment, runtimeArgs };
+  runtimeEnvironment, runtimeArgs, helperFailureCode };

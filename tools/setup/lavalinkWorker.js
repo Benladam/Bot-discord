@@ -7,6 +7,8 @@ const [root, java, cipherRoot] = process.argv.slice(2);
 if (!process.send || !path.isAbsolute(root || '')) process.exit(1);
 let child = null;
 let cipher = null;
+let cipherFailure = null;
+let cipherStderr = '';
 let stopping = false;
 let stopTimer = null;
 
@@ -40,10 +42,16 @@ async function waitForCipher() {
       });
       const message = await response.text();
       if (response.status === 400 && message.includes('player_url')) return;
-    } catch { /* Le serveur Deno n'a pas encore fini son démarrage. */ }
+      if (response.status === 401) throw new Error('YOUTUBE_CIPHER_AUTH_FAILED');
+      if (response.status === 404) throw new Error('YOUTUBE_CIPHER_ENDPOINT_MISSING');
+      if (response.status >= 500) throw new Error('YOUTUBE_CIPHER_SERVER_ERROR');
+    } catch (error) {
+      if (/^YOUTUBE_CIPHER_[A-Z_]+$/.test(error?.message || '')) throw error;
+      /* Le serveur Deno n'a pas encore fini son démarrage. */
+    }
     await new Promise(resolve => setTimeout(resolve, 200));
   }
-  throw new Error('YOUTUBE_CIPHER_HELPER_UNAVAILABLE');
+  throw new Error(cipherFailure || 'YOUTUBE_CIPHER_HELPER_UNAVAILABLE');
 }
 
 async function start() {
@@ -52,20 +60,24 @@ async function start() {
     const connection = cipherRuntime.readConnection(cipherRoot);
     const env = cipherRuntime.runtimeEnvironment(cipherRoot, connection.password, process.env);
     const args = cipherRuntime.runtimeArgs(cipherRoot);
-    cipher = spawn(paths.deno, args, { cwd: paths.source, env, windowsHide: true, stdio: 'ignore' });
+    cipher = spawn(paths.deno, args, { cwd: paths.source, env, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     const cipherChild = cipher;
-    cipherChild.once('error', () => {
+    cipherChild.stderr.on('data', bytes => { cipherStderr = (cipherStderr + bytes.toString('utf8')).slice(-4096); });
+    cipherChild.once('error', error => {
       if (cipher === cipherChild) {
         cipher = null;
-        process.send?.({ type: 'diagnostic', text: 'YOUTUBE_CIPHER_HELPER_UNAVAILABLE' });
+        cipherFailure = error.code === 'EACCES' ? 'YOUTUBE_CIPHER_PERMISSION_DENIED'
+          : error.code === 'ENOENT' ? 'YOUTUBE_CIPHER_RUNTIME_MISSING' : 'YOUTUBE_CIPHER_HELPER_UNAVAILABLE';
+        process.send?.({ type: 'diagnostic', text: cipherFailure });
         stop(1);
       }
     });
-    cipherChild.once('exit', () => {
+    cipherChild.once('exit', (code, signal) => {
       if (cipher === cipherChild) {
         cipher = null;
         if (!stopping) {
-          process.send?.({ type: 'diagnostic', text: 'YOUTUBE_CIPHER_HELPER_UNAVAILABLE' });
+          cipherFailure = cipherRuntime.helperFailureCode(cipherStderr, code, signal);
+          process.send?.({ type: 'diagnostic', text: cipherFailure });
           stop(1);
         }
       }
