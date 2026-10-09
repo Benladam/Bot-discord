@@ -63,7 +63,7 @@ function createLavalinkProvider({ ensure = ensureLavalink, fetchImpl = globalThi
     try {
       // La route du plugin peut abandonner dès qu'un client répond CannotBeLoaded.
       // Essais explicites sur la MÊME vidéo, jamais sur un autre résultat.
-      for (const client of ['ANDROID_VR', 'WEB', 'WEBEMBEDDED']) {
+      for (const client of ['ANDROID_VR', 'WEB', 'WEBEMBEDDED', 'TV']) {
         if (controller.signal.aborted) break;
         const attempt = new AbortController();
         const headerTimer = setTimeout(() => attempt.abort(), 12_000);

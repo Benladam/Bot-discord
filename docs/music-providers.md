@@ -46,6 +46,15 @@ Pour un service Lavalink v4 séparé, configure `LAVALINK_URL` (HTTPS) et
 `LAVALINK_PASSWORD` dans le `.env` privé ; youtube-plugin doit être installé.
 Ne publie pas le port privé via le proxy du dashboard.
 
+Pour essayer OAuth YouTube sur l'instance Lavalink privée, lance ensuite
+`musiccheck setup-lavalink-oauth` depuis la console Kinetic. La console affiche
+le lien d'activation officiel et un code temporaire. Termine toi-même
+l'autorisation Google avec un compte jetable. Le refresh token n'est jamais
+affiché ni envoyé à Discord : il est stocké dans le `application.yml` privé,
+avec les permissions du fichier limitées au propriétaire du processus.
+Le plugin recommande un compte jetable et avertit que l'OAuth peut échouer ou
+entraîner la fermeture du compte. L'activation ne garantit pas la lecture.
+
 Le diagnostic valide le candidat et la durée de l'audio récupéré, puis supprime
 le cache. Il ne remplace pas l'écoute du titre complet sur Discord.
 

@@ -71,6 +71,12 @@ class LavalinkRuntime {
       child.on('error', () => { if (this.child === child) this.child = null; });
       child.on('exit', () => { if (this.child === child) this.child = null; });
       child.on('message', message => {
+        if (message?.type === 'oauth-device' && typeof message.url === 'string'
+            && /^https:\/\/(?:[a-z0-9-]+\.)*(?:google\.com|youtube\.com)\//i.test(message.url)
+            && /^[A-Z0-9-]{6,20}$/.test(message.code || '')) {
+          this.log(`[youtube-oauth] Ouvre ${message.url} et saisis le code ${message.code} avec ton compte jetable.`);
+          return;
+        }
         if (message?.type === 'diagnostic' && /^[A-Z0-9_ :.-]{1,120}$/.test(message.text || '')) {
           this.log(`[lavalink] ${message.text}`);
         }
@@ -87,9 +93,25 @@ class LavalinkRuntime {
     this.stop(); this.retryAt = Date.now() + 30_000;
     throw Object.assign(new Error('Démarrage Lavalink impossible. Vérifie Java 17+ et la mémoire disponible sur cet hôte.'), { code: 'LAVALINK_START_FAILED' });
   }
+  async restart() {
+    const config = connectionConfig(this.env);
+    if (!config || config.external) throw new Error('OAuth Lavalink exige le service privé installé sur cet hôte.');
+    const child = this.child;
+    if (child) {
+      this.child = null;
+      const exited = new Promise(resolve => child.once('exit', resolve));
+      child.kill();
+      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 5000))]);
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && await this.ping(config)) await new Promise(resolve => setTimeout(resolve, 200));
+      if (await this.ping(config)) throw new Error('L’ancien processus Lavalink répond encore; OAuth n’a pas été redémarré.');
+    }
+    this.retryAt = 0;
+    return this.ensure();
+  }
   stop() { const child = this.child; this.child = null; child?.kill(); }
 }
 const runtime = new LavalinkRuntime();
 process.once('exit', () => runtime.stop());
 module.exports = { VERSION, PLUGIN_VERSION, PORT, installationPaths, connectionConfig, LavalinkRuntime,
-  lavalinkConfigured: () => runtime.configured(), ensureLavalink: () => runtime.ensure() };
+  lavalinkConfigured: () => runtime.configured(), ensureLavalink: () => runtime.ensure(), restartLavalink: () => runtime.restart() };

@@ -19,6 +19,13 @@ function diagnosticUrl(input) {
 }
 
 async function musicCheck(input = '', { log = console.info, getPaths = getYouTubeCookiesPaths, readCookies = readCookieFile, probe = streamYtDlp } = {}) {
+  if (String(input).trim() === 'setup-lavalink-oauth') {
+    const root = require('../../features/music/lavalinkRuntime').installationPaths().root;
+    require('../../features/music/lavalinkOAuth').enableLavalinkOAuth(root);
+    await require('../../features/music/lavalinkRuntime').restartLavalink();
+    log('[youtube-oauth] Lavalink redémarré. Utilise uniquement le compte Google jetable; le code temporaire apparaît dans la console du serveur.');
+    return { enabled: true, restarted: true };
+  }
   if (String(input).trim() === 'setup-lavalink') {
     await require('../setup/installLavalink').installLavalink({ log });
     await require('../../features/music/lavalinkRuntime').ensureLavalink();

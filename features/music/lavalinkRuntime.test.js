@@ -26,3 +26,8 @@ test('la configuration locale n’expose ni HTTP arbitraire ni OAuth et désacti
   assert.match(config, /request:\n    enabled: false/);
   assert.doesNotMatch(config, /oauth|refreshToken|cookie/i);
 });
+
+test('le redémarrage Lavalink privé attend la fin de Java avant de démarrer le flux OAuth', async () => {
+  const runtime = new LavalinkRuntime({ env: { LAVALINK_MODE: 'off' } });
+  await assert.rejects(runtime.restart(), /service privé/);
+});
