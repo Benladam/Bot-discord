@@ -40,7 +40,7 @@ function connectionConfig(env = process.env) {
 class LavalinkRuntime {
   constructor({ env = process.env, fetchImpl = globalThis.fetch, forkImpl = fork, log = console.info } = {}) {
     Object.assign(this, { env, fetchImpl, forkImpl, log });
-    this.child = null; this.pending = null; this.retryAt = 0;
+    this.child = null; this.pending = null; this.retryAt = 0; this.oauthDevicePrompt = false; this.oauthPromptWaiters = [];
   }
   configured() { return Boolean(connectionConfig(this.env)); }
   async ping(config) {
@@ -76,6 +76,8 @@ class LavalinkRuntime {
         if (message?.type === 'oauth-device' && typeof message.url === 'string'
             && /^https:\/\/(?:[a-z0-9-]+\.)*(?:google\.com|youtube\.com)\//i.test(message.url)
             && /^[A-Z0-9-]{6,20}$/.test(message.code || '')) {
+          this.oauthDevicePrompt = true;
+          for (const resolve of this.oauthPromptWaiters.splice(0)) resolve(true);
           this.log(`[youtube-oauth] Ouvre ${message.url} et saisis le code ${message.code} avec ton compte jetable.`);
           return;
         }
@@ -101,6 +103,7 @@ class LavalinkRuntime {
     const config = connectionConfig(this.env);
     if (!config || config.external) throw new Error('OAuth Lavalink exige le service privé installé sur cet hôte.');
     const child = this.child;
+    this.oauthDevicePrompt = false;
     if (child) {
       this.child = null;
       const exited = new Promise(resolve => child.once('exit', resolve));
@@ -109,13 +112,30 @@ class LavalinkRuntime {
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline && await this.ping(config)) await new Promise(resolve => setTimeout(resolve, 200));
       if (await this.ping(config)) throw new Error('L’ancien processus Lavalink répond encore; OAuth n’a pas été redémarré.');
+    } else if (await this.ping(config)) {
+      throw new Error('Lavalink répond, mais ce bot ne possède pas son processus Java; le changement OAuth n’a pas été appliqué. Redémarre le processus du bot puis relance la configuration.');
     }
     this.retryAt = 0;
     return this.ensure();
+  }
+  waitForOAuthDevicePrompt(timeoutMs = 5000) {
+    if (this.oauthDevicePrompt) return Promise.resolve(true);
+    const timeout = Number(timeoutMs);
+    if (!Number.isFinite(timeout) || timeout < 0 || timeout > 30_000) return Promise.resolve(false);
+    return new Promise(resolve => {
+      const finish = value => { clearTimeout(timer); resolve(value); };
+      const timer = setTimeout(() => {
+        const index = this.oauthPromptWaiters.indexOf(finish);
+        if (index >= 0) this.oauthPromptWaiters.splice(index, 1);
+        finish(false);
+      }, timeout);
+      this.oauthPromptWaiters.push(finish);
+    });
   }
   stop() { const child = this.child; this.child = null; child?.kill(); }
 }
 const runtime = new LavalinkRuntime();
 process.once('exit', () => runtime.stop());
 module.exports = { VERSION, PLUGIN_VERSION, PORT, installationPaths, connectionConfig, LavalinkRuntime,
-  lavalinkConfigured: () => runtime.configured(), ensureLavalink: () => runtime.ensure(), restartLavalink: () => runtime.restart() };
+  lavalinkConfigured: () => runtime.configured(), ensureLavalink: () => runtime.ensure(), restartLavalink: () => runtime.restart(),
+  waitForLavalinkOAuthPrompt: timeoutMs => runtime.waitForOAuthDevicePrompt(timeoutMs) };

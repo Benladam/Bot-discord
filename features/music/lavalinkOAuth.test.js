@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { applicationConfig } = require('../../tools/setup/installLavalink');
-const { enableLavalinkOAuth, persistLavalinkRefreshToken, parseOAuthDeviceLine, parseOAuthRefreshTokenLine } = require('./lavalinkOAuth');
+const { enableLavalinkOAuth, persistLavalinkRefreshToken, lavalinkOAuthStatus,
+  parseOAuthDeviceLine, parseOAuthRefreshTokenLine, parseOAuthDiagnosticLine } = require('./lavalinkOAuth');
 
 function privateInstall() {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-oauth-'));
@@ -23,9 +24,25 @@ test('OAuth ajoute uniquement le client TV et son niveau de log à la configurat
     assert.match(text, /oauth:\n      enabled: true/);
     assert.match(text, /      - WEBEMBEDDED\n      - TV/);
     assert.match(text, /dev\.lavalink\.youtube\.http\.YoutubeOauth2Handler: INFO/);
+    assert.deepEqual(lavalinkOAuthStatus(root), { enabled: true, refreshTokenConfigured: false,
+      skipInitialization: false, tvClientConfigured: true });
     if (process.platform !== 'win32') assert.equal((fs.statSync(config).mode & 0o777), 0o600);
     enableLavalinkOAuth(root);
     assert.equal((text.match(/      - TV/g) || []).length, 1);
+  } finally { fs.rmSync(parent, { recursive: true, force: true }); }
+});
+
+test('la configuration OAuth réactive le flux appareil si un ancien flag le bloquait sans token', () => {
+  const { parent, root, config } = privateInstall();
+  try {
+    enableLavalinkOAuth(root);
+    const initial = fs.readFileSync(config, 'utf8');
+    fs.writeFileSync(config, initial.replace('      enabled: true\n', '      enabled: true\n      skipInitialization: true\n'));
+    enableLavalinkOAuth(root);
+    const updated = fs.readFileSync(config, 'utf8');
+    assert.match(updated, /skipInitialization: false/);
+    assert.deepEqual(lavalinkOAuthStatus(root), { enabled: true, refreshTokenConfigured: false,
+      skipInitialization: false, tvClientConfigured: true });
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
 
@@ -38,6 +55,8 @@ test('le refresh token est privé et survit à un redémarrage sans être imprim
     const text = fs.readFileSync(config, 'utf8');
     assert.ok(text.includes(`refreshToken: "${secret}"`));
     assert.match(text, /skipInitialization: true/);
+    assert.equal((text.match(/^      skipInitialization:/gm) || []).length, 1);
+    assert.equal(lavalinkOAuthStatus(root).refreshTokenConfigured, true);
     if (process.platform !== 'win32') assert.equal((fs.statSync(config).mode & 0o777), 0o600);
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
@@ -48,4 +67,8 @@ test('le code OAuth expose seulement une adresse Google HTTPS et ignore le refre
   assert.equal(parseOAuthDeviceLine('OAUTH INTEGRATION: To give youtube-source access to your account, go to https://evil.example/device and enter code ABCD-EFGH'), null);
   assert.equal(parseOAuthRefreshTokenLine('OAUTH INTEGRATION: Token retrieved successfully. Store your refresh token as this can be reused. (1//private-refresh-token-value)'),
     '1//private-refresh-token-value');
+  assert.equal(parseOAuthDiagnosticLine('[ERROR] YoutubeOauth2Handler - failed to initialize OAuth'), 'YOUTUBE_OAUTH_HANDLER_ERROR');
+  assert.equal(parseOAuthDiagnosticLine('UnknownHostException: youtube.com/o/oauth2/device/code'), 'YOUTUBE_OAUTH_NETWORK_FAILED');
+  assert.equal(parseOAuthDiagnosticLine('OAUTH INTEGRATION: Account linking was denied.'), 'YOUTUBE_OAUTH_ACCOUNT_LINK_DENIED');
+  assert.equal(parseOAuthDiagnosticLine('INFO unrelated plugin startup'), null);
 });

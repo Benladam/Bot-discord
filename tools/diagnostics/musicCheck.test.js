@@ -1,7 +1,26 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
-const { musicCheck, diagnosticUrl, soundCloudCheck, youtubeiCheck, lavalinkCheck } = require('./musicCheck');
+const { musicCheck, setupLavalinkOAuth, diagnosticUrl, soundCloudCheck, youtubeiCheck, lavalinkCheck } = require('./musicCheck');
+
+test('setup OAuth ne prétend pas avoir un code quand le processus ne l’a pas émis', async () => {
+  const logs = []; const calls = [];
+  const result = await setupLavalinkOAuth({ log: line => logs.push(line),
+    oauth: {
+      enableLavalinkOAuth: root => calls.push(`enable:${root}`),
+      lavalinkOAuthStatus: () => ({ enabled: true, refreshTokenConfigured: false }),
+    },
+    runtime: {
+      installationPaths: () => ({ root: '/private/lavalink' }),
+      restartLavalink: async () => calls.push('restart'),
+      waitForLavalinkOAuthPrompt: async timeout => { calls.push(`wait:${timeout}`); return false; },
+    },
+  });
+  assert.deepEqual(result, { enabled: true, restarted: true, prompted: false, tokenConfigured: false });
+  assert.deepEqual(calls, ['enable:/private/lavalink', 'restart', 'wait:5000']);
+  assert.match(logs.join(' '), /YOUTUBE_OAUTH_PROMPT_NOT_EMITTED/);
+  assert.doesNotMatch(logs.join(' '), /code temporaire apparaît/);
+});
 
 test('soundcloudcheck --cache=148 transmet la durée, prépare tout le morceau et nettoie', async () => {
   const logs = []; const stream = new PassThrough(); let cleaned = 0;

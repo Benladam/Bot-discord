@@ -40,6 +40,14 @@ function editOAuthConfig(root, { enable = false, refreshToken } = {}) {
     const actualEnd = oauthEnd < 0 ? end : oauthEnd;
     const enabledOAuthIndex = lines.findIndex((line, index) => index > oauthIndex && index < actualEnd && line === '      enabled: true');
     if (enable && enabledOAuthIndex < 0) lines.splice(oauthIndex + 1, 0, '      enabled: true');
+    const refreshTokenConfigured = lines.some((line, index) => index > oauthIndex && index < actualEnd
+      && /^      refreshToken:\s*(?!["']{2}\s*$)(?!null\s*$)\S/i.test(line));
+    const skipInitializationIndex = lines.findIndex((line, index) => index > oauthIndex && index < actualEnd
+      && line === '      skipInitialization: true');
+    // A stale skipInitialization flag with no token silently suppresses Google's device flow.
+    if (enable && !refreshTokenConfigured && skipInitializationIndex >= 0) {
+      lines[skipInitializationIndex] = '      skipInitialization: false';
+    }
     if (typeof refreshToken === 'string') {
       if (refreshToken.length < 20 || refreshToken.length > 4096 || /[\r\n\x00-\x1f]/.test(refreshToken)) {
         throw new Error('Jeton OAuth invalide; aucun jeton n’a été enregistré.');
@@ -49,8 +57,9 @@ function editOAuthConfig(root, { enable = false, refreshToken } = {}) {
       const tokenIndex = lines.findIndex((line, index) => index > oauthIndex && index < actualEnd && /^      refreshToken:/.test(line));
       if (tokenIndex >= 0) lines[tokenIndex] = tokenLine;
       else lines.splice(actualEnd, 0, tokenLine);
-      const skipIndex = lines.findIndex(line => line === skipLine);
-      if (skipIndex < 0) lines.splice(tokenIndex >= 0 ? tokenIndex + 1 : actualEnd + 1, 0, skipLine);
+      const skipIndex = lines.findIndex(line => /^      skipInitialization:\s*(?:true|false)\s*$/.test(line));
+      if (skipIndex >= 0) lines[skipIndex] = skipLine;
+      else lines.splice(tokenIndex >= 0 ? tokenIndex + 1 : actualEnd + 1, 0, skipLine);
     }
   }
 
@@ -88,6 +97,18 @@ function persistLavalinkRefreshToken(root, refreshToken) {
   return editOAuthConfig(root, { refreshToken });
 }
 
+function lavalinkOAuthStatus(root) {
+  const text = fs.readFileSync(privateConfigPath(root), 'utf8');
+  const tokenLine = text.match(/^      refreshToken:\s*(.*?)\s*$/m)?.[1] || '';
+  const refreshTokenConfigured = Boolean(tokenLine && !['""', "''", 'null'].includes(tokenLine));
+  return {
+    enabled: /^    oauth:\s*\r?\n      enabled: true\s*$/m.test(text),
+    refreshTokenConfigured,
+    skipInitialization: /^      skipInitialization: true\s*$/m.test(text),
+    tvClientConfigured: /^      - TV\s*$/m.test(text),
+  };
+}
+
 function parseOAuthDeviceLine(line) {
   const match = String(line).match(/OAUTH INTEGRATION: To give youtube-source access to your account, go to\s+(https:\/\/[^\s]+)\s+and enter code\s+([A-Za-z0-9-]{6,20})/i);
   if (!match) return null;
@@ -105,4 +126,20 @@ function parseOAuthRefreshTokenLine(line) {
   return match?.[1] || null;
 }
 
-module.exports = { enableLavalinkOAuth, persistLavalinkRefreshToken, parseOAuthDeviceLine, parseOAuthRefreshTokenLine };
+function parseOAuthDiagnosticLine(line) {
+  const value = String(line);
+  if (/OAUTH INTEGRATION: The device token has expired/i.test(value)) return 'YOUTUBE_OAUTH_DEVICE_CODE_EXPIRED';
+  if (/OAUTH INTEGRATION: Account linking was denied/i.test(value)) return 'YOUTUBE_OAUTH_ACCOUNT_LINK_DENIED';
+  if (/Failed to fetch OAuth2 token response|Failed to acquire HTTP interface/i.test(value)) return 'YOUTUBE_OAUTH_TOKEN_POLL_FAILED';
+  if (/YoutubeOauth2Handler.*\b(?:ERROR|WARN)\b|\b(?:ERROR|WARN)\b.*YoutubeOauth2Handler/i.test(value)) return 'YOUTUBE_OAUTH_HANDLER_ERROR';
+  if (/(?:UnknownHostException|ConnectException|SocketTimeoutException|SSLHandshakeException)/i.test(value)
+      && /oauth|device code|youtube/i.test(value)) return 'YOUTUBE_OAUTH_NETWORK_FAILED';
+  if (/(?:failed|failure|error|exception).{0,100}(?:oauth|device code)|(?:oauth|device code).{0,100}(?:failed|failure|error|exception)/i.test(value)) {
+    return 'YOUTUBE_OAUTH_STARTUP_FAILED';
+  }
+  const status = value.match(/(?:device code fetch|oauth2 token fetch).{0,120}?\b(401|403|429|5\d{2})\b/i)?.[1];
+  return status ? `YOUTUBE_OAUTH_HTTP_${status}` : null;
+}
+
+module.exports = { enableLavalinkOAuth, persistLavalinkRefreshToken, lavalinkOAuthStatus,
+  parseOAuthDeviceLine, parseOAuthRefreshTokenLine, parseOAuthDiagnosticLine };

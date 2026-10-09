@@ -1,7 +1,7 @@
 /** Le processus Java est toujours arrêté si le bot parent disparaît. */
 const { spawn } = require('node:child_process');
 const path = require('node:path');
-const { parseOAuthDeviceLine, parseOAuthRefreshTokenLine, persistLavalinkRefreshToken } = require('../../features/music/lavalinkOAuth');
+const { parseOAuthDeviceLine, parseOAuthRefreshTokenLine, parseOAuthDiagnosticLine, persistLavalinkRefreshToken } = require('../../features/music/lavalinkOAuth');
 const cipherRuntime = require('../../features/music/youtubeCipher');
 const [root, java, cipherRoot] = process.argv.slice(2);
 if (!process.send || !path.isAbsolute(root || '')) process.exit(1);
@@ -114,6 +114,8 @@ async function start() {
             process.send?.({ type: 'diagnostic', text: 'YOUTUBE_OAUTH_TOKEN_SAVE_FAILED' });
           }
         }
+        const oauthDiagnostic = parseOAuthDiagnosticLine(line);
+        if (oauthDiagnostic) process.send?.({ type: 'diagnostic', text: oauthDiagnostic });
         for (const code of ['OutOfMemoryError', 'UnsupportedClassVersionError', 'BindException']) {
           if (line.includes(code)) process.send?.({ type: 'diagnostic', text: code });
         }

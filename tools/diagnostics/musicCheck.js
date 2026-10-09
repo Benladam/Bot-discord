@@ -18,13 +18,31 @@ function diagnosticUrl(input) {
   return `https://www.youtube.com/watch?v=${id}`;
 }
 
+async function setupLavalinkOAuth({
+  log = console.info,
+  oauth = require('../../features/music/lavalinkOAuth'),
+  runtime = require('../../features/music/lavalinkRuntime'),
+} = {}) {
+  const root = runtime.installationPaths().root;
+  oauth.enableLavalinkOAuth(root);
+  const status = oauth.lavalinkOAuthStatus(root);
+  await runtime.restartLavalink();
+  if (status.refreshTokenConfigured) {
+    log('[youtube-oauth] Un refresh token est déjà configuré; aucun nouveau lien/code ne sera généré. Secret non affiché.');
+    return { enabled: status.enabled, restarted: true, prompted: false, tokenConfigured: true };
+  }
+  const prompted = await runtime.waitForLavalinkOAuthPrompt(5000);
+  if (prompted) {
+    log('[youtube-oauth] Flux appareil démarré. Utilise uniquement le compte Google jetable; le lien et le code sont affichés séparément ci-dessus.');
+  } else {
+    log('[youtube-oauth] Aucun lien/code reçu de YouTube après le redémarrage (YOUTUBE_OAUTH_PROMPT_NOT_EMITTED). Ne saisis rien : le code n’a pas été généré.');
+  }
+  return { enabled: status.enabled, restarted: true, prompted, tokenConfigured: false };
+}
+
 async function musicCheck(input = '', { log = console.info, getPaths = getYouTubeCookiesPaths, readCookies = readCookieFile, probe = streamYtDlp } = {}) {
   if (String(input).trim() === 'setup-lavalink-oauth') {
-    const root = require('../../features/music/lavalinkRuntime').installationPaths().root;
-    require('../../features/music/lavalinkOAuth').enableLavalinkOAuth(root);
-    await require('../../features/music/lavalinkRuntime').restartLavalink();
-    log('[youtube-oauth] Lavalink redémarré. Utilise uniquement le compte Google jetable; le code temporaire apparaît dans la console du serveur.');
-    return { enabled: true, restarted: true };
+    return setupLavalinkOAuth({ log });
   }
   if (String(input).trim() === 'setup-lavalink-cipher') {
     const runtime = require('../../features/music/lavalinkRuntime');
@@ -225,4 +243,4 @@ async function soundCloudCheck(input, { log = console.info, probe = soundCloudSe
   }
 }
 
-module.exports = { musicCheck, diagnosticUrl, soundCloudCheck, youtubeiCheck, lavalinkCheck };
+module.exports = { musicCheck, setupLavalinkOAuth, diagnosticUrl, soundCloudCheck, youtubeiCheck, lavalinkCheck };
