@@ -66,8 +66,8 @@ test('installation simulée épingle les deux dépôts, garde les fichiers hors 
   const calls = [];
   const logs = [];
   const fetchImpl = async () => new Response(archive, { status: 200 });
-  const runImpl = async (command, args) => {
-    calls.push({ command, args });
+  const runImpl = async (command, args, cwd) => {
+    calls.push({ command, args, cwd });
     if (command === 'git' && args[0] === '-C' && args[2] === 'checkout') {
       const repo = args[1];
       if (repo.endsWith(`${path.sep}source`)) {
@@ -78,6 +78,7 @@ test('installation simulée épingle les deux dépôts, garde les fichiers hors 
         const solver = path.join(repo, 'src', 'yt', 'solver');
         await fs.mkdir(solver, { recursive: true });
         await fs.writeFile(path.join(solver, 'solvers.ts'), '');
+        await fs.writeFile(path.join(repo, 'package.json'), JSON.stringify({ dependencies: { astring: '1.9.0', meriyah: '6.1.4' } }));
       }
     }
     if (command === 'git' && args[0] === '-C' && args[2] === 'rev-parse') {
@@ -93,6 +94,8 @@ test('installation simulée épingle les deux dépôts, garde les fichiers hors 
     assert.equal(cipher.installed(env), true);
     assert.ok(calls.some(call => call.command === 'git' && call.args.includes(cipher.VERSION)));
     assert.ok(calls.some(call => call.command === 'git' && call.args.includes(cipher.EJS_COMMIT)));
+    assert.ok(calls.some(call => path.basename(call.command) === 'deno' && call.args[0] === 'install'
+      && call.args.includes('--node-modules-dir=auto') && path.basename(call.cwd) === 'ejs'));
     assert.ok(calls.some(call => path.basename(call.command) === 'deno' && call.args[0] === 'cache'));
     assert.ok(logs.some(message => message.includes('récupération de la source yt-cipher')));
     assert.ok(logs.some(message => message.includes('Préchargement des dépendances Deno')));

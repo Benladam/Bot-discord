@@ -199,12 +199,15 @@ async function install({ env = process.env, fetchImpl = globalThis.fetch, runImp
     await checkoutPinnedRepository(stagingEjs, EJS_REPOSITORY, EJS_COMMIT, staging, childEnv, runImpl);
     await fs.access(path.join(stagingSource, 'server.ts'));
     await fs.access(path.join(stagingSource, 'scripts', 'patch-ejs.ts'));
+    await fs.access(path.join(stagingEjs, 'package.json'));
     await fs.access(path.join(stagingEjs, 'src', 'yt', 'solver', 'solvers.ts'));
 
     const patchArgs = ['run', '--allow-net=deno.land', `--allow-read=${staging}`, `--allow-write=${staging}`,
       '--allow-env=DENO_DIR', 'scripts/patch-ejs.ts'];
     log('[youtube-cipher-setup] Application du correctif EJS requis par yt-cipher.');
     await runImpl(stagingDeno, patchArgs, stagingSource, childEnv, { timeoutMs: 120_000 });
+    log('[youtube-cipher-setup] Installation des dépendances npm locales déclarées par EJS.');
+    await runImpl(stagingDeno, ['install', '--node-modules-dir=auto'], stagingEjs, childEnv, { timeoutMs: 180_000 });
     log('[youtube-cipher-setup] Préchargement des dépendances Deno avant le démarrage du bot.');
     await runImpl(stagingDeno, ['cache', 'server.ts', 'worker.ts'], stagingSource, childEnv, { timeoutMs: 180_000 });
 
