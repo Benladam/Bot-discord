@@ -26,6 +26,25 @@ async function musicCheck(input = '', { log = console.info, getPaths = getYouTub
     log('[youtube-oauth] Lavalink redémarré. Utilise uniquement le compte Google jetable; le code temporaire apparaît dans la console du serveur.');
     return { enabled: true, restarted: true };
   }
+  if (String(input).trim() === 'setup-lavalink-cipher') {
+    const runtime = require('../../features/music/lavalinkRuntime');
+    const cipherModule = require('../../features/music/youtubeCipher');
+    const connection = runtime.connectionConfig();
+    if (!connection || connection.external) {
+      throw new Error('Cette installation exige Lavalink privé. Lance musiccheck setup-lavalink sur le serveur du bot.');
+    }
+    const lavalinkRoot = runtime.installationPaths().root;
+    if (!cipherModule.canConfigureLavalinkCipher(lavalinkRoot)) {
+      throw new Error('Un autre remoteCipher est déjà configuré; il a été conservé.');
+    }
+    const helper = await require('../setup/installYoutubeCipher').installYoutubeCipher({ log });
+    const result = cipherModule.enableLavalinkRemoteCipher(lavalinkRoot, helper.password);
+    await runtime.restartLavalink();
+    log(`[lavalink-cipher] Résolveur yt-cipher auto-hébergé démarré sur ${cipherModule.URL}; aucun endpoint public utilisé.`);
+    if (result.alreadyConfigured) log('[lavalink-cipher] Configuration locale déjà présente et conservée.');
+    else log('[lavalink-cipher] Configuration Lavalink privée mise à jour; OAuth et cookies restent séparés.');
+    return { enabled: true, restarted: true, changed: result.changed };
+  }
   if (String(input).trim() === 'setup-lavalink') {
     await require('../setup/installLavalink').installLavalink({ log });
     await require('../../features/music/lavalinkRuntime').ensureLavalink();

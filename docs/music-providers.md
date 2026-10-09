@@ -22,6 +22,7 @@ Dans la **console du bot hébergé** :
 
 ```text
 musiccheck setup-lavalink
+musiccheck setup-lavalink-cipher
 musiccheck lavalink --cache=170 Niska - Salé
 ```
 
@@ -54,6 +55,17 @@ affiché ni envoyé à Discord : il est stocké dans le `application.yml` privé
 avec les permissions du fichier limitées au propriétaire du processus.
 Le plugin recommande un compte jetable et avertit que l'OAuth peut échouer ou
 entraîner la fermeture du compte. L'activation ne garantit pas la lecture.
+
+Si YouTube refuse les formats à cause de son chiffrement, la commande
+`musiccheck setup-lavalink-cipher` installe un résolveur yt-cipher privé sur le
+même hôte, lié uniquement à `127.0.0.1`, puis redémarre Lavalink. Le binaire
+Deno, yt-cipher et son moteur EJS sont épinglés à des versions/commits vérifiés
+et gardés dans le dossier de données privé, hors Git. Le résolveur voit les URL
+YouTube temporaires et scripts de lecteur nécessaires au déchiffrement; aucun
+cookie ni refresh token OAuth ne lui est transmis. L'écoute réelle reste à
+valider après le diagnostic `musiccheck lavalink`.
+L’installation gérée exige Linux x64, Git et 300 MiB libres. Les codes d'accès
+et fichiers de travail sont conservés sous `BOT_DATA_DIR/.cache/youtube-cipher/`.
 
 Le diagnostic valide le candidat et la durée de l'audio récupéré, puis supprime
 le cache. Il ne remplace pas l'écoute du titre complet sur Discord.

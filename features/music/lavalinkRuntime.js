@@ -64,7 +64,9 @@ class LavalinkRuntime {
     if (config.external) throw Object.assign(new Error('Le serveur Lavalink ne répond pas ou son plugin YouTube est absent.'), { code: 'LAVALINK_UNAVAILABLE' });
     if (!this.child) {
       const files = installationPaths(this.env);
-      this.child = this.forkImpl(path.resolve(__dirname, '../../tools/setup/lavalinkWorker.js'), [files.root, config.java || 'java'], {
+      const cipherFiles = require('./youtubeCipher').installationPaths(this.env);
+      this.child = this.forkImpl(path.resolve(__dirname, '../../tools/setup/lavalinkWorker.js'),
+        [files.root, config.java || 'java', cipherFiles.root], {
         windowsHide: true, execArgv: [], env: helperEnvironment(this.env), stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
       });
       const child = this.child;
