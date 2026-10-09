@@ -14,6 +14,8 @@ const { startRecoveringPlayback } = require('./playbackRecovery');
 const { cacheAudio, closeMedia } = require('./temporaryAudio');
 const { ensurePoToken, currentPoTokenConfig, poTokenArgs } = require('./youtubePoToken');
 const { searchYouTubei, streamYouTubei } = require('./providers/youtubei');
+const { lavalinkConfigured } = require('./lavalinkRuntime');
+const { searchLavalink, streamLavalink } = require('./providers/lavalink');
 
 const YTDLP_TIMEOUT_MS = 30_000;
 const YTDLP_OUTPUT_LIMIT = 128 * 1024;
@@ -728,6 +730,14 @@ async function searchYouTubeCandidates(query, options = {}) {
     ...ytDlpOptions
   } = options;
   const hasInjectedYtDlp = Boolean(options.candidates || options.spawnImpl || options.install);
+  if (!hasInjectedYtDlp && !options.youtubeiSearch && lavalinkConfigured()) {
+    try {
+      const tracks = await searchLavalink(query, { limit: options.limit || 5, timeoutMs: options.timeoutMs || 6000 });
+      if (tracks.length) return tracks;
+    } catch (error) {
+      console.warn(`[catalogue] Lavalink indisponible (${sanitizeYtDlpDiagnostic(error.code || 'SEARCH_FAILED')}); essai YouTubei.`);
+    }
+  }
   // Le chemin Node.js sans navigateur est prioritaire. Les injections de tests
   // ne déclenchent jamais un fournisseur réseau non injecté.
   const youtubeiFirst = options.youtubeiFirst !== false && !hasInjectedYtDlp;
@@ -1133,7 +1143,17 @@ function resolveYouTubePlaylist(url, options = {}) {
   return searchYtDlpCandidates(canonical.href, { cookiesPaths: [], ...options, provider: 'youtube', inputMode: 'direct', limit: options.limit || 100 });
 }
 
-async function streamYouTubeAudio(url, { primary = streamYouTubei, fallback = streamYtDlp } = {}) {
+async function streamYouTubeAudio(url, { primary = streamYouTubei, fallback = streamYtDlp,
+  useLavalink = primary === streamYouTubei && fallback === streamYtDlp,
+  lavalink = streamLavalink, isLavalinkConfigured = lavalinkConfigured } = {}) {
+  if (useLavalink && isLavalinkConfigured()) {
+    try {
+      return await lavalink(url);
+    } catch (error) {
+      if (isPreparationAbort(error)) throw error;
+      console.warn(`[audio] Lavalink indisponible (${sanitizeYtDlpDiagnostic(error.code || 'STREAM_FAILED')}); essai YouTubei puis yt-dlp.`);
+    }
+  }
   try {
     return await primary(url);
   } catch (primaryError) {

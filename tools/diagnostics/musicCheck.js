@@ -19,6 +19,15 @@ function diagnosticUrl(input) {
 }
 
 async function musicCheck(input = '', { log = console.info, getPaths = getYouTubeCookiesPaths, readCookies = readCookieFile, probe = streamYtDlp } = {}) {
+  if (String(input).trim() === 'setup-lavalink') {
+    await require('../setup/installLavalink').installLavalink({ log });
+    await require('../../features/music/lavalinkRuntime').ensureLavalink();
+    log('[lavalink-check] Service et plugin prêts. Teste musiccheck lavalink --cache=durée Artiste - Titre pour vérifier l’audio complet.');
+    return { installed: true, ready: true };
+  }
+  if (String(input).trim().startsWith('lavalink ')) {
+    return lavalinkCheck(String(input).trim().slice('lavalink '.length), { log });
+  }
   if (String(input).trim().startsWith('catalog ')) {
     const query = String(input).trim().slice(8).trim().slice(0, 200);
     if (query.length < 2 || /https?:\/\/|[\r\n\x00-\x1f]/i.test(query)) throw new Error('Utilise musiccheck catalog Artiste - Titre, sans lien.');
@@ -90,6 +99,7 @@ async function youtubeiCheck(input, {
   search = searchYouTubei,
   open = streamYouTubei,
   cache = cacheAudio,
+  label = 'youtubei-check',
 } = {}) {
   const request = String(input || '').trim();
   const match = request.match(/^--cache=(\d{1,4})\s+(.+)$/u);
@@ -114,29 +124,34 @@ async function youtubeiCheck(input, {
     });
     media = await cache({ stream, ...stream.musicSource }, { expectedDuration, log });
     if (!media?.cached) throw Object.assign(new Error('Le cache audio complet n’a pas été validé.'), { code: 'AUDIO_CACHE_UNAVAILABLE' });
-    log('[youtubei-check] YouTubei a fourni le bon candidat et le morceau complet a passé la vérification de durée; aucun cookie ni vocal utilisé.');
+    log(`[${label}] Le bon candidat et le morceau complet ont passé la vérification de durée; aucun cookie ni vocal utilisé.`);
     return { available: true, cached: true };
   } catch (error) {
     const code = /^[A-Z0-9_]+$/.test(error?.code || '') ? error.code : 'EXTRACTION_FAILED';
-    log(`[youtubei-check] Échec du test complet (${code}); aucun morceau n’a été lancé.`);
+    log(`[${label}] Échec du test complet (${code}); aucun morceau n’a été lancé.`);
     if (error?.providerReason) {
       const reason = error.providerReason;
       const summary = `${reason.name || 'Error'}${reason.code ? `/${reason.code}` : ''}: ${reason.message || ''}`
         .replace(/https?:\/\/[^\s]+/gi, '[URL]')
         .replace(/\b(cookie|authorization|token|signature|sig)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
         .replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
-      if (summary) log(`[youtubei-check] Détail expurgé du fournisseur: ${summary}`);
+      if (summary) log(`[${label}] Détail expurgé du fournisseur: ${summary}`);
     }
     return { available: false, code };
   } finally {
     if (media) {
       closeMedia(media);
       if (media.cached) log(fs.existsSync(media.url)
-        ? '[youtubei-check] Suppression du cache en attente.'
-        : '[youtubei-check] Fichier audio temporaire supprimé.');
+        ? `[${label}] Suppression du cache en attente.`
+        : `[${label}] Fichier audio temporaire supprimé.`);
     }
     closeMedia({ stream });
   }
+}
+
+function lavalinkCheck(input, options = {}) {
+  const { searchLavalink, streamLavalink } = require('../../features/music/providers/lavalink');
+  return youtubeiCheck(input, { search: searchLavalink, open: streamLavalink, ...options, label: 'lavalink-check' });
 }
 
 if (require.main === module) {
@@ -184,4 +199,4 @@ async function soundCloudCheck(input, { log = console.info, probe = soundCloudSe
   }
 }
 
-module.exports = { musicCheck, diagnosticUrl, soundCloudCheck, youtubeiCheck };
+module.exports = { musicCheck, diagnosticUrl, soundCloudCheck, youtubeiCheck, lavalinkCheck };

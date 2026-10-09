@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
-const { musicCheck, diagnosticUrl, soundCloudCheck, youtubeiCheck } = require('./musicCheck');
+const { musicCheck, diagnosticUrl, soundCloudCheck, youtubeiCheck, lavalinkCheck } = require('./musicCheck');
 
 test('soundcloudcheck --cache=148 transmet la durée, prépare tout le morceau et nettoie', async () => {
   const logs = []; const stream = new PassThrough(); let cleaned = 0;
@@ -126,4 +126,15 @@ test('youtubei-check valide le titre, la durée complète et nettoie le flux san
   assert.match(logs.join(' '), /morceau complet.*aucun cookie ni vocal/);
   await assert.rejects(youtubeiCheck('Niska - Chasse à l’homme'), /--cache/);
   await assert.rejects(youtubeiCheck('--cache=181 https://youtu.be/abc12345678'), /Artiste - Titre/);
+});
+
+test('lavalink-check valide tout le morceau et nettoie sans invoquer YouTubei ni cookies', async () => {
+  const stream = new PassThrough(); const logs = []; let cleaned = 0;
+  const result = await lavalinkCheck('--cache=170 Niska - Salé', {
+    log: line => logs.push(line), search: async () => [{ title: 'Niska - Salé', url: 'https://youtu.be/abcdefghijk', durationInSec: 170 }],
+    open: async () => stream,
+    cache: async () => ({ cached: true, url: 'test-cache.opus', cleanup() { cleaned++; } }),
+  });
+  assert.equal(result.cached, true); assert.equal(cleaned, 1); assert.equal(stream.destroyed, true);
+  assert.match(logs.join(' '), /lavalink-check.*morceau complet/);
 });

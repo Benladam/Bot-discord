@@ -81,3 +81,5 @@ credentials/
 *.lnk
 # Automatic YouTube attestation helper, installed privately on each host
 **/.cache/youtube-pot/
+# Lavalink : Java, JAR, mot de passe et configuration propres à chaque hôte.
+**/.cache/lavalink/

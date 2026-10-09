@@ -16,6 +16,39 @@ yt-dlp conserve les cookies privés explicitement configurés **sur son hôte**
 en dernier recours ; le bot ne les récupère pas depuis Chrome ou Edge.
 Aucun extracteur ne garantit l’accès si la plateforme refuse l’hébergeur.
 
+## Essai Lavalink sur Kinetic ou un autre hôte
+
+Dans la **console du bot hébergé** :
+
+```text
+musiccheck setup-lavalink
+musiccheck lavalink --cache=170 Niska - Salé
+```
+
+L'installation explicite télécharge Lavalink 4.2.2 et youtube-plugin 1.18.2
+depuis leurs releases officielles, vérifie leurs SHA-256 et, sur Linux x64
+sans Java, installe une JRE Temurin 21 portable. Prévoir 600 MiB libres et
+environ 300 MiB de RAM supplémentaire (heap Java plafonné à 192 MiB).
+Elle ne modifie ni Docker, ni les cookies, ni les navigateurs.
+
+Le service écoute **uniquement sur 127.0.0.1:2333**, avec un mot de passe
+aléatoire privé. Tout est stocké dans `BOT_DATA_DIR/.cache/lavalink/` et exclu
+de Git, y compris les JAR et Java. Le processus Java s'arrête avec le bot.
+
+Une fois installé, le bot essaie **Lavalink → YouTubei → yt-dlp → SoundCloud**.
+L'essai utilise `/v4/loadtracks` pour les métadonnées et la route documentée
+`/youtube/stream/{videoId}` du plugin pour l'audio. Ce n'est pas une migration
+du transport vocal vers Lavalink : la file par serveur, DAVE, les commandes,
+les boutons et le cache complet contrôlé restent ceux du bot.
+
+`LAVALINK_MODE=off` dans l'environnement de l'hôte restaure le parcours précédent.
+Pour un service Lavalink v4 séparé, configure `LAVALINK_URL` (HTTPS) et
+`LAVALINK_PASSWORD` dans le `.env` privé ; youtube-plugin doit être installé.
+Ne publie pas le port privé via le proxy du dashboard.
+
+Le diagnostic valide le candidat et la durée de l'audio récupéré, puis supprime
+le cache. Il ne remplace pas l'écoute du titre complet sur Discord.
+
 ## Vérification sur l’hébergeur
 
 Depuis la console du bot, après installation des dépendances et redémarrage :
