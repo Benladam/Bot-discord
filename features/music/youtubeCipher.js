@@ -150,7 +150,7 @@ function runtimeArgs(root) {
   const paths = installationPaths({ BOT_DATA_DIR: path.resolve(resolved, '..', '..', '..') });
   return ['run', '--cached-only', `--allow-net=127.0.0.1:${PORT},www.youtube.com`,
     `--allow-read=${paths.source},${paths.denoCache},${paths.cache}`, `--allow-write=${paths.cache}`,
-    '--allow-env=API_TOKEN,HOST,PORT,MAX_THREADS,PREPROCESSED_CACHE_SIZE,OVERRIDE_SCRIPT_VARIANT,IGNORE_SCRIPT_REGION,XDG_CACHE_HOME,DENO_DIR',
+    '--allow-env=API_TOKEN,HOST,PORT,MAX_THREADS,PREPROCESSED_CACHE_SIZE,SOLVER_CACHE_SIZE,OVERRIDE_SCRIPT_VARIANT,IGNORE_SCRIPT_REGION,XDG_CACHE_HOME,DENO_DIR',
     'server.ts'];
 }
 
