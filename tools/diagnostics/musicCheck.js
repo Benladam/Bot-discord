@@ -40,9 +40,23 @@ async function setupLavalinkOAuth({
   return { enabled: status.enabled, restarted: true, prompted, tokenConfigured: false };
 }
 
+async function resetLavalinkOAuth({
+  log = console.info,
+  oauth = require('../../features/music/lavalinkOAuth'),
+  runtime = require('../../features/music/lavalinkRuntime'),
+} = {}) {
+  const root = runtime.installationPaths().root;
+  oauth.clearLavalinkRefreshToken(root);
+  log('[youtube-oauth] Ancien refresh token retiré de la configuration privée; valeur non affichée.');
+  return setupLavalinkOAuth({ log, oauth, runtime });
+}
+
 async function musicCheck(input = '', { log = console.info, getPaths = getYouTubeCookiesPaths, readCookies = readCookieFile, probe = streamYtDlp } = {}) {
   if (String(input).trim() === 'setup-lavalink-oauth') {
     return setupLavalinkOAuth({ log });
+  }
+  if (String(input).trim() === 'reset-lavalink-oauth') {
+    return resetLavalinkOAuth({ log });
   }
   if (String(input).trim() === 'setup-lavalink-cipher') {
     const runtime = require('../../features/music/lavalinkRuntime');
@@ -243,4 +257,4 @@ async function soundCloudCheck(input, { log = console.info, probe = soundCloudSe
   }
 }
 
-module.exports = { musicCheck, setupLavalinkOAuth, diagnosticUrl, soundCloudCheck, youtubeiCheck, lavalinkCheck };
+module.exports = { musicCheck, setupLavalinkOAuth, resetLavalinkOAuth, diagnosticUrl, soundCloudCheck, youtubeiCheck, lavalinkCheck };

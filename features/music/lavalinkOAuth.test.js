@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { applicationConfig } = require('../../tools/setup/installLavalink');
-const { enableLavalinkOAuth, persistLavalinkRefreshToken, lavalinkOAuthStatus,
+const { enableLavalinkOAuth, persistLavalinkRefreshToken, clearLavalinkRefreshToken, lavalinkOAuthStatus,
   parseOAuthDeviceLine, parseOAuthRefreshTokenLine, parseOAuthDiagnosticLine } = require('./lavalinkOAuth');
 
 function privateInstall() {
@@ -58,6 +58,23 @@ test('le refresh token est privé et survit à un redémarrage sans être imprim
     assert.equal((text.match(/^      skipInitialization:/gm) || []).length, 1);
     assert.equal(lavalinkOAuthStatus(root).refreshTokenConfigured, true);
     if (process.platform !== 'win32') assert.equal((fs.statSync(config).mode & 0o777), 0o600);
+  } finally { fs.rmSync(parent, { recursive: true, force: true }); }
+});
+
+test('le remplacement du refresh token le retire et réactive le flux OAuth appareil sans fuite', () => {
+  const { parent, root, config } = privateInstall();
+  try {
+    enableLavalinkOAuth(root);
+    const secret = '1//private-refresh-token-value';
+    persistLavalinkRefreshToken(root, secret);
+    clearLavalinkRefreshToken(root);
+    const text = fs.readFileSync(config, 'utf8');
+    assert.doesNotMatch(text, /private-refresh-token-value/);
+    assert.match(text, /skipInitialization: false/);
+    assert.equal((text.match(/^      refreshToken:/gm) || []).length, 0);
+    assert.equal((text.match(/^      skipInitialization:/gm) || []).length, 1);
+    assert.deepEqual(lavalinkOAuthStatus(root), { enabled: true, refreshTokenConfigured: false,
+      skipInitialization: false, tvClientConfigured: true });
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
 

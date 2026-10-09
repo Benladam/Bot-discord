@@ -15,7 +15,7 @@ function privateConfigPath(root) {
   return config;
 }
 
-function editOAuthConfig(root, { enable = false, refreshToken } = {}) {
+function editOAuthConfig(root, { enable = false, refreshToken, clearRefreshToken = false } = {}) {
   const configPath = privateConfigPath(root);
   const original = fs.readFileSync(configPath, 'utf8');
   const eol = original.includes('\r\n') ? '\r\n' : '\n';
@@ -61,6 +61,26 @@ function editOAuthConfig(root, { enable = false, refreshToken } = {}) {
       if (skipIndex >= 0) lines[skipIndex] = skipLine;
       else lines.splice(tokenIndex >= 0 ? tokenIndex + 1 : actualEnd + 1, 0, skipLine);
     }
+    if (clearRefreshToken) {
+      // Remove only OAuth credentials inside the YouTube plugin's OAuth block.
+      const beforeClearEnd = lines.findIndex((line, index) => index > oauthIndex && /^    [A-Za-z]/.test(line));
+      const clearEnd = beforeClearEnd < 0 ? lines.length : beforeClearEnd;
+      for (let index = clearEnd - 1; index > oauthIndex; index--) {
+        if (/^      refreshToken:/.test(lines[index])) lines.splice(index, 1);
+      }
+      const currentEnd = lines.findIndex((line, index) => index > oauthIndex && /^    [A-Za-z]/.test(line));
+      const oauthEndIndex = currentEnd < 0 ? lines.length : currentEnd;
+      const skipIndexes = [];
+      for (let index = oauthIndex + 1; index < oauthEndIndex; index++) {
+        if (/^      skipInitialization:\s*(?:true|false)\s*$/.test(lines[index])) skipIndexes.push(index);
+      }
+      if (skipIndexes.length) {
+        lines[skipIndexes[0]] = '      skipInitialization: false';
+        for (const index of skipIndexes.slice(1).reverse()) lines.splice(index, 1);
+      } else {
+        lines.splice(oauthEndIndex, 0, '      skipInitialization: false');
+      }
+    }
   }
 
   const current = lines.join(eol) + eol;
@@ -93,6 +113,7 @@ function editOAuthConfig(root, { enable = false, refreshToken } = {}) {
 }
 
 function enableLavalinkOAuth(root) { return editOAuthConfig(root, { enable: true }); }
+function clearLavalinkRefreshToken(root) { return editOAuthConfig(root, { enable: true, clearRefreshToken: true }); }
 function persistLavalinkRefreshToken(root, refreshToken) {
   return editOAuthConfig(root, { refreshToken });
 }
@@ -142,4 +163,4 @@ function parseOAuthDiagnosticLine(line) {
 }
 
 module.exports = { enableLavalinkOAuth, persistLavalinkRefreshToken, lavalinkOAuthStatus,
-  parseOAuthDeviceLine, parseOAuthRefreshTokenLine, parseOAuthDiagnosticLine };
+  clearLavalinkRefreshToken, parseOAuthDeviceLine, parseOAuthRefreshTokenLine, parseOAuthDiagnosticLine };

@@ -79,6 +79,7 @@ class LavalinkRuntime {
           this.oauthDevicePrompt = true;
           for (const resolve of this.oauthPromptWaiters.splice(0)) resolve(true);
           this.log(`[youtube-oauth] Ouvre ${message.url} et saisis le code ${message.code} avec ton compte jetable.`);
+          this.log('[youtube-oauth] YOUTUBE_OAUTH_PROMPT_EMITTED');
           return;
         }
         if (message?.type === 'diagnostic' && /^[A-Z0-9_ :.-]{1,120}$/.test(message.text || '')) {

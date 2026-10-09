@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
-const { musicCheck, setupLavalinkOAuth, diagnosticUrl, soundCloudCheck, youtubeiCheck, lavalinkCheck } = require('./musicCheck');
+const { musicCheck, setupLavalinkOAuth, resetLavalinkOAuth, diagnosticUrl, soundCloudCheck, youtubeiCheck, lavalinkCheck } = require('./musicCheck');
 
 test('setup OAuth ne prétend pas avoir un code quand le processus ne l’a pas émis', async () => {
   const logs = []; const calls = [];
@@ -20,6 +20,26 @@ test('setup OAuth ne prétend pas avoir un code quand le processus ne l’a pas 
   assert.deepEqual(calls, ['enable:/private/lavalink', 'restart', 'wait:5000']);
   assert.match(logs.join(' '), /YOUTUBE_OAUTH_PROMPT_NOT_EMITTED/);
   assert.doesNotMatch(logs.join(' '), /code temporaire apparaît/);
+});
+
+test('reset OAuth efface le jeton existant puis attend un prompt réel sans imprimer le secret', async () => {
+  const logs = []; const calls = [];
+  const result = await resetLavalinkOAuth({ log: line => logs.push(line),
+    oauth: {
+      clearLavalinkRefreshToken: root => calls.push(`clear:${root}`),
+      enableLavalinkOAuth: root => calls.push(`enable:${root}`),
+      lavalinkOAuthStatus: () => ({ enabled: true, refreshTokenConfigured: false }),
+    },
+    runtime: {
+      installationPaths: () => ({ root: '/private/lavalink' }),
+      restartLavalink: async () => calls.push('restart'),
+      waitForLavalinkOAuthPrompt: async timeout => { calls.push(`wait:${timeout}`); return true; },
+    },
+  });
+  assert.deepEqual(result, { enabled: true, restarted: true, prompted: true, tokenConfigured: false });
+  assert.deepEqual(calls, ['clear:/private/lavalink', 'enable:/private/lavalink', 'restart', 'wait:5000']);
+  assert.match(logs.join(' '), /YOUTUBE_OAUTH_PROMPT_EMITTED|Flux appareil démarré/);
+  assert.doesNotMatch(logs.join(' '), /refresh-token|private/);
 });
 
 test('soundcloudcheck --cache=148 transmet la durée, prépare tout le morceau et nettoie', async () => {

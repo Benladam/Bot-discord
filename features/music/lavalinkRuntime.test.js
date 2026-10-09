@@ -58,3 +58,18 @@ test('le statut du prompt OAuth attend une émission réelle, sans supposer que 
   runtime.oauthDevicePrompt = true;
   assert.equal(await runtime.waitForOAuthDevicePrompt(1), true);
 });
+
+test('un prompt OAuth émis journalise un marqueur sûr distinct', async () => {
+  const logs = [];
+  const runtime = new LavalinkRuntime({ env: { LAVALINK_MODE: 'off' }, log: line => logs.push(line) });
+  let pings = 0;
+  runtime.ping = async () => ++pings > 1;
+  runtime.forkImpl = () => {
+    return { on(event, callback) {
+      if (event === 'message') callback({ type: 'oauth-device', url: 'https://www.google.com/device', code: 'ABCD-EFGH' });
+    }, kill() {} };
+  };
+  await runtime.start({ url: 'http://127.0.0.1:2333', password: 'p'.repeat(32), java: 'java', external: false });
+  assert.ok(logs.some(line => line === '[youtube-oauth] YOUTUBE_OAUTH_PROMPT_EMITTED'));
+  assert.ok(logs.some(line => line.includes('ABCD-EFGH')));
+});
