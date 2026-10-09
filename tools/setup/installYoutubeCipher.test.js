@@ -55,6 +55,7 @@ test('installation simulée épingle les deux dépôts, garde les fichiers hors 
   const denoArchive = { url: 'https://github.com/denoland/deno/releases/download/test/deno.zip',
     sha256: crypto.createHash('sha256').update(archive).digest('hex') };
   const calls = [];
+  const logs = [];
   const fetchImpl = async () => new Response(archive, { status: 200 });
   const runImpl = async (command, args) => {
     calls.push({ command, args });
@@ -76,7 +77,7 @@ test('installation simulée épingle les deux dépôts, garde les fichiers hors 
     return '';
   };
   try {
-    const first = await installYoutubeCipher({ env, platform: 'linux', arch: 'x64', denoArchive, fetchImpl, runImpl, log() {} });
+    const first = await installYoutubeCipher({ env, platform: 'linux', arch: 'x64', denoArchive, fetchImpl, runImpl, log(message) { logs.push(message); } });
     const paths = cipher.installationPaths(env);
     assert.equal(first.installed, true);
     assert.match(first.password, /^[a-f0-9]{64}$/);
@@ -84,6 +85,8 @@ test('installation simulée épingle les deux dépôts, garde les fichiers hors 
     assert.ok(calls.some(call => call.command === 'git' && call.args.includes(cipher.VERSION)));
     assert.ok(calls.some(call => call.command === 'git' && call.args.includes(cipher.EJS_COMMIT)));
     assert.ok(calls.some(call => path.basename(call.command) === 'deno' && call.args[0] === 'cache'));
+    assert.ok(logs.some(message => message.includes('récupération de la source yt-cipher')));
+    assert.ok(logs.some(message => message.includes('Préchargement des dépendances Deno')));
     assert.equal(JSON.parse(await fs.readFile(paths.manifest, 'utf8')).denoSha256, denoArchive.sha256);
     assert.equal(JSON.parse(await fs.readFile(paths.connection, 'utf8')).password, first.password);
 

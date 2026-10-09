@@ -169,7 +169,9 @@ async function install({ env = process.env, fetchImpl = globalThis.fetch, runImp
     await fs.chmod(stagingDeno, 0o700);
 
     const childEnv = commandEnvironment(env, stagingDenoCache);
+    log('[youtube-cipher-setup] Runtime Deno téléchargé et vérifié; récupération de la source yt-cipher épinglée.');
     await checkoutPinnedRepository(stagingSource, CIPHER_REPOSITORY, VERSION, staging, childEnv, runImpl);
+    log('[youtube-cipher-setup] Source yt-cipher récupérée; récupération de la dépendance EJS épinglée.');
     await checkoutPinnedRepository(stagingEjs, EJS_REPOSITORY, EJS_COMMIT, staging, childEnv, runImpl);
     await fs.access(path.join(stagingSource, 'server.ts'));
     await fs.access(path.join(stagingSource, 'scripts', 'patch-ejs.ts'));
@@ -177,7 +179,9 @@ async function install({ env = process.env, fetchImpl = globalThis.fetch, runImp
 
     const patchArgs = ['run', '--allow-net=deno.land', `--allow-read=${staging}`, `--allow-write=${staging}`,
       '--allow-env=DENO_DIR', 'scripts/patch-ejs.ts'];
+    log('[youtube-cipher-setup] Application du correctif EJS requis par yt-cipher.');
     await runImpl(stagingDeno, patchArgs, stagingSource, childEnv, { timeoutMs: 120_000 });
+    log('[youtube-cipher-setup] Préchargement des dépendances Deno avant le démarrage du bot.');
     await runImpl(stagingDeno, ['cache', 'server.ts', 'worker.ts'], stagingSource, childEnv, { timeoutMs: 180_000 });
 
     const password = crypto.randomBytes(32).toString('hex');
