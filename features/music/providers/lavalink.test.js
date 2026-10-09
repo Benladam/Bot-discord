@@ -22,7 +22,7 @@ test('Lavalink recherche par titre, canonicalise les candidats et refuse un autr
 test('Lavalink ouvre uniquement la vidéo exacte et ferme requête et flux au nettoyage', async () => {
   let signal;
   const provider = createLavalinkProvider({ ensure, fetchImpl: async (url, options) => {
-    assert.equal(url, `${config.url}/youtube/stream/abcdefghijk`);
+    assert.equal(url, `${config.url}/youtube/stream/abcdefghijk?withClient=ANDROID_VR`);
     signal = options.signal;
     return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'audio/webm' } });
   } });
@@ -38,4 +38,16 @@ test('Lavalink refuse les erreurs JSON sans exposer les URLs signées et ne lit 
     assert.equal(error.code, 'LAVALINK_STREAM_FAILED'); assert.doesNotMatch(error.message, /private|test-secret/); return true;
   });
   await assert.rejects(provider.search('https://youtu.be/abcdefghijk'), /invalide/);
+});
+
+test('un refus ANDROID_VR n’empêche pas WEB de fournir la même vidéo', async () => {
+  const calls = [];
+  const provider = createLavalinkProvider({ ensure, fetchImpl: async url => {
+    calls.push(url);
+    if (url.endsWith('ANDROID_VR')) return Response.json({ error: 'denied' }, { status: 400 });
+    return new Response(new Uint8Array([1]), { headers: { 'content-type': 'audio/mp4' } });
+  } });
+  const stream = await provider.stream('https://youtu.be/abcdefghijk');
+  assert.equal(calls.length, 2); assert.ok(calls.every(url => url.includes('/stream/abcdefghijk?')));
+  assert.ok(calls[1].endsWith('WEB')); stream.cleanup();
 });

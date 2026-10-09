@@ -30,21 +30,37 @@ function createLavalinkProvider({ ensure = ensureLavalink, fetchImpl = globalThi
     const config = await ensure();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(100, Math.min(120_000, timeoutMs)));
-    let response;
+    const failures = [];
     try {
-      response = await fetchImpl(`${config.url}/youtube/stream/${id}`, {
-        headers: { Authorization: config.password }, signal: controller.signal, redirect: 'error',
-      });
-      const type = response.headers.get('content-type') || '';
-      if (!response.ok || !response.body || !/^(audio\/|video\/|application\/octet-stream)/i.test(type)) {
-        await response.body?.cancel?.().catch(() => {});
-        throw Object.assign(new Error(`Le plugin Lavalink ne fournit pas le flux demandé (HTTP ${response.status}).`), { code: 'LAVALINK_STREAM_FAILED' });
+      // La route du plugin peut abandonner dès qu'un client répond CannotBeLoaded.
+      // Essais explicites sur la MÊME vidéo, jamais sur un autre résultat.
+      for (const client of ['ANDROID_VR', 'WEB', 'WEBEMBEDDED']) {
+        if (controller.signal.aborted) break;
+        const attempt = new AbortController();
+        const headerTimer = setTimeout(() => attempt.abort(), 12_000);
+        let response;
+        try {
+          response = await fetchImpl(`${config.url}/youtube/stream/${id}?withClient=${client}`, {
+            headers: { Authorization: config.password }, signal: AbortSignal.any([controller.signal, attempt.signal]), redirect: 'error',
+          });
+        } catch {
+          failures.push(`${client}=TIMEOUT_OR_NETWORK`); clearTimeout(headerTimer); attempt.abort(); continue;
+        }
+        clearTimeout(headerTimer);
+        const type = response.headers.get('content-type') || '';
+        if (!response.ok || !response.body || !/^(audio\/|video\/|application\/octet-stream)/i.test(type)) {
+          failures.push(`${client}=HTTP_${response.status}${response.ok ? '_NOT_AUDIO' : ''}`);
+          await response.body?.cancel?.().catch(() => {}); attempt.abort(); continue;
+        }
+        const audio = Readable.fromWeb(response.body);
+        const cleanup = () => { clearTimeout(timer); controller.abort(); attempt.abort(); };
+        audio.once('close', cleanup); audio.once('end', cleanup); audio.cleanup = () => { cleanup(); audio.destroy(); };
+        audio.musicSource = { sourceUrl, provider: 'YouTube', extractor: 'lavalink' };
+        return audio;
       }
-      const audio = Readable.fromWeb(response.body);
-      const cleanup = () => { clearTimeout(timer); controller.abort(); };
-      audio.once('close', cleanup); audio.once('end', cleanup); audio.cleanup = () => { cleanup(); audio.destroy(); };
-      audio.musicSource = { sourceUrl, provider: 'YouTube', extractor: 'lavalink' };
-      return audio;
+      throw Object.assign(new Error('Aucun client YouTube de Lavalink ne fournit le flux demandé.'), {
+        code: 'LAVALINK_STREAM_FAILED', providerReason: { name: 'Lavalink', code: 'CLIENTS_REFUSED', message: failures.join('; ').slice(0, 180) },
+      });
     } catch (error) {
       clearTimeout(timer); controller.abort();
       if (error.code === 'LAVALINK_STREAM_FAILED') throw error;
