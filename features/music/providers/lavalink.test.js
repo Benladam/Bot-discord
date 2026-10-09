@@ -55,5 +55,7 @@ test('un refus ANDROID_VR n’empêche pas WEB de fournir la même vidéo', asyn
 test('le diagnostic de trace ne sort que des codes connus, jamais les secrets ni chemins', async () => {
   assert.equal(await safeFailureReason(Response.json({ trace: 'IllegalStateException: Must find action functions /home/private/?token=secret' })), 'CIPHER_FAILED');
   assert.equal(await safeFailureReason(Response.json({ message: 'Sign in to confirm you’re not a bot; SID=secret' })), 'AUTH_REQUIRED');
+  assert.equal(await safeFailureReason(Response.json({ trace: 'FriendlyException: This video requires login. /private?SID=secret' })), 'AUTH_REQUIRED');
+  assert.equal(await safeFailureReason(Response.json({ trace: 'NoSuchMethodError: privateMethod(token=secret)' })), 'PLUGIN_INCOMPATIBLE');
   assert.equal(await safeFailureReason(Response.json({ trace: 'token=secret /private/unknownError' })), '');
 });

@@ -16,12 +16,16 @@ async function safeFailureReason(response) {
       text += Buffer.from(value).toString('utf8').slice(0, 65536 - text.length);
     }
     const reasons = [
-      [/sign in to confirm|login.required|not a bot/i, 'AUTH_REQUIRED'],
+      [/sign in to confirm|login.required|requires login|cannot be viewed anonymously|not a bot/i, 'AUTH_REQUIRED'],
+      [/requires age verification|inappropriate for some users/i, 'AGE_VERIFICATION_REQUIRED'],
       [/must find action functions|could not.*(?:cipher|signature)|(?:cipher|signature).*?(?:failed|not found|unsupported)/i, 'CIPHER_FAILED'],
       [/status code: 403|403 Forbidden/i, 'UPSTREAM_403'],
       [/status code: 429|429 Too Many Requests/i, 'UPSTREAM_429'],
       [/SocketTimeoutException|timed out/i, 'UPSTREAM_TIMEOUT'],
       [/could not find formats|no formats found/i, 'NO_FORMATS'],
+      [/video (?:is |is not )?(?:unavailable|available)|private video|video is unplayable|non-embeddable/i, 'CONTENT_UNAVAILABLE'],
+      [/NoSuchMethodError|NoClassDefFoundError|IncompatibleClassChangeError/i, 'PLUGIN_INCOMPATIBLE'],
+      [/SSLHandshakeException|PKIX path building/i, 'UPSTREAM_TLS_FAILED'],
     ];
     return reasons.find(([pattern]) => pattern.test(text))?.[1] || '';
   } catch { return ''; }
