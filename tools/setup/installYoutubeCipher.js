@@ -99,10 +99,27 @@ function commandEnvironment(env, denoDir) {
   return { ...helperEnvironment(env), DENO_DIR: denoDir };
 }
 
+function safeDiagnostic(value) {
+  return String(value || '')
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .replace(/\b((?:api[_-]?token|refresh[_-]?token|authorization|cookie|set-cookie)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1[redacted]')
+    .replace(/\b(Bearer\s+)[^\s,;]+/gi, '$1[redacted]')
+    .replace(/https?:\/\/[^\s<>"']+/gi, raw => {
+      const punctuation = raw.match(/[),.;]+$/)?.[0] || '';
+      try {
+        const url = new URL(raw.slice(0, punctuation ? -punctuation.length : undefined));
+        return `${url.origin}${url.pathname}${url.search ? '?[query redacted]' : ''}${punctuation}`;
+      } catch { return '[URL redacted]'; }
+    })
+    .replace(/\b[a-f0-9]{64}\b/gi, '[redacted]')
+    .split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(-3).join(' | ').slice(0, 500);
+}
+
 function run(command, args, cwd, env, { capture = false, timeoutMs = 120_000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
+    let stderrTail = '';
     let settled = false;
     let timedOut = false;
     let killTimer = null;
@@ -119,13 +136,20 @@ function run(command, args, cwd, env, { capture = false, timeoutMs = 120_000 } =
       killTimer = setTimeout(() => child.kill('SIGKILL'), 3000);
       killTimer.unref();
     }, timeoutMs);
-    for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => {
-      if (capture) output = (output + chunk.toString('utf8')).slice(-1024);
+    child.stdout.on('data', chunk => { if (capture) output = (output + chunk.toString('utf8')).slice(-1024); });
+    child.stderr.on('data', chunk => {
+      const text = chunk.toString('utf8');
+      stderrTail = (stderrTail + text).slice(-2048);
+      if (capture) output = (output + text).slice(-1024);
     });
     child.once('error', () => finish(new Error('Git ou Deno indisponible sur cet hôte.')));
-    child.once('exit', code => finish(timedOut
-      ? new Error('Installation yt-cipher : délai dépassé.')
-      : code === 0 ? null : new Error('Installation yt-cipher refusée; l’installation existante est conservée.')));
+    child.once('exit', code => {
+      if (timedOut) return finish(new Error('Installation yt-cipher : délai dépassé.'));
+      if (code === 0) return finish(null);
+      const detail = safeDiagnostic(stderrTail);
+      const commandName = path.basename(command);
+      finish(new Error(`Installation yt-cipher refusée (${commandName}, code ${code})${detail ? ` : ${detail}` : ''}; l’installation existante est conservée.`));
+    });
   });
 }
 
@@ -212,4 +236,4 @@ if (require.main === module) {
 }
 
 module.exports = { DENO_ARCHIVE, CIPHER_REPOSITORY, EJS_REPOSITORY, zipEntry, downloadDeno,
-  checkoutPinnedRepository, installYoutubeCipher };
+  checkoutPinnedRepository, safeDiagnostic, installYoutubeCipher };

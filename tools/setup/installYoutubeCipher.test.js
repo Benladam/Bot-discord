@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { deflateRawSync } = require('node:zlib');
 const cipher = require('../../features/music/youtubeCipher');
-const { DENO_ARCHIVE, zipEntry, downloadDeno, installYoutubeCipher } = require('./installYoutubeCipher');
+const { DENO_ARCHIVE, zipEntry, downloadDeno, safeDiagnostic, installYoutubeCipher } = require('./installYoutubeCipher');
 
 function zipSingleFile(name, content) {
   const filename = Buffer.from(name);
@@ -42,6 +42,15 @@ test('téléchargement Deno vérifie HTTPS, origine GitHub et SHA-256 avant extr
     headers: { 'x-test': url }, }), { ...asset, url: 'https://downloads.example.test/deno.zip' }), /refusé/);
   assert.match(DENO_ARCHIVE.url, /^https:\/\/github\.com\/denoland\/deno\/releases\/download\/v2\.9\.7\//);
   assert.match(DENO_ARCHIVE.sha256, /^[a-f0-9]{64}$/);
+});
+
+test('les diagnostics de sous-processus masquent les secrets et les paramètres d’URL', () => {
+  const message = safeDiagnostic('API_TOKEN=secret Bearer access https://youtube.com/watch?v=video&sig=secret\n\nError: denied');
+  assert.doesNotMatch(message, /secret|access|video/);
+  assert.match(message, /API_TOKEN=\[redacted\]/);
+  assert.match(message, /Bearer \[redacted\]/);
+  assert.match(message, /https:\/\/youtube\.com\/watch\?\[query redacted\]/);
+  assert.match(message, /Error: denied/);
 });
 
 test('installation Deno refuse une plateforme non prise en charge avant tout téléchargement', async () => {
