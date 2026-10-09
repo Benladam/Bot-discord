@@ -65,6 +65,7 @@ test('worker Deno a des droits limités, écoute en loopback et ne reçoit aucun
     assert.equal(env.DISCORD_TOKEN, undefined);
     assert.equal(args.includes('--cached-only'), true);
     assert.ok(args.includes('--allow-net=127.0.0.1:8001,www.youtube.com'));
+    assert.ok(args.some(value => value === '--allow-env=API_TOKEN,HOST,PORT,MAX_THREADS,PREPROCESSED_CACHE_SIZE,OVERRIDE_SCRIPT_VARIANT,IGNORE_SCRIPT_REGION,XDG_CACHE_HOME,DENO_DIR'));
     assert.ok(args.some(value => value.startsWith('--allow-write=') && value.endsWith(`${path.sep}cache`)));
     assert.ok(!args.some(value => value.includes('cipher.kikkia.dev')));
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
@@ -73,6 +74,7 @@ test('worker Deno a des droits limités, écoute en loopback et ne reçoit aucun
 test('les diagnostics du résolveur classifient la cause sans exposer la sortie brute', () => {
   assert.equal(cipher.helperFailureCode('error: Could not find "astring" in a node_modules folder', 1), 'YOUTUBE_CIPHER_DEPENDENCY_MISSING');
   assert.equal(cipher.helperFailureCode('PermissionDenied: Requires net access', 1), 'YOUTUBE_CIPHER_PERMISSION_DENIED');
+  assert.equal(cipher.helperFailureCode('NotCapable: Requires env access to IGNORE_SCRIPT_REGION', 1), 'YOUTUBE_CIPHER_PERMISSION_DENIED');
   assert.equal(cipher.helperFailureCode('Address already in use', 1), 'YOUTUBE_CIPHER_PORT_IN_USE');
   assert.equal(cipher.helperFailureCode('', null, 'SIGKILL'), 'YOUTUBE_CIPHER_RESOURCE_LIMIT');
   assert.equal(cipher.helperFailureCode('unexpected failure', 1), 'YOUTUBE_CIPHER_PROCESS_EXIT');

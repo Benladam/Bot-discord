@@ -150,7 +150,7 @@ function runtimeArgs(root) {
   const paths = installationPaths({ BOT_DATA_DIR: path.resolve(resolved, '..', '..', '..') });
   return ['run', '--cached-only', `--allow-net=127.0.0.1:${PORT},www.youtube.com`,
     `--allow-read=${paths.source},${paths.denoCache},${paths.cache}`, `--allow-write=${paths.cache}`,
-    '--allow-env=API_TOKEN,HOST,PORT,MAX_THREADS,PREPROCESSED_CACHE_SIZE,OVERRIDE_SCRIPT_VARIANT,XDG_CACHE_HOME,DENO_DIR',
+    '--allow-env=API_TOKEN,HOST,PORT,MAX_THREADS,PREPROCESSED_CACHE_SIZE,OVERRIDE_SCRIPT_VARIANT,IGNORE_SCRIPT_REGION,XDG_CACHE_HOME,DENO_DIR',
     'server.ts'];
 }
 
@@ -160,7 +160,7 @@ function helperFailureCode(stderr, exitCode, signal) {
     return 'YOUTUBE_CIPHER_RESOURCE_LIMIT';
   }
   if (/address already in use|EADDRINUSE/i.test(output)) return 'YOUTUBE_CIPHER_PORT_IN_USE';
-  if (/PermissionDenied|permission denied|requires (?:read|write|net) access/i.test(output)) {
+  if (/PermissionDenied|NotCapable|permission denied|requires (?:read|write|net|env) access/i.test(output)) {
     return 'YOUTUBE_CIPHER_PERMISSION_DENIED';
   }
   if (/not found in cache|cached-only|node_modules folder|module not found|could not find .*package/i.test(output)) {
