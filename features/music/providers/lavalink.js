@@ -3,6 +3,31 @@ const { Readable } = require('node:stream');
 const { canonicalYouTubeUrl } = require('./youtubei');
 const { ensureLavalink } = require('../lavalinkRuntime');
 
+async function safeFailureReason(response) {
+  // Les traces restent dans la connexion privée authentifiée. Aucun texte brut,
+  // URL, chemin, compte ou jeton n'est transmis aux logs Discord/console.
+  const reader = response.body?.getReader?.();
+  if (!reader) return '';
+  let text = '';
+  try {
+    while (text.length < 65536) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += Buffer.from(value).toString('utf8').slice(0, 65536 - text.length);
+    }
+    const reasons = [
+      [/sign in to confirm|login.required|not a bot/i, 'AUTH_REQUIRED'],
+      [/must find action functions|could not.*(?:cipher|signature)|(?:cipher|signature).*?(?:failed|not found|unsupported)/i, 'CIPHER_FAILED'],
+      [/status code: 403|403 Forbidden/i, 'UPSTREAM_403'],
+      [/status code: 429|429 Too Many Requests/i, 'UPSTREAM_429'],
+      [/SocketTimeoutException|timed out/i, 'UPSTREAM_TIMEOUT'],
+      [/could not find formats|no formats found/i, 'NO_FORMATS'],
+    ];
+    return reasons.find(([pattern]) => pattern.test(text))?.[1] || '';
+  } catch { return ''; }
+  finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+}
+
 function createLavalinkProvider({ ensure = ensureLavalink, fetchImpl = globalThis.fetch } = {}) {
   async function search(query, { limit = 5, timeoutMs = 6000 } = {}) {
     const term = String(query || '').trim().replace(/\s+/g, ' ').slice(0, 200);
@@ -40,7 +65,7 @@ function createLavalinkProvider({ ensure = ensureLavalink, fetchImpl = globalThi
         const headerTimer = setTimeout(() => attempt.abort(), 12_000);
         let response;
         try {
-          response = await fetchImpl(`${config.url}/youtube/stream/${id}?withClient=${client}`, {
+          response = await fetchImpl(`${config.url}/youtube/stream/${id}?withClient=${client}&trace=true`, {
             headers: { Authorization: config.password }, signal: AbortSignal.any([controller.signal, attempt.signal]), redirect: 'error',
           });
         } catch {
@@ -49,8 +74,9 @@ function createLavalinkProvider({ ensure = ensureLavalink, fetchImpl = globalThi
         clearTimeout(headerTimer);
         const type = response.headers.get('content-type') || '';
         if (!response.ok || !response.body || !/^(audio\/|video\/|application\/octet-stream)/i.test(type)) {
-          failures.push(`${client}=HTTP_${response.status}${response.ok ? '_NOT_AUDIO' : ''}`);
-          await response.body?.cancel?.().catch(() => {}); attempt.abort(); continue;
+          const reason = await safeFailureReason(response);
+          failures.push(`${client}=HTTP_${response.status}${response.ok ? '_NOT_AUDIO' : ''}${reason ? `/${reason}` : ''}`);
+          attempt.abort(); continue;
         }
         const audio = Readable.fromWeb(response.body);
         const cleanup = () => { clearTimeout(timer); controller.abort(); attempt.abort(); };
@@ -70,4 +96,4 @@ function createLavalinkProvider({ ensure = ensureLavalink, fetchImpl = globalThi
   return { search, stream };
 }
 const provider = createLavalinkProvider();
-module.exports = { createLavalinkProvider, searchLavalink: provider.search, streamLavalink: provider.stream };
+module.exports = { createLavalinkProvider, safeFailureReason, searchLavalink: provider.search, streamLavalink: provider.stream };

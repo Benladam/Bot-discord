@@ -4,7 +4,7 @@ const path = require('node:path');
 const [root, java] = process.argv.slice(2);
 if (!process.send || !path.isAbsolute(root || '')) process.exit(1);
 const child = spawn(java || 'java', ['-Xms32m', '-Xmx192m', '-XX:MaxDirectMemorySize=64m',
-  '-XX:ActiveProcessorCount=2', '-jar', 'Lavalink.jar'], {
+  '-XX:ActiveProcessorCount=2', '-jar', 'Lavalink.jar', '--server.error.include-stacktrace=on_param'], {
   cwd: root, env: process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
 });
 // Pas de journaux Java bruts : ils peuvent contenir des URLs signées.
