@@ -92,7 +92,8 @@ function createYoutubeiProvider({ loadRuntime = createRuntime } = {}) {
   async function search(query, { limit = 5, timeoutMs = DEFAULT_SEARCH_TIMEOUT_MS } = {}) {
     const normalized = String(query || '').trim().replace(/\s+/g, ' ').slice(0, 200);
     if (normalized.length < 2 || /[\r\n\x00-\x1f]/.test(normalized)) throw new Error('Recherche YouTube invalide.');
-    const { extractor, searchType } = await runtime();
+    const { extractor, searchType } = await withTimeout(runtime(), timeoutMs,
+      'YOUTUBEI_INIT_TIMEOUT', 'L’initialisation YouTubei a dépassé son délai.');
     const result = await withTimeout(
       extractor.handle(normalized, { type: searchType, requestedBy: null }),
       timeoutMs,
@@ -118,7 +119,8 @@ function createYoutubeiProvider({ loadRuntime = createRuntime } = {}) {
 
   async function stream(value, { timeoutMs = DEFAULT_STREAM_TIMEOUT_MS } = {}) {
     const url = canonicalYouTubeUrl(value);
-    const state = await runtime();
+    const state = await withTimeout(runtime(), timeoutMs,
+      'YOUTUBEI_INIT_TIMEOUT', 'L’initialisation YouTubei a dépassé son délai.');
     const { extractor } = state;
     state.clearStreamError?.();
     const output = await withTimeout(

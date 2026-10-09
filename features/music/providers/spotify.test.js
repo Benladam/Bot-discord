@@ -5,13 +5,13 @@ const snapshotEnvironment = () => Object.fromEntries(
   ['SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'SPOTIFY_REFRESH_TOKEN'].map(key => [key, process.env[key]]),
 );
 
-test('un échec de recherche yt-dlp retombe sur la recherche YouTube play-dl', async () => {
+test('un échec de recherche du catalogue retombe sur YouTubei', async () => {
   const { searchYouTube } = require('./spotify');
   const result = await searchYouTube('Artiste - Titre', {
     searchYtDlp: async () => { throw new Error('PyInstaller extraction failed'); },
-    searchPlayDl: async (query, options) => {
+    searchAlternative: async (query, options) => {
       assert.equal(query, 'Artiste - Titre');
-      assert.deepEqual(options, { limit: 3, source: { youtube: 'video' } });
+      assert.deepEqual(options, { limit: 3 });
       return [{
         title: 'Titre officiel',
         url: 'https://www.youtube.com/watch?v=abc1234',
@@ -110,7 +110,7 @@ test('la recherche Spotify ignore les URL vidéo retournées par des domaines in
   const { searchYouTube } = require('./spotify');
   const result = await searchYouTube('Artiste - Titre', {
     searchYtDlp: async () => [],
-    searchPlayDl: async () => [{ title: 'Titre', url: 'https://example.com/audio' }],
+    searchAlternative: async () => [{ title: 'Titre', url: 'https://example.com/audio' }],
   });
   assert.equal(result, null);
 });

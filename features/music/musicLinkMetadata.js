@@ -1,5 +1,5 @@
 /** Métadonnées publiques des liens musicaux et journalisation sans secrets. */
-const play = require('play-dl');
+const { getDeezerEntry } = require('./providers/deezer');
 const { cleanMediaQuery } = require('./mediaQuery');
 
 const PROVIDER_LABELS = Object.freeze({
@@ -242,12 +242,8 @@ async function resolveMusicLinkMetadata(input, {
     if (target.playlist) {
       const listUrl = new URL('https://www.youtube.com/playlist');
       listUrl.searchParams.set('list', target.playlist);
-      const playlist = await resolveBeforeTimeout(
-        () => play.playlist_info(listUrl.toString(), { incomplete: true }).catch(() => null),
-        requestTimeout,
-      );
-      const title = playlist?.title || playlist?.name;
-      if (title) return makeMetadata(provider, title, '', 'playlist');
+      const data = await requestOEmbed('https://www.youtube.com/oembed', listUrl.toString(), fetchImpl, requestTimeout).catch(() => null);
+      if (data?.title) return makeMetadata(provider, data.title, '', 'playlist');
     }
     return null;
   }
@@ -272,8 +268,7 @@ async function resolveMusicLinkMetadata(input, {
         if (title) return makeMetadata(provider, title, artist, kind);
       }
     }
-    // play-dl sait suivre les liens Deezer courts lorsque l'API publique ne suffit pas.
-    const entry = await resolveBeforeTimeout(() => play.deezer(link.value).catch(() => null), requestTimeout);
+    const entry = await resolveBeforeTimeout(() => getDeezerEntry(link.value, { fetchImpl, timeoutMs: requestTimeout }).catch(() => null), requestTimeout);
     if (!entry) return null;
     const kind = entry.type === 'track' ? 'track' : entry.type === 'album' ? 'album' : entry.type === 'playlist' ? 'playlist' : 'artist';
     const title = entry.title || entry.name;

@@ -3,14 +3,14 @@
  *
  * Spotify n'autorise pas le streaming audio direct, on résout donc les
  * métadonnées de la piste (titre + artiste) puis on lit l'audio équivalent
- * sur YouTube via play-dl.
+ * sur YouTube via YouTubei, avec yt-dlp en secours.
  *
  * Nécessite les identifiants Spotify (Client ID + Client Secret) dans .env :
  *   SPOTIFY_CLIENT_ID=...
  *   SPOTIFY_CLIENT_SECRET=...
  */
 
-const play = require('play-dl');
+const { searchYouTubei } = require('./youtubei');
 const { searchYouTubeCandidates } = require('../audioSender');
 const { getPublicPlaylist } = require('./spotifyPublic');
 const MAX_SPOTIFY_TRACKS = 100;
@@ -167,7 +167,7 @@ function normalizeYouTubeMatch(r, query) {
 
 async function searchYouTube(query, {
   searchYtDlp = searchYouTubeCandidates,
-  searchPlayDl = (...args) => play.search(...args),
+  searchAlternative = searchYouTubei,
 } = {}) {
   let ytDlpError = null;
   try {
@@ -179,16 +179,16 @@ async function searchYouTube(query, {
   }
 
   // Kinetic peut momentanément refuser l’extraction du binaire autonome.
-  // play-dl essaie un chemin distinct pour retrouver une URL vidéo directe.
+  // L'extracteur Node.js peut retrouver une URL sans démarrer de binaire.
   try {
-    const results = await searchPlayDl(query, { limit: 3, source: { youtube: 'video' } });
+    const results = await searchAlternative(query, { limit: 3 });
     const match = (Array.isArray(results) ? results : [])
       .map((item) => normalizeYouTubeMatch(item, query))
       .find(Boolean);
     if (match) return match;
   } catch (error) {
     if (ytDlpError) {
-      console.warn(`[spotify] recherche yt-dlp/play-dl échouée pour « ${String(query).slice(0, 100)} »: ${error.message}`);
+      console.warn(`[spotify] recherches YouTube indisponibles pour « ${String(query).slice(0, 100)} ».`);
     }
   }
 

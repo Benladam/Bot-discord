@@ -19,6 +19,23 @@ function diagnosticUrl(input) {
 }
 
 async function musicCheck(input = '', { log = console.info, getPaths = getYouTubeCookiesPaths, readCookies = readCookieFile, probe = streamYtDlp } = {}) {
+  if (String(input).trim().startsWith('catalog ')) {
+    const query = String(input).trim().slice(8).trim().slice(0, 200);
+    if (query.length < 2 || /https?:\/\/|[\r\n\x00-\x1f]/i.test(query)) throw new Error('Utilise musiccheck catalog Artiste - Titre, sans lien.');
+    const { searchCatalog } = require('../../features/music/musicCatalog');
+    let removed = false;
+    try { require.resolve('play-dl'); } catch (error) { removed = error.code === 'MODULE_NOT_FOUND'; }
+    log(`[catalog-check] play-dl absent=${removed}; YouTubei primaire; métadonnées Deezer/SoundCloud HTTP; aucun navigateur utilisé.`);
+    const initial = await searchCatalog(query, { limit: 10, fresh: true, sourceTimeoutMs: 2500 });
+    // Attend aussi les fournisseurs tardifs pour ce diagnostic administrateur,
+    // sans changer le délai court de l’autocomplétion Discord.
+    await new Promise(resolve => setTimeout(resolve, 6500));
+    const items = await searchCatalog(query, { limit: 10, sourceTimeoutMs: 2500 });
+    const sources = {};
+    for (const item of items.length ? items : initial) sources[item.provider] = (sources[item.provider] || 0) + 1;
+    log(`[catalog-check] Résultats publics reçus par source : ${JSON.stringify(sources)}. Extraction audio et écoute non vérifiées.`);
+    return { removed, sources };
+  }
   if (String(input).trim().startsWith('youtubei ')) {
     return youtubeiCheck(String(input).trim().slice('youtubei '.length), { log });
   }

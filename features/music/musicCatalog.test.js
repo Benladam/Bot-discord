@@ -5,14 +5,14 @@ test('une recherche lente continue après la réponse Discord, est mutualisée e
   const audio = require('./audioSender');
   const spotify = require('./providers/spotify');
   const soundcloud = require('./providers/soundcloud');
-  const play = require('play-dl');
-  const originals = [audio.searchYouTubeCandidates, audio.searchYouTubePlaylists, spotify.searchSpotifyCatalog, soundcloud.configureSoundCloud, play.search];
+  const deezer = require('./providers/deezer');
+  const originals = [audio.searchYouTubeCandidates, audio.searchYouTubePlaylists, spotify.searchSpotifyCatalog, soundcloud.configureSoundCloud, deezer.searchDeezer];
   let release; let calls = 0; let budget;
   audio.searchYouTubeCandidates = (query, options) => { calls++; budget = options.timeoutMs; return new Promise(resolve => { release = resolve; }); };
   audio.searchYouTubePlaylists = async () => [];
   spotify.searchSpotifyCatalog = async () => [];
   soundcloud.configureSoundCloud = () => false;
-  play.search = async () => [];
+  deezer.searchDeezer = async () => [];
   delete require.cache[require.resolve('./musicCatalog')];
   try {
     const { searchCatalog, describe } = require('./musicCatalog');
@@ -27,7 +27,7 @@ test('une recherche lente continue après la réponse Discord, est mutualisée e
     assert.equal(calls, 1);
     assert.match(describe({ provider: 'soundcloud', kind: 'track' }), /^SoundCloud/);
   } finally {
-    [audio.searchYouTubeCandidates, audio.searchYouTubePlaylists, spotify.searchSpotifyCatalog, soundcloud.configureSoundCloud, play.search] = originals;
+    [audio.searchYouTubeCandidates, audio.searchYouTubePlaylists, spotify.searchSpotifyCatalog, soundcloud.configureSoundCloud, deezer.searchDeezer] = originals;
     delete require.cache[require.resolve('./musicCatalog')];
   }
 });

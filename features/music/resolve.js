@@ -3,10 +3,10 @@
  * Fonctionne pour les deux modes de commande (! et /).
  */
 
-const play = require('play-dl');
 const { isSpotifyUrl, resolveSpotifyLink } = require('./providers/spotify');
-const { configureSoundCloud } = require('./providers/soundcloud');
-const { searchYouTubeCandidates, searchSoundCloudCandidates, resolveSoundCloudCandidates } = require('./audioSender');
+const { configureSoundCloud, resolveSoundCloud } = require('./providers/soundcloud');
+const { getDeezerTracks } = require('./providers/deezer');
+const { searchYouTubeCandidates, searchSoundCloudCandidates, resolveSoundCloudCandidates, resolveYouTubePlaylist } = require('./audioSender');
 const { musicArtwork } = require('./artwork');
 const { candidateArtist } = require('./trackMatching');
 const { soundCloudMatchScore } = require('./soundCloudMatching');
@@ -42,10 +42,7 @@ function normalizeSoundCloudTrack(track) {
 async function resolveSoundCloudLink(url) {
   if (configureSoundCloud()) {
     try {
-      const entry = await play.soundcloud(url);
-      const tracks = entry.type === 'track' ? [entry]
-        : entry.type === 'playlist' ? await entry.all_tracks()
-          : [];
+      const tracks = await resolveSoundCloud(url);
       const songs = tracks.slice(0, 100).map(normalizeSoundCloudTrack).filter((track) => track.url);
       if (songs.length) return songs;
     } catch (_) { /* repli sur l'extracteur yt-dlp */ }
@@ -81,9 +78,9 @@ async function resolveQuery(query, { fetchImpl = globalThis.fetch } = {}) {
   // 2) Lien YouTube
   const videoId = youtubeVideoId(query);
   if (videoId) {
-    // Ne pas demander les métadonnées par play-dl avant la lecture : YouTube
+    // Ne pas demander de flux privé pour les métadonnées avant la lecture : YouTube
     // bloque souvent ces requêtes d'hébergeur avec "Sign in to confirm...".
-    // yt-dlp récupère le flux audio dans audioSender.js au démarrage de la lecture.
+    // YouTubei puis yt-dlp récupèrent l'audio dans audioSender.js.
     let metadata = null;
     if (typeof fetchImpl === 'function') {
       try {
@@ -123,30 +120,17 @@ async function resolveQuery(query, { fetchImpl = globalThis.fetch } = {}) {
   }
 
   if (/(?:youtube\.com|youtu\.be)/i.test(query)) {
-    const valid = await play.validate(query);
-    if (!valid) {
-      throw new Error('Lien YouTube invalide.');
-    }
-    if (valid === 'yt_playlist') {
-      const playlist = await play.playlist_info(query, { incomplete: true });
-      const videos = (await playlist.all_videos()).slice(0, 100);
+    if (new URL(query).searchParams.has('list')) {
+      const videos = await resolveYouTubePlaylist(query, { limit: 100 });
       return videos.map((video) => ({
         title: video.title || 'Musique inconnue',
         url: video.url,
         duration: video.durationInSec || 0,
-        thumbnail: video.thumbnails?.[0]?.url || null,
+        thumbnail: musicArtwork(video),
         source: 'youtube',
       }));
     }
-    const info = await play.video_info(query);
-    const d = info.video_details;
-    return [{
-      title: d.title || 'Musique inconnue',
-      url: d.url || query,
-      duration: d.durationInSec || 0,
-      thumbnail: d.thumbnails && d.thumbnails.length ? d.thumbnails[0].url : null,
-      source: 'youtube',
-    }];
+    throw new Error('Lien YouTube invalide.');
   }
 
   // 3) Recherche texte sur YouTube
@@ -230,8 +214,7 @@ async function resolveDeezerTracks(tracks, {
 }
 
 async function resolveDeezerLink(url) {
-  const entry = await play.deezer(url);
-  const tracks = entry.type === 'track' ? [entry] : await entry.all_tracks();
+  const tracks = await getDeezerTracks(url);
   return resolveDeezerTracks(tracks);
 }
 

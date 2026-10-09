@@ -3,8 +3,27 @@ const assert = require('node:assert/strict');
 const { PassThrough } = require('node:stream');
 const {
   prepareInput, soundCloudStream, buildYtDlpArgs, soundCloudSearchStream,
-  youtubeSearchStream, streamYouTubeAudio,
+  youtubeSearchStream, streamYouTubeAudio, searchYouTubeCandidates,
 } = require('./audioSender');
+
+test('YouTubei fournit le catalogue en premier sans processus ni cookies', async () => {
+  const expected = [{ title: 'Titre', url: 'https://www.youtube.com/watch?v=abcdefghijk' }];
+  const tracks = await searchYouTubeCandidates('Artiste - Titre', {
+    youtubeiSearch: async (query, options) => {
+      assert.equal(query, 'Artiste - Titre');
+      assert.deepEqual(options, { limit: 3, timeoutMs: 1200 });
+      return expected;
+    }, limit: 3, timeoutMs: 1200,
+  });
+  assert.equal(tracks, expected);
+});
+
+test('un arrêt de préparation ne démarre pas un second fournisseur YouTube', async () => {
+  await assert.rejects(streamYouTubeAudio('https://youtu.be/abcdefghijk', {
+    primary: async () => { throw Object.assign(new Error('aborted'), { code: 'AUDIO_CANCELLED' }); },
+    fallback: async () => assert.fail('Le secours ne doit pas démarrer après un arrêt.'),
+  }), { code: 'AUDIO_CANCELLED' });
+});
 
 test('SoundCloud examine les résultats au-delà des dix premiers et classe avant de jouer', async () => {
   const opened = [];
@@ -203,7 +222,7 @@ test('yt-dlp refuse les formats preview SoundCloud pour les deux modes de lectur
   assert.equal(youtubeArgs[youtubeArgs.indexOf('-f') + 1], 'bestaudio/best');
 });
 
-test('le repli play-dl exclut les previews même quand SoundCloud annonce une durée complète', async () => {
+test('le repli API SoundCloud exclut les previews même quand le catalogue annonce une durée complète', async () => {
   const stream = new PassThrough();
   const complete = { url: 'https://api.soundcloud.com/full', duration: 181_000, format: { protocol: 'hls' } };
   let receivedFormats;
@@ -223,7 +242,7 @@ test('le repli play-dl exclut les previews même quand SoundCloud annonce une du
   stream.destroy();
 });
 
-test('le repli play-dl refuse une piste dont tous les transcodages sont des extraits', async () => {
+test('le repli API SoundCloud refuse une piste dont tous les transcodages sont des extraits', async () => {
   let opened = false;
   await assert.rejects(soundCloudStream('https://soundcloud.com/artist/track', {
     getYtDlpStream: async () => { throw new Error('yt-dlp indisponible'); },
@@ -286,7 +305,7 @@ test('ne lance pas une recherche de repli sans métadonnées de requête', async
   assert.equal(attemptedSoundCloud, false);
 });
 
-test('essaie YouTubei sur la même vidéo après l’échec yt-dlp et garde le flux vérifiable', async () => {
+test('le fournisseur de secours garde exactement la même vidéo et un flux vérifiable', async () => {
   const stream = new PassThrough();
   let attempted = '';
   const result = await streamYouTubeAudio('https://youtube.com/watch?v=abcdefghijk', {

@@ -4,9 +4,8 @@ const path = require('node:path');
 const { spawn } = require('child_process');
 const { PassThrough } = require('node:stream');
 const ffmpegStatic = require('ffmpeg-static');
-const play = require('play-dl');
 const { ensureManagedYtDlp, getDataDirectory } = require('./ytDlp');
-const { configureSoundCloud } = require('./providers/soundcloud');
+const { configureSoundCloud, searchSoundCloud, getSoundCloudTrack, streamSoundCloudInfo } = require('./providers/soundcloud');
 const { candidateTitle, candidateArtist, fallbackSearchQuery } = require('./trackMatching');
 const { PcmVolume } = require('./pcmVolume');
 const { readCookieFile } = require('./youtubeCookies');
@@ -229,8 +228,8 @@ function isSoundCloudPreviewFormat(format) {
 
 async function soundCloudStream(url, {
   getYtDlpStream = streamYtDlp,
-  getTrack = (...args) => play.soundcloud(...args),
-  streamFromInfo = (...args) => play.stream_from_info(...args),
+  getTrack = getSoundCloudTrack,
+  streamFromInfo = streamSoundCloudInfo,
   isConfigured = configureSoundCloud,
 } = {}) {
   try {
@@ -250,10 +249,10 @@ async function soundCloudStream(url, {
         error.code = 'SOUNDCLOUD_PREVIEW_ONLY';
         throw error;
       }
-      // Conserve l’instance SoundCloudTrack attendue par play-dl, mais ne lui
-      // laisse sélectionner que les transcodages complets de cette requête.
+      // Seuls les transcodages complets du titre demandé sont transmis à l’API.
       track.formats = formats;
       const result = await streamFromInfo(track);
+      if (typeof result?.url === 'string' && isAudioUrl(result.url)) return result.url;
       if (!result?.stream || typeof result.stream.pipe !== 'function') {
         throw new Error('SoundCloud n’a pas fourni de flux audio lisible.');
       }
@@ -270,7 +269,7 @@ async function soundCloudSearchStream(query, {
   expectedTitle,
   guildId,
   searchCandidates = searchSoundCloudCandidates,
-  searchFallback = (...args) => play.search(...args),
+  searchFallback = searchSoundCloud,
   openTrack = soundCloudStream,
   isConfigured = configureSoundCloud,
   timeoutMs = 12_000,
@@ -304,7 +303,7 @@ async function soundCloudSearchStream(query, {
         if (!seen.has(url)) {
           if (minimumDuration && duration > 0 && duration < minimumDuration) rejectedShortTracks++;
           else rejectedDifferentTracks++;
-          console.info(`[audio] résultat SoundCloud refusé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || queries[0]))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))}`);
+          console.info(`[audio] résultat SoundCloud refusé serveur=${guildId || '?'} demandé=${JSON.stringify(sanitizeYtDlpDiagnostic(expectedTitle || queries[0]))} candidat=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateTitle(track)))} artiste=${JSON.stringify(sanitizeYtDlpDiagnostic(candidateArtist(track)))} durée=${duration || 0}s attendue=${Number(expectedDuration) || 0}s`);
         }
         seen.add(url);
         continue;
@@ -358,7 +357,7 @@ async function soundCloudSearchStream(query, {
     // Des résultats existent mais sont faux : l'API ne doit pas être ignorée.
     if (!apiTried && Date.now() < deadline && attemptedFullTracks < 3 && isConfigured()) {
       apiTried = true;
-      const alternatives = await searchWithinDeadline(() => searchFallback(term, { limit: 25, source: { soundcloud: 'tracks' } }));
+      const alternatives = await searchWithinDeadline(remaining => searchFallback(term, { limit: 25, timeoutMs: remaining }));
       const fallback = await select(alternatives);
       if (fallback) return fallback;
     }
@@ -729,6 +728,18 @@ async function searchYouTubeCandidates(query, options = {}) {
     ...ytDlpOptions
   } = options;
   const hasInjectedYtDlp = Boolean(options.candidates || options.spawnImpl || options.install);
+  // Le chemin Node.js sans navigateur est prioritaire. Les injections de tests
+  // ne déclenchent jamais un fournisseur réseau non injecté.
+  const youtubeiFirst = options.youtubeiFirst !== false && !hasInjectedYtDlp;
+  if (youtubeiFirst) {
+    try {
+      const tracks = await youtubeiSearch(query, { limit: options.limit || 5,
+        timeoutMs: Math.min(12_000, Number(options.timeoutMs) || 6_000) });
+      if (tracks?.length) return tracks;
+    } catch (error) {
+      console.warn(`[catalogue] Recherche YouTubei indisponible (${sanitizeYtDlpDiagnostic(error.code || 'SEARCH_FAILED')}); essai yt-dlp.`);
+    }
+  }
   try {
     return await searchYtDlpCandidates(query, {
       cookiesPaths: [], ...ytDlpOptions, provider: 'youtube', searchPrefix: 'ytsearch', inputMode: 'search',
@@ -736,7 +747,7 @@ async function searchYouTubeCandidates(query, options = {}) {
   } catch (ytDlpError) {
     // Les tests/injections gardent leur isolation réseau. En production, le
     // catalogue YouTubei contourne aussi les erreurs d'espace temporaire yt-dlp.
-    if (!youtubeiFallback || hasInjectedYtDlp && !options.youtubeiSearch || isPreparationAbort(ytDlpError)) throw ytDlpError;
+    if (youtubeiFirst || !youtubeiFallback || hasInjectedYtDlp && !options.youtubeiSearch || isPreparationAbort(ytDlpError)) throw ytDlpError;
     try {
       const tracks = await youtubeiSearch(query, {
         limit: options.limit || 5,
@@ -1113,23 +1124,32 @@ async function streamYtDlp(url, {
   throw new Error(bestYtDlpError(errors, 'yt-dlp n’a pas réussi à ouvrir un flux audio.'));
 }
 
-async function streamYouTubeAudio(url, { primary = streamYtDlp, fallback = streamYouTubei } = {}) {
+function resolveYouTubePlaylist(url, options = {}) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'https:' || !['youtube.com', 'www.youtube.com', 'music.youtube.com', 'm.youtube.com'].includes(parsed.hostname)
+      || !/^[A-Za-z0-9_-]+$/.test(parsed.searchParams.get('list') || '')) throw new Error('Lien playlist YouTube invalide.');
+  const canonical = new URL('https://www.youtube.com/playlist');
+  canonical.searchParams.set('list', parsed.searchParams.get('list'));
+  return searchYtDlpCandidates(canonical.href, { cookiesPaths: [], ...options, provider: 'youtube', inputMode: 'direct', limit: options.limit || 100 });
+}
+
+async function streamYouTubeAudio(url, { primary = streamYouTubei, fallback = streamYtDlp } = {}) {
   try {
     return await primary(url);
-  } catch (ytDlpError) {
-    if (isPreparationAbort(ytDlpError)) throw ytDlpError;
+  } catch (primaryError) {
+    if (isPreparationAbort(primaryError)) throw primaryError;
+    const reason = primaryError?.providerReason;
+    const cause = reason ? ` cause=${sanitizeYtDlpDiagnostic(`${reason.name || 'Error'}: ${reason.message || ''}`)}` : '';
+    console.warn(`[audio] Fournisseur YouTube primaire indisponible (${sanitizeYtDlpDiagnostic(primaryError.code || 'STREAM_FAILED')})${cause}; essai du secours.`);
     try {
       const stream = await fallback(url);
-      console.info('[audio] Flux YouTubei ouvert après l’échec de yt-dlp; la durée sera vérifiée avant lecture.');
+      console.info('[audio] Flux YouTube de secours ouvert; la durée sera vérifiée avant lecture.');
       return stream;
-    } catch (youtubeiError) {
-      const code = /^[A-Z0-9_]+$/.test(youtubeiError?.code || '') ? youtubeiError.code : 'STREAM_FAILED';
-      const reason = youtubeiError?.providerReason;
-      const reasonText = reason
-        ? ` cause=${sanitizeYtDlpDiagnostic(`${reason.name || 'Error'}${reason.code ? `/${reason.code}` : ''}: ${reason.message || ''}`)}`
-        : '';
-      console.warn(`[audio] Repli YouTubei indisponible (${code})${reasonText}; conservation de l’erreur yt-dlp.`);
-      throw ytDlpError;
+    } catch (fallbackError) {
+      if (isPreparationAbort(fallbackError)) throw fallbackError;
+      console.warn(`[audio] Secours YouTube indisponible (${sanitizeYtDlpDiagnostic(fallbackError.code || 'STREAM_FAILED')}).`);
+      fallbackError.cause ||= primaryError;
+      throw fallbackError;
     }
   }
 }
@@ -1506,5 +1526,6 @@ module.exports = {
   soundCloudStream,
   soundCloudSearchStream,
   resolveSoundCloudCandidates,
+  resolveYouTubePlaylist,
   youtubeSearchStream,
 };

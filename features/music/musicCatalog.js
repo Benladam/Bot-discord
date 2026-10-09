@@ -1,7 +1,7 @@
 /** Agrégateur de métadonnées publics. L'audio est résolu séparément par fournisseur. */
-const play = require('play-dl');
+const { searchDeezer } = require('./providers/deezer');
 const { searchSpotifyCatalog, getSpotifyArtistAlbums } = require('./providers/spotify');
-const { configureSoundCloud } = require('./providers/soundcloud');
+const { configureSoundCloud, searchSoundCloud } = require('./providers/soundcloud');
 const { searchYouTubeCandidates, searchYouTubePlaylists } = require('./audioSender');
 const { collectCatalogResults } = require('./catalogSearch');
 const { musicArtwork } = require('./artwork');
@@ -146,19 +146,19 @@ async function searchCatalog(query, { limit = 10, fresh = false, sourceTimeoutMs
         limit: Math.min(5, perType), timeoutMs: workerWaitMs,
       })).map((item) => normalizeYoutube(item, 'playlist')), workerWaitMs + 100),
       safeSearch('Spotify', () => searchSpotifyCatalog(normalized, Math.min(5, perType)), sourceWaitMs),
-      safeSearch('Deezer morceaux', async () => (await play.search(normalized, {
-        limit: perType, source: { deezer: 'track' },
+      safeSearch('Deezer morceaux', async () => (await searchDeezer(normalized, {
+        limit: perType, type: 'track', timeoutMs: sourceWaitMs,
       })).map((item) => normalizeDeezer(item, 'track')), sourceWaitMs),
-      safeSearch('Deezer albums', async () => (await play.search(normalized, {
-        limit: Math.min(5, perType), source: { deezer: 'album' },
+      safeSearch('Deezer albums', async () => (await searchDeezer(normalized, {
+        limit: Math.min(5, perType), type: 'album', timeoutMs: sourceWaitMs,
       })).map((item) => normalizeDeezer(item, 'album')), sourceWaitMs),
-      safeSearch('Deezer playlists', async () => (await play.search(normalized, {
-        limit: Math.min(5, perType), source: { deezer: 'playlist' },
+      safeSearch('Deezer playlists', async () => (await searchDeezer(normalized, {
+        limit: Math.min(5, perType), type: 'playlist', timeoutMs: sourceWaitMs,
       })).map((item) => normalizeDeezer(item, 'playlist')), sourceWaitMs),
     ];
     if (configureSoundCloud()) {
-      tasks.splice(1, 0, safeSearch('SoundCloud morceaux', async () => (await play.search(normalized, {
-        limit: perType, source: { soundcloud: 'tracks' },
+      tasks.splice(1, 0, safeSearch('SoundCloud morceaux', async () => (await searchSoundCloud(normalized, {
+        limit: perType, timeoutMs: sourceWaitMs,
       })).map(normalizeSoundCloud), sourceWaitMs));
     }
     const storeResults = (results) => {

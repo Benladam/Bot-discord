@@ -144,10 +144,12 @@ cp .env.example .env
 | `BOT_PRESENCE_INTERVAL_SECONDS` | non | Délai initial entre deux textes (30 à 86400 secondes, défaut `60`) |
 | `BOT_PRESENCE_TEXTS` | non | Textes d’activité séparés par `|`; `{prefix}` est remplacé par le préfixe du bot |
 
-L’audio est transmis directement de yt-dlp à FFmpeg pour éviter de réutiliser
-une URL temporaire qui peut expirer ou être refusée par le serveur média.
+YouTubei est essayé en premier pour rechercher et ouvrir l’audio YouTube,
+sans lire les cookies des navigateurs. yt-dlp reste un secours indépendant.
+Les flux sont préparés et vérifiés avant la connexion vocale.
 SoundCloud fonctionne aussi sans `SOUNDCLOUD_CLIENT_ID` via les extracteurs
-yt-dlp; la clé est facultative et ajoute le repli API `play-dl`. Dépose un vrai
+yt-dlp; la clé est facultative et ajoute le repli HTTP SoundCloud direct.
+Les recherches et playlists Deezer utilisent l’API publique : `play-dl` n’est plus une dépendance. Dépose un vrai
 fichier de cookies YouTube au format Netscape sous `data/youtube-cookies.txt`, ou définis
 `YOUTUBE_COOKIES_PATH` vers un ou plusieurs emplacements séparés par `;`. Le bot
 essaie les fichiers dans l’ordre. Quand une piste SoundCloud échoue,
